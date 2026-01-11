@@ -1107,3 +1107,23 @@ Started: Sun 11 Jan 10:55:32 GMT 2026
   - iteration:completed should clear task info and transition back to 'selecting' before next task
   - The ◐ and ⏵ symbols provide visual distinction between different active states
 ---
+
+## 2026-01-11 - ralph-tui-45r.41
+- What was implemented:
+  - FEAT: Add 'r' keyboard shortcut to refresh task list
+  - Added refreshTasks() method to ExecutionEngine that fetches fresh tasks from tracker
+  - Added tasks:refreshed event type and TasksRefreshedEvent interface in engine/types.ts
+  - Handle 'r' key press in RunApp to trigger engine.refreshTasks()
+  - RunApp event handler updates task list state from tasks:refreshed event
+  - Updated keyboard shortcuts in footer (condensed) to include 'r' for Refresh
+  - Updated fullKeyboardShortcuts in help overlay with 'r' for Refresh under Execution category
+- Files changed:
+  - src/engine/types.ts (updated) - Added tasks:refreshed event type and TasksRefreshedEvent interface
+  - src/engine/index.ts (updated) - Added refreshTasks() method
+  - src/tui/components/RunApp.tsx (updated) - Added 'r' key handler and tasks:refreshed event handler
+  - src/tui/theme.ts (updated) - Added 'r' shortcut to keyboardShortcuts and fullKeyboardShortcuts
+- **Learnings:**
+  - Event-driven architecture enables loose coupling: 'r' key calls engine.refreshTasks(), which emits event, TUI responds
+  - The convertTasksWithDependencyStatus() function recomputes actionable/blocked status from fresh data
+  - Keyboard shortcuts should be documented in both condensed footer and full help overlay for discoverability
+---
