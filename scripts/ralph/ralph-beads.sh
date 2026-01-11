@@ -228,6 +228,10 @@ $PROMPT"
 
 echo "Starting Ralph (Beads + $AGENT_CLI)"
 [ "$BV_AVAILABLE" = false ] && echo "Note: bv not found, using bd-only mode"
+
+# Flush database to JSONL at startup to ensure bv sees current state
+# (issues.jsonl is git-tracked but database is not, so they can drift after branch switches)
+bd sync --flush-only 2>/dev/null || true
 echo ""
 
 # Get the epic we're working on
