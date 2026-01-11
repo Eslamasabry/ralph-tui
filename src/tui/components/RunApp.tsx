@@ -1,6 +1,7 @@
 /**
  * ABOUTME: RunApp component for the Ralph TUI execution view.
  * Integrates with the execution engine to display real-time progress.
+ * Handles graceful interruption with confirmation dialog.
  */
 
 import { useKeyboard, useTerminalDimensions } from '@opentui/react';
@@ -17,6 +18,7 @@ import { IterationHistoryView } from './IterationHistoryView.js';
 import { TaskDetailView } from './TaskDetailView.js';
 import { IterationDetailView } from './IterationDetailView.js';
 import { ProgressDashboard } from './ProgressDashboard.js';
+import { ConfirmationDialog } from './ConfirmationDialog.js';
 import type { ExecutionEngine, EngineEvent, IterationResult } from '../../engine/index.js';
 
 /**
@@ -40,6 +42,12 @@ export interface RunAppProps {
   onTaskDrillDown?: (task: TaskItem) => void;
   /** Callback when Enter is pressed on an iteration to drill into details */
   onIterationDrillDown?: (iteration: IterationResult) => void;
+  /** Whether the interrupt confirmation dialog is showing */
+  showInterruptDialog?: boolean;
+  /** Callback when user confirms interrupt */
+  onInterruptConfirm?: () => void;
+  /** Callback when user cancels interrupt */
+  onInterruptCancel?: () => void;
 }
 
 /**
@@ -71,7 +79,15 @@ function engineStatusToRalphStatus(
 /**
  * Main RunApp component for execution view
  */
-export function RunApp({ engine, onQuit, onTaskDrillDown, onIterationDrillDown }: RunAppProps): ReactNode {
+export function RunApp({
+  engine,
+  onQuit,
+  onTaskDrillDown,
+  onIterationDrillDown,
+  showInterruptDialog = false,
+  onInterruptConfirm,
+  onInterruptCancel,
+}: RunAppProps): ReactNode {
   const { width, height } = useTerminalDimensions();
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -230,6 +246,20 @@ export function RunApp({ engine, onQuit, onTaskDrillDown, onIterationDrillDown }
   // Handle keyboard navigation
   const handleKeyboard = useCallback(
     (key: { name: string }) => {
+      // When interrupt dialog is showing, only handle y/n/Esc
+      if (showInterruptDialog) {
+        switch (key.name) {
+          case 'y':
+            onInterruptConfirm?.();
+            break;
+          case 'n':
+          case 'escape':
+            onInterruptCancel?.();
+            break;
+        }
+        return; // Don't process other keys when dialog is showing
+      }
+
       switch (key.name) {
         case 'q':
           // Quit the application
@@ -334,7 +364,7 @@ export function RunApp({ engine, onQuit, onTaskDrillDown, onIterationDrillDown }
           break;
       }
     },
-    [tasks, selectedIndex, status, engine, onQuit, onTaskDrillDown, viewMode, iterations, iterationSelectedIndex, iterationHistoryLength, onIterationDrillDown]
+    [tasks, selectedIndex, status, engine, onQuit, onTaskDrillDown, viewMode, iterations, iterationSelectedIndex, iterationHistoryLength, onIterationDrillDown, showInterruptDialog, onInterruptConfirm, onInterruptCancel]
   );
 
   useKeyboard(handleKeyboard);
@@ -446,6 +476,14 @@ export function RunApp({ engine, onQuit, onTaskDrillDown, onIterationDrillDown }
         progress={progress}
         totalTasks={totalTasks}
         completedTasks={completedTasks}
+      />
+
+      {/* Interrupt Confirmation Dialog */}
+      <ConfirmationDialog
+        visible={showInterruptDialog}
+        title="⚠ Interrupt Ralph?"
+        message="Current iteration will be terminated."
+        hint="[y] Yes  [n/Esc] No  [Ctrl+C] Force quit"
       />
     </box>
   );

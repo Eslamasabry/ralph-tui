@@ -2,8 +2,10 @@
  * ABOUTME: Run command implementation for ralph-tui.
  * Handles CLI argument parsing, configuration loading, session management,
  * and starting the execution engine with TUI.
+ * Implements graceful interruption with Ctrl+C confirmation dialog.
  */
 
+import { useState } from 'react';
 import { createCliRenderer } from '@opentui/core';
 import { createRoot } from '@opentui/react';
 import { buildConfig, validateConfig } from '../config/index.js';
@@ -36,6 +38,8 @@ import { RunApp } from '../tui/components/RunApp.js';
 import type { TrackerTask } from '../plugins/trackers/types.js';
 import type { RalphConfig } from '../config/types.js';
 import { projectConfigExists, runSetupWizard } from '../setup/index.js';
+import { createInterruptHandler } from '../interruption/index.js';
+import type { InterruptHandler } from '../interruption/types.js';
 
 /**
  * Extended runtime options with noSetup flag
@@ -250,6 +254,57 @@ async function promptResumeOrNew(cwd: string): Promise<'resume' | 'new' | 'abort
 }
 
 /**
+ * Props for the RunAppWrapper component
+ */
+interface RunAppWrapperProps {
+  engine: ExecutionEngine;
+  interruptHandler: InterruptHandler;
+  onQuit: () => Promise<void>;
+  onInterruptConfirmed: () => Promise<void>;
+}
+
+/**
+ * Wrapper component that manages interrupt dialog state and passes it to RunApp.
+ * This is needed because we need React state management for the dialog visibility.
+ */
+function RunAppWrapper({
+  engine,
+  interruptHandler,
+  onQuit,
+  onInterruptConfirmed,
+}: RunAppWrapperProps) {
+  const [showInterruptDialog, setShowInterruptDialog] = useState(false);
+
+  // These callbacks are passed to the interrupt handler
+  const handleShowDialog = () => setShowInterruptDialog(true);
+  const handleHideDialog = () => setShowInterruptDialog(false);
+  const handleCancelled = () => setShowInterruptDialog(false);
+
+  // Set up the interrupt handler callbacks
+  // Note: We use a ref-like pattern here since these need to be stable references
+  // that the handler can call, but the handler was created before this component mounted
+  (interruptHandler as { _showDialog?: () => void })._showDialog = handleShowDialog;
+  (interruptHandler as { _hideDialog?: () => void })._hideDialog = handleHideDialog;
+  (interruptHandler as { _cancelled?: () => void })._cancelled = handleCancelled;
+
+  return (
+    <RunApp
+      engine={engine}
+      onQuit={onQuit}
+      showInterruptDialog={showInterruptDialog}
+      onInterruptConfirm={async () => {
+        setShowInterruptDialog(false);
+        await onInterruptConfirmed();
+      }}
+      onInterruptCancel={() => {
+        setShowInterruptDialog(false);
+        interruptHandler.reset();
+      }}
+    />
+  );
+}
+
+/**
  * Run the execution engine with TUI
  */
 async function runWithTui(
@@ -258,6 +313,9 @@ async function runWithTui(
   _config: RalphConfig
 ): Promise<PersistedSessionState> {
   let currentState = persistedState;
+  let showDialogCallback: (() => void) | null = null;
+  let hideDialogCallback: (() => void) | null = null;
+  let cancelledCallback: (() => void) | null = null;
 
   const renderer = await createCliRenderer({
     exitOnCtrlC: false, // We handle this ourselves
@@ -289,12 +347,13 @@ async function runWithTui(
 
   // Create cleanup function
   const cleanup = async (): Promise<void> => {
+    interruptHandler.dispose();
     await engine.dispose();
     renderer.destroy();
   };
 
-  // Handle process signals
-  const handleSignal = async (): Promise<void> => {
+  // Graceful shutdown: stop engine, save state, clean up
+  const gracefulShutdown = async (): Promise<void> => {
     // Save interrupted state
     currentState = { ...currentState, status: 'interrupted' };
     await savePersistedSession(currentState);
@@ -302,27 +361,65 @@ async function runWithTui(
     process.exit(0);
   };
 
-  process.on('SIGINT', handleSignal);
-  process.on('SIGTERM', handleSignal);
+  // Force quit: immediate exit
+  const forceQuit = (): void => {
+    // Synchronous cleanup - just exit immediately
+    process.exit(1);
+  };
 
-  // Render the TUI
+  // Create interrupt handler with callbacks
+  const interruptHandler = createInterruptHandler({
+    doublePressWindowMs: 1000,
+    onConfirmed: gracefulShutdown,
+    onCancelled: () => {
+      cancelledCallback?.();
+    },
+    onShowDialog: () => {
+      showDialogCallback?.();
+    },
+    onHideDialog: () => {
+      hideDialogCallback?.();
+    },
+    onForceQuit: forceQuit,
+  });
+
+  // Handle SIGTERM separately (always graceful)
+  process.on('SIGTERM', gracefulShutdown);
+
+  // Render the TUI with wrapper that manages dialog state
   root.render(
-    <RunApp
+    <RunAppWrapper
       engine={engine}
-      onQuit={async () => {
-        // Save interrupted state
-        currentState = { ...currentState, status: 'interrupted' };
-        await savePersistedSession(currentState);
-        await cleanup();
-        process.exit(0);
-      }}
+      interruptHandler={interruptHandler}
+      onQuit={gracefulShutdown}
+      onInterruptConfirmed={gracefulShutdown}
     />
   );
+
+  // Extract callback setters from the wrapper component
+  // The wrapper will set these when it mounts
+  const checkCallbacks = setInterval(() => {
+    const handler = interruptHandler as {
+      _showDialog?: () => void;
+      _hideDialog?: () => void;
+      _cancelled?: () => void;
+    };
+    if (handler._showDialog) {
+      showDialogCallback = handler._showDialog;
+    }
+    if (handler._hideDialog) {
+      hideDialogCallback = handler._hideDialog;
+    }
+    if (handler._cancelled) {
+      cancelledCallback = handler._cancelled;
+    }
+  }, 10);
 
   // Start the engine (this will run the loop)
   await engine.start();
 
-  // Clean up when done
+  // Clean up
+  clearInterval(checkCallbacks);
   await cleanup();
 
   return currentState;
@@ -330,6 +427,8 @@ async function runWithTui(
 
 /**
  * Run in headless mode (no TUI)
+ * In headless mode, Ctrl+C immediately triggers graceful shutdown (no confirmation dialog).
+ * Double Ctrl+C within 1 second forces immediate exit.
  */
 async function runHeadless(
   engine: ExecutionEngine,
@@ -337,6 +436,8 @@ async function runHeadless(
   _config: RalphConfig
 ): Promise<PersistedSessionState> {
   let currentState = persistedState;
+  let lastSigintTime = 0;
+  const DOUBLE_PRESS_WINDOW_MS = 1000;
 
   // Subscribe to events for console output and state persistence
   engine.on((event) => {
@@ -394,9 +495,10 @@ async function runHeadless(
     }
   });
 
-  // Handle process signals
-  const handleSignal = async (): Promise<void> => {
-    console.log('\nInterrupted, stopping...');
+  // Graceful shutdown handler
+  const gracefulShutdown = async (): Promise<void> => {
+    console.log('\nInterrupted, stopping gracefully...');
+    console.log('(Press Ctrl+C again within 1s to force quit)');
     // Save interrupted state
     currentState = { ...currentState, status: 'interrupted' };
     await savePersistedSession(currentState);
@@ -404,8 +506,33 @@ async function runHeadless(
     process.exit(0);
   };
 
-  process.on('SIGINT', handleSignal);
-  process.on('SIGTERM', handleSignal);
+  // Handle SIGINT with double-press detection
+  const handleSigint = async (): Promise<void> => {
+    const now = Date.now();
+    const timeSinceLastSigint = now - lastSigintTime;
+    lastSigintTime = now;
+
+    // Check for double-press - force quit immediately
+    if (timeSinceLastSigint < DOUBLE_PRESS_WINDOW_MS) {
+      console.log('\nForce quit!');
+      process.exit(1);
+    }
+
+    // Single press - graceful shutdown
+    await gracefulShutdown();
+  };
+
+  // Handle SIGTERM (always graceful, no double-press)
+  const handleSigterm = async (): Promise<void> => {
+    console.log('\nReceived SIGTERM, stopping gracefully...');
+    currentState = { ...currentState, status: 'interrupted' };
+    await savePersistedSession(currentState);
+    await engine.dispose();
+    process.exit(0);
+  };
+
+  process.on('SIGINT', handleSigint);
+  process.on('SIGTERM', handleSigterm);
 
   // Start the engine
   await engine.start();

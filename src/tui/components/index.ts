@@ -18,3 +18,5 @@ export { IterationDetailView } from './IterationDetailView.js';
 export type { IterationDetailViewProps } from './IterationDetailView.js';
 export { ProgressDashboard } from './ProgressDashboard.js';
 export type { ProgressDashboardProps } from './ProgressDashboard.js';
+export { ConfirmationDialog } from './ConfirmationDialog.js';
+export type { ConfirmationDialogProps } from './ConfirmationDialog.js';
