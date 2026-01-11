@@ -1,6 +1,7 @@
 /**
  * ABOUTME: Docs command for ralph-tui.
  * Opens documentation in the default browser or shows the URL.
+ * Detects repository URL from git remote origin for accurate documentation links.
  */
 
 import { exec } from 'node:child_process';
@@ -8,17 +9,71 @@ import { promisify } from 'node:util';
 
 const execAsync = promisify(exec);
 
-/** Documentation URLs */
-const DOCS = {
-  main: 'https://github.com/anthropics/ralph-tui#readme',
-  quickstart: 'https://github.com/anthropics/ralph-tui#quick-start',
-  cli: 'https://github.com/anthropics/ralph-tui#cli-reference',
-  plugins: 'https://github.com/anthropics/ralph-tui#plugins',
-  templates: 'https://github.com/anthropics/ralph-tui#prompt-templates',
-  contributing: 'https://github.com/anthropics/ralph-tui/blob/main/CONTRIBUTING.md',
+/** Default repository base URL (used if git remote detection fails) */
+const DEFAULT_REPO_URL = 'https://github.com/subsy/ralph-tui';
+
+/** Documentation section paths relative to repo base */
+const DOC_PATHS = {
+  main: '#readme',
+  quickstart: '#quick-start',
+  cli: '#cli-reference',
+  plugins: '#plugins',
+  templates: '#prompt-templates',
+  contributing: '/blob/main/CONTRIBUTING.md',
 } as const;
 
-type DocSection = keyof typeof DOCS;
+type DocSection = keyof typeof DOC_PATHS;
+
+/** Cached repo URL to avoid repeated git calls */
+let cachedRepoUrl: string | null = null;
+
+/**
+ * Detect the GitHub repository URL from git remote origin.
+ * Converts SSH URLs (git@github.com:user/repo.git) to HTTPS URLs.
+ * Falls back to DEFAULT_REPO_URL if detection fails.
+ */
+async function getRepoUrl(): Promise<string> {
+  if (cachedRepoUrl !== null) {
+    return cachedRepoUrl;
+  }
+
+  try {
+    const { stdout } = await execAsync('git remote get-url origin');
+    const remoteUrl = stdout.trim();
+
+    // Convert SSH URL to HTTPS URL
+    // git@github.com:user/repo.git -> https://github.com/user/repo
+    const sshMatch = remoteUrl.match(/^git@github\.com:(.+?)(?:\.git)?$/);
+    if (sshMatch) {
+      cachedRepoUrl = `https://github.com/${sshMatch[1]}`;
+      return cachedRepoUrl;
+    }
+
+    // Handle HTTPS URL
+    // https://github.com/user/repo.git -> https://github.com/user/repo
+    const httpsMatch = remoteUrl.match(/^https:\/\/github\.com\/(.+?)(?:\.git)?$/);
+    if (httpsMatch) {
+      cachedRepoUrl = `https://github.com/${httpsMatch[1]}`;
+      return cachedRepoUrl;
+    }
+
+    // Fallback to default if URL format not recognized
+    cachedRepoUrl = DEFAULT_REPO_URL;
+    return cachedRepoUrl;
+  } catch {
+    // Not a git repo or git not available
+    cachedRepoUrl = DEFAULT_REPO_URL;
+    return cachedRepoUrl;
+  }
+}
+
+/**
+ * Get the full documentation URL for a section.
+ */
+async function getDocUrl(section: DocSection): Promise<string> {
+  const baseUrl = await getRepoUrl();
+  return baseUrl + DOC_PATHS[section];
+}
 
 /**
  * Print help for the docs command.
@@ -68,7 +123,7 @@ export function parseDocsArgs(args: string[]): { section: DocSection; urlOnly: b
       process.exit(0);
     } else if (!arg.startsWith('-')) {
       // Check if it's a valid section
-      if (arg in DOCS) {
+      if (arg in DOC_PATHS) {
         section = arg as DocSection;
       } else {
         console.error(`Unknown section: ${arg}`);
@@ -127,7 +182,7 @@ async function openInBrowser(url: string): Promise<boolean> {
  */
 export async function executeDocsCommand(args: string[]): Promise<void> {
   const { section, urlOnly } = parseDocsArgs(args);
-  const url = DOCS[section];
+  const url = await getDocUrl(section);
 
   if (urlOnly) {
     console.log(url);
