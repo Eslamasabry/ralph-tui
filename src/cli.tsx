@@ -10,6 +10,7 @@ import { App } from './tui/index.js';
 import {
   printTrackerPlugins,
   printAgentPlugins,
+  printPluginsHelp,
   executeRunCommand,
   executeStatusCommand,
   executeResumeCommand,
@@ -19,6 +20,7 @@ import {
   executeTemplateCommand,
   executeInitCommand,
   executeConvertCommand,
+  executeDocsCommand,
 } from './commands/index.js';
 
 /**
@@ -44,6 +46,7 @@ Commands:
   template init       Copy default template for customization
   plugins agents      List available agent plugins
   plugins trackers    List available tracker plugins
+  docs [section]      Open documentation in browser
   help, --help, -h    Show this help message
 
 Run Options:
@@ -91,6 +94,8 @@ Examples:
   ralph-tui plugins trackers             # List tracker plugins
   ralph-tui template show                # Show current prompt template
   ralph-tui template init                # Create custom template
+  ralph-tui docs                         # Open documentation in browser
+  ralph-tui docs quickstart              # Open quick start guide
 `);
 }
 
@@ -161,9 +166,20 @@ async function handleSubcommand(args: string[]): Promise<boolean> {
     return true;
   }
 
+  // Docs command
+  if (command === 'docs') {
+    await executeDocsCommand(args.slice(1));
+    return true;
+  }
+
   // Plugins commands
   if (command === 'plugins') {
     const subcommand = args[1];
+
+    if (subcommand === '--help' || subcommand === '-h') {
+      printPluginsHelp();
+      return true;
+    }
 
     if (subcommand === 'agents') {
       await printAgentPlugins();
@@ -175,9 +191,11 @@ async function handleSubcommand(args: string[]): Promise<boolean> {
       return true;
     }
 
-    // Unknown plugins subcommand
-    console.error(`Unknown plugins subcommand: ${subcommand || '(none)'}`);
-    console.log('Available: plugins agents, plugins trackers');
+    // Unknown or missing plugins subcommand
+    if (subcommand) {
+      console.error(`Unknown plugins subcommand: ${subcommand}`);
+    }
+    printPluginsHelp();
     return true;
   }
 

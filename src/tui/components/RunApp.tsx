@@ -19,6 +19,7 @@ import { TaskDetailView } from './TaskDetailView.js';
 import { IterationDetailView } from './IterationDetailView.js';
 import { ProgressDashboard } from './ProgressDashboard.js';
 import { ConfirmationDialog } from './ConfirmationDialog.js';
+import { HelpOverlay } from './HelpOverlay.js';
 import type { ExecutionEngine, EngineEvent, IterationResult } from '../../engine/index.js';
 
 /**
@@ -112,6 +113,8 @@ export function RunApp({
   const [detailTask, setDetailTask] = useState<TaskItem | null>(null);
   // Iteration detail view state
   const [detailIteration, setDetailIteration] = useState<IterationResult | null>(null);
+  // Help overlay state
+  const [showHelp, setShowHelp] = useState(false);
 
   // Subscribe to engine events
   useEffect(() => {
@@ -260,6 +263,14 @@ export function RunApp({
         return; // Don't process other keys when dialog is showing
       }
 
+      // When help overlay is showing, ? or Esc closes it
+      if (showHelp) {
+        if (key.name === '?' || key.name === 'escape') {
+          setShowHelp(false);
+        }
+        return; // Don't process other keys when help is showing
+      }
+
       switch (key.name) {
         case 'q':
           // Quit the application
@@ -343,6 +354,11 @@ export function RunApp({
           setShowDashboard((prev) => !prev);
           break;
 
+        case '?':
+          // Show help overlay
+          setShowHelp(true);
+          break;
+
         case 'return':
         case 'enter':
           if (viewMode === 'tasks') {
@@ -364,7 +380,7 @@ export function RunApp({
           break;
       }
     },
-    [tasks, selectedIndex, status, engine, onQuit, onTaskDrillDown, viewMode, iterations, iterationSelectedIndex, iterationHistoryLength, onIterationDrillDown, showInterruptDialog, onInterruptConfirm, onInterruptCancel]
+    [tasks, selectedIndex, status, engine, onQuit, onTaskDrillDown, viewMode, iterations, iterationSelectedIndex, iterationHistoryLength, onIterationDrillDown, showInterruptDialog, onInterruptConfirm, onInterruptCancel, showHelp]
   );
 
   useKeyboard(handleKeyboard);
@@ -485,6 +501,9 @@ export function RunApp({
         message="Current iteration will be terminated."
         hint="[y] Yes  [n/Esc] No  [Ctrl+C] Force quit"
       />
+
+      {/* Help Overlay */}
+      <HelpOverlay visible={showHelp} />
     </box>
   );
 }

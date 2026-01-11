@@ -29,17 +29,41 @@ const RED = '\x1b[31m';
 export async function executeTemplateCommand(args: string[]): Promise<void> {
   const subcommand = args[0];
 
+  // Check for help flag
+  if (subcommand === '--help' || subcommand === '-h') {
+    printTemplateHelp();
+    return;
+  }
+
   if (subcommand === 'show') {
+    // Check for help in subcommand args
+    if (args.includes('--help') || args.includes('-h')) {
+      printTemplateHelp();
+      return;
+    }
     await handleShowTemplate(args.slice(1));
     return;
   }
 
   if (subcommand === 'init') {
+    // Check for help in subcommand args
+    if (args.includes('--help') || args.includes('-h')) {
+      printTemplateHelp();
+      return;
+    }
     await handleInitTemplate(args.slice(1));
     return;
   }
 
   // Help or unknown subcommand
+  printTemplateHelp();
+}
+
+/**
+ * Print help for the template command.
+ * Exported for use in index.ts
+ */
+export function printTemplateHelp(): void {
   showTemplateHelp();
 }
 

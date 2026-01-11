@@ -867,3 +867,33 @@ Started: Sun 11 Jan 10:55:32 GMT 2026
   - Using stderr for WARN and ERROR levels follows Unix convention and allows piping stdout
   - The engine already emits all necessary events (agent:output, iteration:*, etc.) - just needed to format them
 ---
+
+## 2026-01-11 - ralph-tui-45r.30
+- What was implemented:
+  - US-030: Help and Documentation with full acceptance criteria
+  - Added --help/-h flag support to plugins command with printPluginsHelp()
+  - Added --help/-h flag support to template command with printTemplateHelp()
+  - New 'docs' command to open documentation in browser (or print URL with --url flag)
+  - Documentation sections: main, quickstart, cli, plugins, templates, contributing
+  - Cross-platform browser opening: xdg-open (Linux), open (macOS), start (Windows)
+  - In-TUI help overlay activated with '?' key showing all keyboard shortcuts
+  - Keyboard shortcuts organized by category: General, Execution, Views, Navigation, System
+  - Full keyboard shortcuts constant (fullKeyboardShortcuts) in theme.ts for overlay display
+  - Updated keyboardShortcuts in theme.ts to include '?' key hint in footer
+  - Updated main CLI help to include docs command
+- Files changed:
+  - src/commands/plugins.ts (updated) - Added printPluginsHelp() function
+  - src/commands/template.ts (updated) - Added printTemplateHelp() export, --help flag handling
+  - src/commands/docs.ts (new) - Docs command with browser opening
+  - src/commands/index.ts (updated) - Export new functions
+  - src/cli.tsx (updated) - Added docs command, plugins --help handling
+  - src/tui/theme.ts (updated) - Full keyboard shortcuts list, updated footer shortcuts
+  - src/tui/components/HelpOverlay.tsx (new) - Help overlay modal component
+  - src/tui/components/RunApp.tsx (updated) - '?' key handling, help overlay integration
+  - src/tui/components/index.ts (updated) - Export HelpOverlay
+- **Learnings:**
+  - Browser opening is platform-dependent: xdg-open (Linux), open (macOS), start (Windows)
+  - Keyboard shortcuts should be categorized for better discoverability in help
+  - The useCallback dependency array must include state used in early returns (showHelp)
+  - Overlay components with absolute positioning work well for modal dialogs in OpenTUI
+---

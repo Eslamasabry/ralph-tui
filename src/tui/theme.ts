@@ -71,14 +71,32 @@ export const statusIndicators = {
 } as const;
 
 /**
- * Keyboard shortcut display mappings
+ * Keyboard shortcut display mappings for footer (condensed)
  */
 export const keyboardShortcuts = [
   { key: 'q', description: 'Quit' },
   { key: 'p', description: 'Pause/Resume' },
   { key: 'd', description: 'Dashboard' },
   { key: '↑↓', description: 'Navigate' },
-  { key: 'Enter', description: 'Select' },
+  { key: '?', description: 'Help' },
+] as const;
+
+/**
+ * Full keyboard shortcuts for help overlay
+ */
+export const fullKeyboardShortcuts = [
+  { key: '?', description: 'Show/hide this help', category: 'General' },
+  { key: 'q', description: 'Quit Ralph', category: 'General' },
+  { key: 'Esc', description: 'Go back / Cancel', category: 'General' },
+  { key: 'p', description: 'Pause / Resume execution', category: 'Execution' },
+  { key: 'd', description: 'Toggle progress dashboard', category: 'Views' },
+  { key: 'i', description: 'Toggle iterations / tasks view', category: 'Views' },
+  { key: 't', description: 'Switch to tasks view', category: 'Views' },
+  { key: '↑ / k', description: 'Move selection up', category: 'Navigation' },
+  { key: '↓ / j', description: 'Move selection down', category: 'Navigation' },
+  { key: 'Enter', description: 'View selected item details', category: 'Navigation' },
+  { key: 'Ctrl+C', description: 'Interrupt (with confirmation)', category: 'System' },
+  { key: 'Ctrl+C ×2', description: 'Force quit immediately', category: 'System' },
 ] as const;
 
 /**

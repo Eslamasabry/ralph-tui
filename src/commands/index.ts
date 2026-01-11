@@ -8,6 +8,7 @@ export {
   printTrackerPlugins,
   listAgentPlugins,
   printAgentPlugins,
+  printPluginsHelp,
 } from './plugins.js';
 
 export {
@@ -47,6 +48,7 @@ export {
 
 export {
   executeTemplateCommand,
+  printTemplateHelp,
 } from './template.js';
 
 export {
@@ -60,3 +62,9 @@ export {
   parseConvertArgs,
   printConvertHelp,
 } from './convert.js';
+
+export {
+  executeDocsCommand,
+  parseDocsArgs,
+  printDocsHelp,
+} from './docs.js';

@@ -13,6 +13,44 @@ import {
 } from '../plugins/agents/index.js';
 
 /**
+ * Print help for the plugins command.
+ */
+export function printPluginsHelp(): void {
+  console.log(`
+ralph-tui plugins - Manage and inspect plugins
+
+Usage: ralph-tui plugins <subcommand>
+
+Subcommands:
+  agents     List all available agent plugins
+  trackers   List all available tracker plugins
+
+Options:
+  --help, -h   Show this help message
+
+Description:
+  Ralph TUI uses a plugin system for both AI agents and task trackers.
+
+  Agent plugins execute prompts via AI coding assistants:
+    - claude: Claude Code CLI (claude command)
+    - opencode: OpenCode CLI (opencode command)
+
+  Tracker plugins manage task lists and progress:
+    - beads: Git-backed issue tracker (.beads/ directory)
+    - beads-bv: Beads with bv graph analysis for smart task selection
+    - json: Simple prd.json file-based tracking
+
+  Custom plugins can be added to:
+    ~/.config/ralph-tui/plugins/agents/
+    ~/.config/ralph-tui/plugins/trackers/
+
+Examples:
+  ralph-tui plugins agents      # List agent plugins
+  ralph-tui plugins trackers    # List tracker plugins
+`);
+}
+
+/**
  * Output format for tracker plugin CLI commands
  */
 interface TrackerPluginInfo {

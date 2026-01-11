@@ -20,3 +20,5 @@ export { ProgressDashboard } from './ProgressDashboard.js';
 export type { ProgressDashboardProps } from './ProgressDashboard.js';
 export { ConfirmationDialog } from './ConfirmationDialog.js';
 export type { ConfirmationDialogProps } from './ConfirmationDialog.js';
+export { HelpOverlay } from './HelpOverlay.js';
+export type { HelpOverlayProps } from './HelpOverlay.js';
