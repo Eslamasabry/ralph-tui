@@ -4,6 +4,7 @@
  */
 
 import type { IterationStatus } from '../engine/types.js';
+import type { SubagentEvent, SubagentState } from '../plugins/agents/tracing/types.js';
 
 /**
  * Directory where iteration logs are stored (relative to cwd).
@@ -60,6 +61,53 @@ export interface IterationLogMetadata {
 }
 
 /**
+ * Node in the subagent hierarchy tree.
+ * Represents a single subagent with its nested children.
+ */
+export interface SubagentHierarchyNode {
+  /** Subagent state at time of persistence */
+  state: SubagentState;
+
+  /** Child subagents spawned by this subagent */
+  children: SubagentHierarchyNode[];
+}
+
+/**
+ * Aggregate statistics for subagent activity.
+ */
+export interface SubagentTraceStats {
+  /** Total number of subagents spawned */
+  totalSubagents: number;
+
+  /** Count by agent type (e.g., { Explore: 3, Bash: 2 }) */
+  byType: Record<string, number>;
+
+  /** Total duration of all completed subagents in milliseconds */
+  totalDurationMs: number;
+
+  /** Number of subagents that failed */
+  failureCount: number;
+
+  /** Maximum nesting depth observed */
+  maxDepth: number;
+}
+
+/**
+ * Complete subagent trace data persisted with iteration logs.
+ * Contains the full event timeline, hierarchy tree, and aggregate stats.
+ */
+export interface SubagentTrace {
+  /** Full timeline of subagent lifecycle events in chronological order */
+  events: SubagentEvent[];
+
+  /** Hierarchical tree of subagent relationships */
+  hierarchy: SubagentHierarchyNode[];
+
+  /** Aggregate statistics */
+  stats: SubagentTraceStats;
+}
+
+/**
  * Complete iteration log with metadata and output.
  */
 export interface IterationLog {
@@ -74,6 +122,9 @@ export interface IterationLog {
 
   /** Path to the log file on disk */
   filePath: string;
+
+  /** Subagent trace data (optional, for iterations with subagent tracking) */
+  subagentTrace?: SubagentTrace;
 }
 
 /**

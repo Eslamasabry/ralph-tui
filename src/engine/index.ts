@@ -26,7 +26,7 @@ import { SubagentTraceParser } from '../plugins/agents/tracing/parser.js';
 import type { SubagentEvent } from '../plugins/agents/tracing/types.js';
 import { ClaudeAgentPlugin } from '../plugins/agents/builtin/claude.js';
 import { updateSessionIteration, updateSessionStatus } from '../session/index.js';
-import { saveIterationLog } from '../logs/index.js';
+import { saveIterationLog, buildSubagentTrace } from '../logs/index.js';
 import { renderPrompt } from '../templates/index.js';
 
 /**
@@ -651,13 +651,16 @@ export class ExecutionEngine {
       };
 
       // Save iteration output to .ralph-tui/iterations/ directory
-      await saveIterationLog(
-        this.config.cwd,
-        result,
-        agentResult.stdout,
-        agentResult.stderr ?? this.state.currentStderr,
-        this.config
-      );
+      // Include subagent trace if any subagents were spawned
+      const events = this.subagentParser.getEvents();
+      const states = this.subagentParser.getAllSubagents();
+      const subagentTrace =
+        events.length > 0 ? buildSubagentTrace(events, states) : undefined;
+
+      await saveIterationLog(this.config.cwd, result, agentResult.stdout, agentResult.stderr ?? this.state.currentStderr, {
+        config: this.config,
+        subagentTrace,
+      });
 
       this.emit({
         type: 'iteration:completed',

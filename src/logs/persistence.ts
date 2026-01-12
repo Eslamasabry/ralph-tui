@@ -19,8 +19,12 @@ import type {
   LogFilterOptions,
   LogCleanupOptions,
   LogCleanupResult,
+  SubagentTrace,
+  SubagentHierarchyNode,
+  SubagentTraceStats,
 } from './types.js';
 import { ITERATIONS_DIR } from './types.js';
+import type { SubagentEvent, SubagentState } from '../plugins/agents/tracing/types.js';
 import type { IterationResult } from '../engine/types.js';
 import type { RalphConfig } from '../config/types.js';
 
@@ -33,6 +37,11 @@ const LOG_DIVIDER = '\n--- RAW OUTPUT ---\n';
  * Divider between stdout and stderr in raw output section.
  */
 const STDERR_DIVIDER = '\n--- STDERR ---\n';
+
+/**
+ * Divider before subagent trace JSON section.
+ */
+const SUBAGENT_TRACE_DIVIDER = '\n--- SUBAGENT TRACE ---\n';
 
 /**
  * Generate log filename for an iteration.
@@ -217,15 +226,46 @@ function parseMetadataHeader(header: string): IterationLogMetadata | null {
 }
 
 /**
+ * Options for saving iteration logs.
+ */
+export interface SaveIterationLogOptions {
+  /** Ralph config (for output directory, agent plugin, model, epicId) */
+  config?: Partial<RalphConfig>;
+
+  /** Subagent trace data to persist (optional) */
+  subagentTrace?: SubagentTrace;
+}
+
+/**
  * Save an iteration log to disk.
+ * @param cwd Working directory
+ * @param result Iteration execution result
+ * @param stdout Agent stdout output
+ * @param stderr Agent stderr output
+ * @param options Save options including config and subagent trace
  */
 export async function saveIterationLog(
   cwd: string,
   result: IterationResult,
   stdout: string,
   stderr: string,
-  config?: Partial<RalphConfig>
+  options?: SaveIterationLogOptions | Partial<RalphConfig>
 ): Promise<string> {
+  // Handle both old signature (config only) and new signature (options object)
+  // Old signature: saveIterationLog(cwd, result, stdout, stderr, config)
+  // New signature: saveIterationLog(cwd, result, stdout, stderr, options)
+  let config: Partial<RalphConfig> | undefined;
+  let subagentTrace: SubagentTrace | undefined;
+
+  if (options && 'subagentTrace' in options) {
+    // New options object
+    config = options.config;
+    subagentTrace = options.subagentTrace;
+  } else {
+    // Old config-only signature for backward compatibility
+    config = options as Partial<RalphConfig> | undefined;
+  }
+
   const outputDir = config?.outputDir;
   await ensureIterationsDir(cwd, outputDir);
 
@@ -243,12 +283,19 @@ export async function saveIterationLog(
     content += stderr;
   }
 
+  // Append subagent trace if provided
+  if (subagentTrace && subagentTrace.events.length > 0) {
+    content += SUBAGENT_TRACE_DIVIDER;
+    content += JSON.stringify(subagentTrace, null, 2);
+  }
+
   await writeFile(filePath, content);
   return filePath;
 }
 
 /**
  * Load an iteration log from disk.
+ * Handles logs with and without subagent trace data for backward compatibility.
  */
 export async function loadIterationLog(filePath: string): Promise<IterationLog | null> {
   try {
@@ -257,7 +304,7 @@ export async function loadIterationLog(filePath: string): Promise<IterationLog |
     // Split header and output
     const parts = content.split(LOG_DIVIDER);
     const header = parts[0] ?? '';
-    const output = parts[1] ?? '';
+    let output = parts[1] ?? '';
 
     // Parse metadata from header
     const metadata = parseMetadataHeader(header);
@@ -265,7 +312,22 @@ export async function loadIterationLog(filePath: string): Promise<IterationLog |
       return null;
     }
 
-    // Split stdout and stderr
+    // Check for and extract subagent trace section
+    let subagentTrace: SubagentTrace | undefined;
+    const traceIndex = output.indexOf(SUBAGENT_TRACE_DIVIDER);
+    if (traceIndex !== -1) {
+      const traceJson = output.slice(traceIndex + SUBAGENT_TRACE_DIVIDER.length);
+      output = output.slice(0, traceIndex);
+
+      try {
+        subagentTrace = JSON.parse(traceJson) as SubagentTrace;
+      } catch {
+        // If trace parsing fails, continue without it (backward compatibility)
+        subagentTrace = undefined;
+      }
+    }
+
+    // Split stdout and stderr from the remaining output
     const outputParts = output.split(STDERR_DIVIDER);
     const stdout = outputParts[0] ?? '';
     const stderr = outputParts[1] ?? '';
@@ -275,6 +337,7 @@ export async function loadIterationLog(filePath: string): Promise<IterationLog |
       stdout,
       stderr,
       filePath,
+      subagentTrace,
     };
   } catch {
     return null;
@@ -471,4 +534,111 @@ export async function getIterationLogsDiskUsage(cwd: string): Promise<number> {
   }
 
   return totalBytes;
+}
+
+/**
+ * Build a SubagentTrace from arrays of events and states.
+ * This is a helper function for the engine to construct trace data for persistence.
+ *
+ * @param events Array of subagent lifecycle events in chronological order
+ * @param states Array of all subagent states
+ * @returns Complete SubagentTrace ready for persistence
+ */
+export function buildSubagentTrace(
+  events: SubagentEvent[],
+  states: SubagentState[]
+): SubagentTrace {
+  // Build hierarchy tree from states
+  const hierarchy = buildHierarchyTree(states);
+
+  // Compute aggregate statistics
+  const stats = computeTraceStats(states);
+
+  return {
+    events,
+    hierarchy,
+    stats,
+  };
+}
+
+/**
+ * Build hierarchy tree from flat list of subagent states.
+ */
+function buildHierarchyTree(states: SubagentState[]): SubagentHierarchyNode[] {
+  const nodeMap = new Map<string, SubagentHierarchyNode>();
+  const roots: SubagentHierarchyNode[] = [];
+
+  // First pass: create nodes for all states
+  for (const state of states) {
+    nodeMap.set(state.id, {
+      state,
+      children: [],
+    });
+  }
+
+  // Second pass: build tree structure
+  for (const state of states) {
+    const node = nodeMap.get(state.id)!;
+
+    if (state.parentId && nodeMap.has(state.parentId)) {
+      // Add as child of parent
+      const parentNode = nodeMap.get(state.parentId)!;
+      parentNode.children.push(node);
+    } else {
+      // This is a root node
+      roots.push(node);
+    }
+  }
+
+  return roots;
+}
+
+/**
+ * Compute aggregate statistics from subagent states.
+ */
+function computeTraceStats(states: SubagentState[]): SubagentTraceStats {
+  const byType: Record<string, number> = {};
+  let totalDurationMs = 0;
+  let failureCount = 0;
+  let maxDepth = 0;
+
+  // Create a map for quick lookup
+  const stateMap = new Map<string, SubagentState>();
+  for (const state of states) {
+    stateMap.set(state.id, state);
+  }
+
+  for (const state of states) {
+    // Count by agent type
+    byType[state.agentType] = (byType[state.agentType] || 0) + 1;
+
+    // Sum durations of completed subagents
+    if (state.durationMs !== undefined) {
+      totalDurationMs += state.durationMs;
+    }
+
+    // Count failures
+    if (state.status === 'error') {
+      failureCount++;
+    }
+
+    // Calculate depth for this subagent
+    let depth = 1;
+    let current = state;
+    while (current.parentId) {
+      depth++;
+      const parent = stateMap.get(current.parentId);
+      if (!parent) break;
+      current = parent;
+    }
+    maxDepth = Math.max(maxDepth, depth);
+  }
+
+  return {
+    totalSubagents: states.length,
+    byType,
+    totalDurationMs,
+    failureCount,
+    maxDepth,
+  };
 }

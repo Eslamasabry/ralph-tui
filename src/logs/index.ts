@@ -11,9 +11,14 @@ export type {
   LogFilterOptions,
   LogCleanupOptions,
   LogCleanupResult,
+  SubagentHierarchyNode,
+  SubagentTraceStats,
+  SubagentTrace,
 } from './types.js';
 
 export { ITERATIONS_DIR } from './types.js';
+
+export type { SaveIterationLogOptions } from './persistence.js';
 
 export {
   generateLogFilename,
@@ -29,6 +34,7 @@ export {
   getIterationLogCount,
   hasIterationLogs,
   getIterationLogsDiskUsage,
+  buildSubagentTrace,
 } from './persistence.js';
 
 export type {
