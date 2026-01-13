@@ -6,7 +6,8 @@
 
 import type { ReactNode } from 'react';
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { useKeyboard } from '@opentui/react';
+import { useKeyboard, useRenderer } from '@opentui/react';
+import type { KeyEvent, PasteEvent } from '@opentui/core';
 import { writeFile, mkdir, access } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -405,7 +406,7 @@ Read the PRD and create the appropriate tasks.`;
    * Handle keyboard input
    */
   const handleKeyboard = useCallback(
-    (key: { name: string; sequence?: string }) => {
+    (key: KeyEvent) => {
       // Handle quit confirmation dialog
       if (showQuitConfirm) {
         if (key.name === 'y' || key.sequence === 'y' || key.sequence === 'Y') {
@@ -462,7 +463,12 @@ Read the PRD and create the appropriate tasks.`;
           break;
 
         default:
-          // Handle regular character input and pasted content
+          // Handle regular character input
+          // Skip if any modifier key (except shift) is pressed - these are shortcuts
+          if (key.ctrl || key.meta || key.option || key.super || key.hyper) {
+            break;
+          }
+
           if (key.sequence) {
             const printableChars = key.sequence
               .split('')
@@ -480,6 +486,27 @@ Read the PRD and create the appropriate tasks.`;
   );
 
   useKeyboard(handleKeyboard);
+
+  // Handle paste events separately from keyboard input
+  // OpenTUI emits paste as a separate event type on the keyInput handler
+  const renderer = useRenderer();
+  useEffect(() => {
+    const handlePaste = (event: PasteEvent) => {
+      // Don't process paste while loading or in quit confirmation
+      if (isLoading || showQuitConfirm) {
+        return;
+      }
+      // Append pasted text to input value
+      if (event.text) {
+        setInputValue((prev) => prev + event.text);
+      }
+    };
+
+    renderer.keyInput.on('paste', handlePaste);
+    return () => {
+      renderer.keyInput.off('paste', handlePaste);
+    };
+  }, [renderer, isLoading, showQuitConfirm]);
 
   // Determine hint text based on phase
   const hint =
