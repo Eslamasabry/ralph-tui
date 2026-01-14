@@ -273,13 +273,15 @@ export abstract class BaseAgentPlugin implements AgentPlugin {
     });
 
     // Spawn the process
-    // Note: shell: false to avoid shell interpretation of special characters in args
+    // Note: On Windows, we need shell: true to execute wrapper scripts (.cmd, .bat, .ps1)
+    // On Unix, shell: false avoids shell interpretation of special characters in args
     // The prompt will be passed via stdin if getStdinInput returns content
+    const isWindows = platform() === 'win32';
     const proc = spawn(command, allArgs, {
       cwd: options?.cwd ?? process.cwd(),
       env,
       stdio: ['pipe', 'pipe', 'pipe'],
-      shell: false,
+      shell: isWindows,
     });
 
     // Write to stdin if subclass provides input (e.g., prompt content)
