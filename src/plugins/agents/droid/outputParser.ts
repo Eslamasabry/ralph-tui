@@ -211,6 +211,23 @@ function extractToolCalls(payload: Record<string, unknown>): DroidToolCall[] {
     calls.push(parsedSingle);
   }
 
+  // Also check for Anthropic/Claude format: content[] with tool_use blocks
+  // This handles agents that output in the standard Anthropic message format
+  const content = payload.content ?? (payload.message as Record<string, unknown>)?.content;
+  if (Array.isArray(content)) {
+    for (const block of content) {
+      const blockRecord = asRecord(block);
+      if (blockRecord?.type === 'tool_use' && typeof blockRecord.name === 'string') {
+        const input = asRecord(blockRecord.input);
+        calls.push({
+          id: readString(blockRecord.id),
+          name: blockRecord.name,
+          arguments: input ?? undefined,
+        });
+      }
+    }
+  }
+
   return calls;
 }
 
