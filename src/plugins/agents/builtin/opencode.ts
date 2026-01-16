@@ -167,7 +167,8 @@ export class OpenCodeAgentPlugin extends BaseAgentPlugin {
 
   override getSandboxRequirements() {
     return {
-      authPaths: ['~/.opencode', '~/.config/opencode'],
+      // ~/.local/share/opencode contains auth.json with OAuth tokens
+      authPaths: ['~/.opencode', '~/.config/opencode', '~/.local/share/opencode'],
       binaryPaths: ['/usr/local/bin', '~/.local/bin', '~/go/bin'],
       runtimePaths: [],
       requiresNetwork: true,
