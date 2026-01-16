@@ -4,6 +4,7 @@
  */
 
 import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { isAbsolute, resolve } from 'node:path';
 import type { SandboxConfig } from './types.js';
 import type { AgentSandboxRequirements } from '../plugins/agents/types.js';
@@ -201,9 +202,14 @@ export class SandboxWrapper {
   }
 
   private normalizePaths(paths: string[], cwd: string): string[] {
+    const home = homedir();
     const resolved = paths
       .filter((path) => path.trim().length > 0)
-      .map((path) => (isAbsolute(path) ? path : resolve(cwd, path)));
+      .map((path) => {
+        // Expand ~ to home directory
+        const expanded = path.startsWith('~/') ? path.replace('~', home) : path;
+        return isAbsolute(expanded) ? expanded : resolve(cwd, expanded);
+      });
     return Array.from(new Set(resolved));
   }
 }
