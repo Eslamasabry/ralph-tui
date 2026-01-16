@@ -328,7 +328,12 @@ export function processAgentEvents(events: AgentDisplayEvent[]): string {
         break;
 
       case 'tool_use':
-        // formatToolCall already adds a trailing newline, no need for leading newline
+        // Add newline before tool call if there's preceding content (like text)
+        // This ensures "Let me check...[Glob]" becomes "Let me check...\n[Glob]"
+        // formatToolCall adds its own trailing newline
+        if (parts.length > 0 && !parts[parts.length - 1]!.endsWith('\n')) {
+          parts.push('\n');
+        }
         parts.push(formatToolCall(event.name, event.input as ToolInputFormatters));
         break;
 
@@ -372,7 +377,10 @@ export function processAgentEventsToSegments(events: AgentDisplayEvent[]): Forma
         break;
 
       case 'tool_use':
-        // Tool calls formatted inline - newlines are handled by the parser
+        // Add newline before tool call if there's preceding content (like text)
+        if (segments.length > 0 && !segments[segments.length - 1]!.text.endsWith('\n')) {
+          segments.push({ text: '\n' });
+        }
         segments.push(...formatToolCallSegments(event.name, event.input as ToolInputFormatters));
         break;
 
