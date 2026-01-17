@@ -27,7 +27,7 @@ import type {
 import { ITERATIONS_DIR } from './types.js';
 import type { SubagentEvent, SubagentState } from '../plugins/agents/tracing/types.js';
 import type { IterationResult } from '../engine/types.js';
-import type { RalphConfig } from '../config/types.js';
+import type { RalphConfig, SandboxConfig, SandboxMode } from '../config/types.js';
 
 /**
  * Divider between metadata header and raw output in log files.
@@ -91,6 +91,12 @@ export interface BuildMetadataOptions {
 
   /** Summary of how iteration completed */
   completionSummary?: string;
+
+  /** Sandbox configuration used for this iteration */
+  sandboxConfig?: SandboxConfig;
+
+  /** Resolved sandbox mode when configured mode was 'auto' */
+  resolvedSandboxMode?: Exclude<SandboxMode, 'auto'>;
 }
 
 /**
@@ -104,12 +110,27 @@ export function buildMetadata(
   let config: Partial<RalphConfig> | undefined;
   let agentSwitches: AgentSwitchEntry[] | undefined;
   let completionSummary: string | undefined;
+  let sandboxConfig: SandboxConfig | undefined;
+  let resolvedSandboxMode: Exclude<SandboxMode, 'auto'> | undefined;
 
-  if (configOrOptions && 'agentSwitches' in configOrOptions) {
+  // Detect new options object format by checking for any of its unique keys
+  // (config, agentSwitches, completionSummary, sandboxConfig, resolvedSandboxMode)
+  const isOptionsObject = configOrOptions && (
+    'config' in configOrOptions ||
+    'agentSwitches' in configOrOptions ||
+    'completionSummary' in configOrOptions ||
+    'sandboxConfig' in configOrOptions ||
+    'resolvedSandboxMode' in configOrOptions
+  );
+
+  if (isOptionsObject) {
     // New options object
-    config = configOrOptions.config;
-    agentSwitches = configOrOptions.agentSwitches;
-    completionSummary = configOrOptions.completionSummary;
+    const opts = configOrOptions as BuildMetadataOptions;
+    config = opts.config;
+    agentSwitches = opts.agentSwitches;
+    completionSummary = opts.completionSummary;
+    sandboxConfig = opts.sandboxConfig;
+    resolvedSandboxMode = opts.resolvedSandboxMode;
   } else {
     // Old config-only signature for backward compatibility
     config = configOrOptions as Partial<RalphConfig> | undefined;
@@ -132,6 +153,9 @@ export function buildMetadata(
     epicId: config?.epicId,
     agentSwitches: agentSwitches && agentSwitches.length > 0 ? agentSwitches : undefined,
     completionSummary,
+    sandboxMode: sandboxConfig?.mode,
+    resolvedSandboxMode,
+    sandboxNetwork: sandboxConfig?.network,
   };
 }
 
@@ -169,6 +193,17 @@ function formatMetadataHeader(metadata: IterationLogMetadata): string {
   }
   if (metadata.epicId) {
     lines.push(`- **Epic**: ${metadata.epicId}`);
+  }
+
+  // Add sandbox configuration if present
+  if (metadata.sandboxMode) {
+    const modeDisplay = metadata.sandboxMode === 'auto' && metadata.resolvedSandboxMode
+      ? `auto (${metadata.resolvedSandboxMode})`
+      : metadata.sandboxMode;
+    lines.push(`- **Sandbox Mode**: ${modeDisplay}`);
+    if (metadata.sandboxNetwork !== undefined) {
+      lines.push(`- **Sandbox Network**: ${metadata.sandboxNetwork ? 'Enabled' : 'Disabled'}`);
+    }
   }
 
   // Add completion summary if present
@@ -252,6 +287,23 @@ function parseMetadataHeader(header: string): IterationLogMetadata | null {
     const model = extractValue('Model');
     const epicId = extractValue('Epic');
 
+    // Parse sandbox configuration
+    const sandboxModeRaw = extractValue('Sandbox Mode');
+    let sandboxMode: string | undefined;
+    let resolvedSandboxMode: string | undefined;
+    if (sandboxModeRaw) {
+      // Handle "auto (docker)" or "auto (sandbox-exec)" format
+      const autoMatch = sandboxModeRaw.match(/^auto\s*\(([^)]+)\)$/);
+      if (autoMatch) {
+        sandboxMode = 'auto';
+        resolvedSandboxMode = autoMatch[1];
+      } else {
+        sandboxMode = sandboxModeRaw;
+      }
+    }
+    const sandboxNetworkRaw = extractValue('Sandbox Network');
+    const sandboxNetwork = sandboxNetworkRaw ? sandboxNetworkRaw === 'Enabled' : undefined;
+
     return {
       iteration,
       taskId,
@@ -267,6 +319,9 @@ function parseMetadataHeader(header: string): IterationLogMetadata | null {
       agentPlugin,
       model,
       epicId,
+      sandboxMode,
+      resolvedSandboxMode,
+      sandboxNetwork,
     };
   } catch {
     return null;
@@ -288,6 +343,12 @@ export interface SaveIterationLogOptions {
 
   /** Summary of how iteration completed (e.g., 'Completed on fallback (opencode) due to rate limit') */
   completionSummary?: string;
+
+  /** Sandbox configuration used for this iteration */
+  sandboxConfig?: SandboxConfig;
+
+  /** Resolved sandbox mode when configured mode was 'auto' */
+  resolvedSandboxMode?: Exclude<SandboxMode, 'auto'>;
 }
 
 /**
@@ -312,14 +373,28 @@ export async function saveIterationLog(
   let subagentTrace: SubagentTrace | undefined;
   let agentSwitches: AgentSwitchEntry[] | undefined;
   let completionSummary: string | undefined;
+  let sandboxConfig: SandboxConfig | undefined;
+  let resolvedSandboxMode: Exclude<SandboxMode, 'auto'> | undefined;
 
-  if (options && 'subagentTrace' in options) {
+  // Detect new options object format by checking for any of its unique keys
+  const isOptionsObject = options && (
+    'config' in options ||
+    'subagentTrace' in options ||
+    'agentSwitches' in options ||
+    'completionSummary' in options ||
+    'sandboxConfig' in options ||
+    'resolvedSandboxMode' in options
+  );
+
+  if (isOptionsObject) {
     // New options object
     const saveOptions = options as SaveIterationLogOptions;
     config = saveOptions.config;
     subagentTrace = saveOptions.subagentTrace;
     agentSwitches = saveOptions.agentSwitches;
     completionSummary = saveOptions.completionSummary;
+    sandboxConfig = saveOptions.sandboxConfig;
+    resolvedSandboxMode = saveOptions.resolvedSandboxMode;
   } else {
     // Old config-only signature for backward compatibility
     config = options as Partial<RalphConfig> | undefined;
@@ -332,6 +407,8 @@ export async function saveIterationLog(
     config,
     agentSwitches,
     completionSummary,
+    sandboxConfig,
+    resolvedSandboxMode,
   });
   const filename = generateLogFilename(result.iteration, result.task.id);
   const filePath = join(getIterationsDir(cwd, outputDir), filename);

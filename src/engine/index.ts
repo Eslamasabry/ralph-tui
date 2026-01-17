@@ -937,6 +937,7 @@ export class ExecutionEngine {
         subagentTrace,
         agentSwitches: this.currentIterationAgentSwitches.length > 0 ? [...this.currentIterationAgentSwitches] : undefined,
         completionSummary,
+        sandboxConfig: this.config.sandbox,
       });
 
       // Append progress entry for cross-iteration context

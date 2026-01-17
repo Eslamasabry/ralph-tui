@@ -82,6 +82,15 @@ export interface IterationLogMetadata {
 
   /** Summary of how iteration completed (e.g., 'Completed on fallback (opencode) due to rate limit') */
   completionSummary?: string;
+
+  /** Sandbox mode used for this iteration ('docker', 'seatbelt', 'off') */
+  sandboxMode?: string;
+
+  /** Resolved sandbox mode when configured mode was 'auto' */
+  resolvedSandboxMode?: string;
+
+  /** Whether network access was enabled in sandbox */
+  sandboxNetwork?: boolean;
 }
 
 /**
