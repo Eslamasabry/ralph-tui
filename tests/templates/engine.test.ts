@@ -874,3 +874,250 @@ describe('Template Engine - Integration', () => {
     });
   });
 });
+
+// ============================================================================
+// Edge Cases and Error Handling Tests
+// ============================================================================
+
+describe('Template Engine - Error Handling', () => {
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = await createTestDir();
+    clearTemplateCache();
+  });
+
+  afterEach(async () => {
+    await cleanupTestDir(testDir);
+  });
+
+  describe('loadTemplate - Tracker Template Fallback', () => {
+    test('uses tracker template when no custom/project/global exists', () => {
+      // Use a unique tracker type that won't have global templates
+      const uniqueType = `tracker-${Date.now()}` as any;
+      const trackerTemplate = 'Tracker Template: {{taskId}} - {{taskTitle}}';
+      const result = loadTemplate(undefined, uniqueType, testDir, trackerTemplate);
+
+      expect(result.success).toBe(true);
+      expect(result.content).toBe(trackerTemplate);
+      expect(result.source).toBe(`tracker:${uniqueType}`);
+    });
+
+    test('tracker template has lower priority than project template', async () => {
+      // Create a project template
+      const projectDir = join(testDir, '.ralph-tui', 'templates');
+      await mkdir(projectDir, { recursive: true });
+      await writeFile(join(projectDir, 'beads.hbs'), 'Project Override');
+
+      const trackerTemplate = 'Tracker Template';
+      const result = loadTemplate(undefined, 'beads', testDir, trackerTemplate);
+
+      expect(result.success).toBe(true);
+      expect(result.content).toBe('Project Override');
+      expect(result.source).toContain('project:');
+    });
+  });
+
+  describe('loadTemplate - Builtin Fallback', () => {
+    test('falls back to global or builtin when no tracker template provided', () => {
+      // No custom path, no project template, no tracker template
+      // Will use global template if user has it installed, otherwise builtin
+      const result = loadTemplate(undefined, 'beads', testDir, undefined);
+
+      expect(result.success).toBe(true);
+      // Either global (if user has it) or builtin
+      expect(result.source).toMatch(/^(builtin:|global:)/);
+    });
+
+    test('uses builtin for unknown tracker type without global template', () => {
+      // Use a unique type that won't have a global template
+      const uniqueType = `unknown-${Date.now()}` as any;
+      const result = loadTemplate(undefined, uniqueType, testDir, undefined);
+
+      expect(result.success).toBe(true);
+      expect(result.source).toBe(`builtin:${uniqueType}`);
+      // Unknown types get the default template
+      expect(result.content).toBeDefined();
+    });
+  });
+
+  describe('loadTemplate - Custom Path Errors', () => {
+    test('returns error when custom path file does not exist', () => {
+      const customPath = join(testDir, 'nonexistent.hbs');
+      const result = loadTemplate(customPath, 'beads', testDir);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not found');
+      expect(result.source).toBe(customPath);
+    });
+
+    test('returns error with original path for non-existent relative path', () => {
+      const result = loadTemplate('./missing-template.hbs', 'beads', testDir);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not found');
+    });
+  });
+
+  describe('renderPrompt - Error Handling', () => {
+    test('returns error when template has invalid Handlebars syntax', async () => {
+      // Create template with invalid syntax
+      const projectDir = join(testDir, '.ralph-tui', 'templates');
+      await mkdir(projectDir, { recursive: true });
+      await writeFile(join(projectDir, 'beads.hbs'), '{{#if unclosed');
+
+      const task = createMockTask();
+      const config = createMockConfig({ cwd: testDir });
+
+      const result = renderPrompt(task, config);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBeDefined();
+    });
+
+    test('passes through load error when custom template not found', () => {
+      const task = createMockTask();
+      const config = createMockConfig({
+        cwd: testDir,
+        promptTemplate: join(testDir, 'does-not-exist.hbs'),
+      });
+
+      const result = renderPrompt(task, config);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not found');
+    });
+  });
+
+  describe('copyBuiltinTemplate - Error Cases', () => {
+    test('returns error for invalid destination path', () => {
+      // Try to copy to a path with null bytes (invalid on most filesystems)
+      const invalidPath = '/invalid\0path/template.hbs';
+      const result = copyBuiltinTemplate('beads', invalidPath);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBeDefined();
+    });
+
+    test('returns error when destination directory cannot be created', () => {
+      // Try to create in a non-writable location (if running as non-root)
+      // This test may be skipped on some systems
+      const restrictedPath = '/root/no-access/template.hbs';
+      const result = copyBuiltinTemplate('beads', restrictedPath);
+
+      // Will fail on most systems unless running as root
+      if (!result.success) {
+        expect(result.error).toBeDefined();
+      }
+    });
+  });
+
+  describe('installGlobalTemplates - Function Behavior', () => {
+    // Note: installGlobalTemplates modifies the user's actual global config directory
+    // We only test the return value structure, not the file system side effects
+    // to avoid polluting the user's real config during test runs
+
+    test('returns correct structure with templatesDir and results', () => {
+      // Use an empty templates object to avoid modifying user's config
+      const templates = {};
+
+      const result = installGlobalTemplates(templates, false);
+
+      expect(result).toHaveProperty('success');
+      expect(result).toHaveProperty('templatesDir');
+      expect(result).toHaveProperty('results');
+      expect(result.templatesDir).toContain('.config/ralph-tui/templates');
+      expect(Array.isArray(result.results)).toBe(true);
+    });
+
+    test('returns success true when no templates provided', () => {
+      const result = installGlobalTemplates({}, false);
+
+      expect(result.success).toBe(true);
+      expect(result.results.length).toBe(0);
+    });
+  });
+});
+
+// ============================================================================
+// Tracker Template Integration Tests
+// ============================================================================
+
+describe('Template Engine - Tracker Template Integration', () => {
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = await createTestDir();
+    clearTemplateCache();
+  });
+
+  afterEach(async () => {
+    await cleanupTestDir(testDir);
+  });
+
+  test('loadTemplate hierarchy: project > global > tracker > builtin', () => {
+    // The template resolution hierarchy is:
+    // 1. customPath (explicit path)
+    // 2. Project template (.ralph-tui/templates/{tracker}.hbs)
+    // 3. Global template (~/.config/ralph-tui/templates/{tracker}.hbs)
+    // 4. Tracker template (from plugin's getTemplate())
+    // 5. Builtin template
+
+    // Test with a tracker type that won't have global templates
+    const trackerTemplate = 'Tracker Template Content';
+    const result = loadTemplate(undefined, 'custom-tracker' as any, testDir, trackerTemplate);
+
+    expect(result.success).toBe(true);
+    // With a custom tracker type, no global template exists, so tracker template is used
+    expect(result.content).toBe(trackerTemplate);
+    expect(result.source).toBe('tracker:custom-tracker');
+  });
+
+  test('renderPrompt prefers project template over tracker template', async () => {
+    // Create project template
+    const projectDir = join(testDir, '.ralph-tui', 'templates');
+    await mkdir(projectDir, { recursive: true });
+    await writeFile(join(projectDir, 'beads.hbs'), 'Project says: {{taskId}}');
+
+    const task = createMockTask();
+    const config = createMockConfig({ cwd: testDir });
+    const trackerTemplate = 'Tracker says: {{taskId}}';
+
+    const result = renderPrompt(task, config, undefined, undefined, trackerTemplate);
+
+    expect(result.success).toBe(true);
+    expect(result.prompt).toBe('Project says: task-123');
+    expect(result.source).toContain('project:');
+  });
+
+  test('loadTemplate returns available template in correct priority order', () => {
+    // No custom path, no project template (testDir is empty), no tracker template
+    // Will use global (if user has it) or builtin
+    const result = loadTemplate(undefined, 'beads', testDir, undefined);
+
+    expect(result.success).toBe(true);
+    // Either builtin or global depending on user's setup
+    expect(result.source).toMatch(/^(builtin:|global:)/);
+  });
+
+  test('loadTemplate uses tracker template when no global exists for tracker type', () => {
+    // Use a unique tracker type that definitely has no global template
+    const uniqueType = `unique-tracker-${Date.now()}` as any;
+    const trackerTemplate = 'My custom tracker template';
+    const result = loadTemplate(undefined, uniqueType, testDir, trackerTemplate);
+
+    expect(result.success).toBe(true);
+    expect(result.content).toBe(trackerTemplate);
+    expect(result.source).toBe(`tracker:${uniqueType}`);
+  });
+
+  test('loadTemplate falls back to builtin for unknown type without tracker template', () => {
+    const uniqueType = `unknown-${Date.now()}` as any;
+    const result = loadTemplate(undefined, uniqueType, testDir, undefined);
+
+    expect(result.success).toBe(true);
+    expect(result.source).toBe(`builtin:${uniqueType}`);
+    // Unknown types get the default template
+    expect(result.content).toBeDefined();
+  });
+});

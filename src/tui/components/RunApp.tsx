@@ -454,11 +454,28 @@ export function RunApp({
   }, [displayedTasks.length, selectedIndex]);
 
   // Regenerate prompt preview when selected task changes (if in prompt view mode)
-  // This keeps the prompt preview in sync with the currently selected task
-  // Uses selectedIndex and displayedTasks directly to ensure fresh data on each effect run
+  // This keeps the prompt preview in sync with the currently selected task/iteration
+  // Works for both tasks view (uses selectedIndex) and iterations view (uses iteration's task)
   useEffect(() => {
-    const taskId = displayedTasks[selectedIndex]?.id;
-    if (detailsViewMode !== 'prompt' || !taskId) {
+    // Compute effective task ID based on current view mode
+    // In iterations view, use the task from the selected iteration
+    // In tasks view, use the task from the task list
+    const selectedIteration = viewMode === 'iterations' && iterations.length > 0
+      ? iterations[iterationSelectedIndex]
+      : undefined;
+    const effectiveTaskId = viewMode === 'iterations'
+      ? selectedIteration?.task?.id
+      : displayedTasks[selectedIndex]?.id;
+
+    // If not in prompt view mode, do nothing
+    if (detailsViewMode !== 'prompt') {
+      return;
+    }
+
+    // If no task is selected, clear the preview
+    if (!effectiveTaskId) {
+      setPromptPreview('No task selected');
+      setTemplateSource(undefined);
       return;
     }
 
@@ -469,7 +486,7 @@ export function RunApp({
     setTemplateSource(undefined);
 
     void (async () => {
-      const result = await engine.generatePromptPreview(taskId);
+      const result = await engine.generatePromptPreview(effectiveTaskId);
       // Don't update state if this effect was cancelled (user changed task again)
       if (cancelled) return;
 
@@ -486,7 +503,7 @@ export function RunApp({
     return () => {
       cancelled = true;
     };
-  }, [detailsViewMode, displayedTasks, selectedIndex, engine]);
+  }, [detailsViewMode, viewMode, displayedTasks, selectedIndex, iterations, iterationSelectedIndex, engine]);
 
   // Update output parser when agent changes (parser was created before config was loaded)
   useEffect(() => {
