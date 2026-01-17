@@ -94,12 +94,12 @@ printMode = "text"
 | `command` | string | `"claude"` | Path to Claude CLI executable |
 
 <Callout type="tip">
-For simple configs, you can use the top-level `executable` option instead of the `[[agents]]` array:
+For simple configs, you can use the top-level `command` option instead of the `[[agents]]` array:
 ```toml
 agent = "claude"
-executable = "ccr code"  # Use Claude Code Router
+command = "ccr code"  # Use Claude Code Router
 ```
-See [Custom Executable](/docs/configuration/options#custom-executable) for details.
+See [Custom Command](/docs/configuration/options#custom-command) for details.
 </Callout>
 
 ## Models

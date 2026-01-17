@@ -178,7 +178,7 @@ export interface StoredConfig {
   agentCommand?: string;
 
   /**
-   * Custom executable path for the agent.
+   * Custom command/executable path for the agent.
    *
    * Use this to route agent requests through wrapper tools like Claude Code Router (CCR)
    * or to specify a custom binary location.
@@ -191,7 +191,7 @@ export interface StoredConfig {
    * @example "ccr code" - Route through Claude Code Router
    * @example "/opt/bin/my-claude" - Absolute path to custom binary
    */
-  executable?: string;
+  command?: string;
 
   /** Shorthand: tracker plugin name */
   tracker?: string;

@@ -120,7 +120,7 @@ export const StoredConfigSchema = z
     agent: z.string().optional(),
     agentCommand: z.string().optional(),
     /**
-     * Custom executable path for the agent.
+     * Custom command/executable path for the agent.
      *
      * Use this to route agent requests through wrapper tools like Claude Code Router (CCR)
      * or to specify a custom binary location.
@@ -133,11 +133,11 @@ export const StoredConfigSchema = z
      * @example "ccr code" - Route through Claude Code Router
      * @example "/opt/bin/my-claude" - Absolute path to custom binary
      */
-    executable: z
+    command: z
       .string()
       .refine(
         (cmd) => !/[;&|`$()]/.test(cmd),
-        'Executable path cannot contain shell metacharacters (;&|`$()). Use a wrapper script instead.'
+        'Command cannot contain shell metacharacters (;&|`$()). Use a wrapper script instead.'
       )
       .optional(),
     agentOptions: AgentOptionsSchema.optional(),

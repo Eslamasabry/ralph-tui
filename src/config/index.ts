@@ -147,7 +147,7 @@ function mergeConfigs(global: StoredConfig, project: StoredConfig): StoredConfig
   if (project.outputDir !== undefined) merged.outputDir = project.outputDir;
   if (project.agent !== undefined) merged.agent = project.agent;
   if (project.agentCommand !== undefined) merged.agentCommand = project.agentCommand;
-  if (project.executable !== undefined) merged.executable = project.executable;
+  if (project.command !== undefined) merged.command = project.command;
   if (project.tracker !== undefined) merged.tracker = project.tracker;
 
   // Replace arrays entirely if present in project config
@@ -315,13 +315,12 @@ function getDefaultAgentConfig(
       };
     }
 
-    // Apply executable shorthand (only if not already set on agent config)
+    // Apply command shorthand (only if not already set on agent config)
     // This allows users to specify a custom executable like 'ccr code' for Claude Code Router
-    // The 'executable' field in StoredConfig maps to 'command' in AgentPluginConfig
-    if (storedConfig.executable && !result.command) {
+    if (storedConfig.command && !result.command) {
       result = {
         ...result,
-        command: storedConfig.executable,
+        command: storedConfig.command,
       };
     }
 
