@@ -126,23 +126,33 @@ ${BOLD}Install Options:${RESET}
   ${DIM}--all${RESET}              Install all bundled skills (default if no name given)
   ${DIM}--force${RESET}            Overwrite existing skills
   ${DIM}--agent <id>${RESET}       Install only to specific agent (claude, opencode, droid)
+  ${DIM}--local${RESET}            Install to project-local directory (takes precedence)
+  ${DIM}--global${RESET}           Install to personal/global directory (default)
 
 ${BOLD}Examples:${RESET}
   ralph-tui skills list                    # List all skills per agent
-  ralph-tui skills install                 # Install all skills to all agents
+  ralph-tui skills install                 # Install all skills to global dirs
+  ralph-tui skills install --local         # Install all skills to local project
   ralph-tui skills install --force         # Force reinstall all skills
   ralph-tui skills install ralph-tui-prd   # Install specific skill
   ralph-tui skills install --agent claude  # Install only to Claude Code
-  ralph-tui skills install --agent opencode --force  # Force reinstall to OpenCode
+  ralph-tui skills install --agent claude --local  # Install to .claude/skills/
 
-${BOLD}Supported Agents:${RESET}
-  ${CYAN}claude${RESET}    Claude Code     ~/.claude/skills/
-  ${CYAN}opencode${RESET}  OpenCode        ~/.config/opencode/skills/
-  ${CYAN}droid${RESET}     Factory Droid   ~/.factory/skills/
+${BOLD}Skills Locations:${RESET}
 
-${BOLD}Note:${RESET}
-  Skills are installed to the personal (global) directory by default.
-  These skills are then available to the agent across all projects.
+  ${CYAN}Global (personal)${RESET} - Available across all projects:
+    Claude Code     ~/.claude/skills/
+    OpenCode        ~/.config/opencode/skills/
+    Factory Droid   ~/.factory/skills/
+
+  ${CYAN}Local (project)${RESET} - Takes precedence, version-controllable:
+    Claude Code     .claude/skills/
+    OpenCode        .opencode/skills/
+    Factory Droid   .factory/skills/
+
+${BOLD}Precedence:${RESET}
+  Local (project) skills take precedence over global (personal) skills.
+  This allows project-specific customizations.
 `);
 }
 
@@ -152,6 +162,7 @@ ${BOLD}Note:${RESET}
  */
 async function handleListSkills(): Promise<void> {
   const skills = await listBundledSkills();
+  const cwd = process.cwd();
 
   if (skills.length === 0) {
     console.log(`${YELLOW}No bundled skills found.${RESET}`);
@@ -178,16 +189,26 @@ async function handleListSkills(): Promise<void> {
     const statusIcon = agent.available ? `${GREEN}✓${RESET}` : `${DIM}○${RESET}`;
     const availableText = agent.available ? '' : ` ${DIM}(not installed)${RESET}`;
     console.log(`${statusIcon} ${BOLD}${agent.meta.name}${RESET}${availableText}`);
-    console.log(`  ${DIM}Personal: ${resolveSkillsPath(agent.skillsPaths.personal)}${RESET}`);
+    console.log(`  ${DIM}Global: ${resolveSkillsPath(agent.skillsPaths.personal)}${RESET}`);
+    console.log(`  ${DIM}Local:  ${resolveSkillsPath(agent.skillsPaths.repo, cwd)}${RESET}`);
 
     if (agent.available) {
-      const status = await getSkillStatusForAgent(agent.skillsPaths);
+      const status = await getSkillStatusForAgent(agent.skillsPaths, cwd);
       for (const skill of skills) {
         const skillStatus = status.get(skill.name);
-        const installed = skillStatus?.personal ?? false;
-        const statusText = installed
-          ? `${GREEN}✓ installed${RESET}`
-          : `${DIM}not installed${RESET}`;
+        const globalInstalled = skillStatus?.personal ?? false;
+        const localInstalled = skillStatus?.repo ?? false;
+
+        let statusText: string;
+        if (localInstalled && globalInstalled) {
+          statusText = `${GREEN}✓ local${RESET} ${DIM}+${RESET} ${GREEN}global${RESET}`;
+        } else if (localInstalled) {
+          statusText = `${GREEN}✓ local${RESET}`;
+        } else if (globalInstalled) {
+          statusText = `${GREEN}✓ global${RESET}`;
+        } else {
+          statusText = `${DIM}not installed${RESET}`;
+        }
         console.log(`    ${skill.name}: ${statusText}`);
       }
     }
@@ -195,7 +216,7 @@ async function handleListSkills(): Promise<void> {
   }
 
   console.log(`${DIM}${'─'.repeat(70)}${RESET}`);
-  console.log(`${DIM}Use 'ralph-tui skills install' to install skills${RESET}`);
+  console.log(`${DIM}Use 'ralph-tui skills install' for global, '--local' for project-local${RESET}`);
 }
 
 /**
@@ -206,11 +227,15 @@ function parseInstallArgs(args: string[]): {
   all: boolean;
   force: boolean;
   agentId: string | null;
+  local: boolean;
+  global: boolean;
 } {
   let skillName: string | null = null;
   let all = false;
   let force = false;
   let agentId: string | null = null;
+  let local = false;
+  let global = false;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -219,6 +244,10 @@ function parseInstallArgs(args: string[]): {
       force = true;
     } else if (arg === '--all' || arg === '-a') {
       all = true;
+    } else if (arg === '--local' || arg === '-l') {
+      local = true;
+    } else if (arg === '--global' || arg === '-g') {
+      global = true;
     } else if (arg === '--agent') {
       // Next arg is the agent ID
       if (i + 1 < args.length) {
@@ -237,7 +266,12 @@ function parseInstallArgs(args: string[]): {
     all = true;
   }
 
-  return { skillName, all, force, agentId };
+  // If neither --local nor --global specified, default to global
+  if (!local && !global) {
+    global = true;
+  }
+
+  return { skillName, all, force, agentId, local, global };
 }
 
 /**
@@ -245,7 +279,8 @@ function parseInstallArgs(args: string[]): {
  * Installs skills to all detected agents (or a specific agent).
  */
 async function handleInstallSkills(args: string[]): Promise<void> {
-  const { skillName, force, agentId } = parseInstallArgs(args);
+  const { skillName, force, agentId, local, global } = parseInstallArgs(args);
+  const cwd = process.cwd();
 
   const skills = await listBundledSkills();
 
@@ -289,12 +324,19 @@ async function handleInstallSkills(args: string[]): Promise<void> {
     return;
   }
 
+  // Build location description
+  const locationText = local && global
+    ? 'global + local'
+    : local
+      ? 'local (project)'
+      : 'global';
+
   // Show what we're installing
   const skillText = skillName ? `skill: ${CYAN}${skillName}${RESET}` : 'all skills';
   const agentText = agentId
     ? `to ${CYAN}${agentId}${RESET}`
     : `to ${availableAgents.length} agent(s)`;
-  console.log(`${BOLD}Installing ${skillText} ${agentText}...${RESET}\n`);
+  console.log(`${BOLD}Installing ${skillText} ${agentText} [${locationText}]...${RESET}\n`);
 
   let totalInstalled = 0;
   let totalSkipped = 0;
@@ -303,7 +345,6 @@ async function handleInstallSkills(args: string[]): Promise<void> {
   // Install to each agent
   for (const agent of availableAgents) {
     console.log(`${BOLD}${agent.meta.name}${RESET}`);
-    console.log(`${DIM}${resolveSkillsPath(agent.skillsPaths.personal)}${RESET}`);
 
     const result = await installSkillsForAgent(
       agent.meta.id,
@@ -311,26 +352,28 @@ async function handleInstallSkills(args: string[]): Promise<void> {
       agent.skillsPaths,
       {
         force,
-        personal: true,
-        repo: false,
+        personal: global,
+        repo: local,
+        cwd,
         skillName: skillName ?? undefined,
       }
     );
 
     // Show results for each skill
     for (const [name, targetResults] of result.skills) {
-      // Currently only installing to personal, so check each target result
-      for (const { result: skillResult } of targetResults) {
+      for (const { target, result: skillResult } of targetResults) {
+        const targetLabel = target === 'personal' ? 'global' : 'local';
         if (skillResult.success) {
           if (skillResult.skipped) {
-            console.log(`  ${DIM}⊘${RESET} Skipped: ${name} ${DIM}(already exists)${RESET}`);
+            console.log(`  ${DIM}⊘${RESET} Skipped [${targetLabel}]: ${name} ${DIM}(already exists)${RESET}`);
             totalSkipped++;
           } else {
-            console.log(`  ${GREEN}✓${RESET} Installed: ${CYAN}${name}${RESET}`);
+            console.log(`  ${GREEN}✓${RESET} Installed [${targetLabel}]: ${CYAN}${name}${RESET}`);
+            console.log(`    ${DIM}${skillResult.path}${RESET}`);
             totalInstalled++;
           }
         } else {
-          console.log(`  ${RED}✗${RESET} Failed: ${name} - ${skillResult.error}`);
+          console.log(`  ${RED}✗${RESET} Failed [${targetLabel}]: ${name} - ${skillResult.error}`);
           totalFailed++;
         }
       }
@@ -344,6 +387,10 @@ async function handleInstallSkills(args: string[]): Promise<void> {
 
   if (totalSkipped > 0 && !force) {
     console.log(`\n${DIM}Tip: Use --force to overwrite existing skills${RESET}`);
+  }
+
+  if (local) {
+    console.log(`\n${DIM}Note: Local skills take precedence over global skills.${RESET}`);
   }
 
   if (totalFailed > 0) {

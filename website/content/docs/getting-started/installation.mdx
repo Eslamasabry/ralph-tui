@@ -170,11 +170,25 @@ Ralph TUI includes bundled skills for PRD creation and task conversion. Skills a
 
 ### Supported Agents
 
+**Global (personal)** - Available across all projects:
+
 | Agent | Skills Location |
 |-------|-----------------|
 | Claude Code | `~/.claude/skills/` |
 | OpenCode | `~/.config/opencode/skills/` |
 | Factory Droid | `~/.factory/skills/` |
+
+**Local (project)** - Takes precedence, version-controllable:
+
+| Agent | Skills Location |
+|-------|-----------------|
+| Claude Code | `.claude/skills/` |
+| OpenCode | `.opencode/skills/` |
+| Factory Droid | `.factory/skills/` |
+
+<Callout type="tip">
+Local skills take precedence over global skills, allowing project-specific customizations that can be version-controlled with your project.
+</Callout>
 
 ### Manual Management
 
@@ -182,8 +196,11 @@ Ralph TUI includes bundled skills for PRD creation and task conversion. Skills a
 # List bundled skills and installation status per agent
 ralph-tui skills list
 
-# Install skills to all detected agents
+# Install skills to global directory (default)
 ralph-tui skills install
+
+# Install skills to local project directory
+ralph-tui skills install --local
 
 # Force reinstall (overwrite existing)
 ralph-tui skills install --force
