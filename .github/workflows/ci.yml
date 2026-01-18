@@ -55,45 +55,57 @@ jobs:
 
       - name: Run tests with coverage
         run: |
-          set -o pipefail
           mkdir -p coverage-parts
 
           # Run tests in batches to avoid mock.module() conflicts between test files
           # Each batch outputs its own lcov file for later merging
-          {
-            bun test tests/ --coverage --coverage-reporter=text --coverage-reporter=lcov
-            cp coverage/lcov.info coverage-parts/tests.lcov
 
-            bun test src/commands/doctor.test.ts --coverage --coverage-reporter=text --coverage-reporter=lcov
-            cp coverage/lcov.info coverage-parts/doctor.lcov
+          echo "=== Running tests/ ===" | tee -a coverage-output.txt
+          bun test tests/ --coverage --coverage-reporter=text --coverage-reporter=lcov 2>&1 | tee -a coverage-output.txt
+          cp coverage/lcov.info coverage-parts/tests.lcov
 
-            bun test src/commands/info.test.ts --coverage --coverage-reporter=text --coverage-reporter=lcov
-            cp coverage/lcov.info coverage-parts/info.lcov
+          echo "=== Running doctor.test.ts ===" | tee -a coverage-output.txt
+          bun test src/commands/doctor.test.ts --coverage --coverage-reporter=text --coverage-reporter=lcov 2>&1 | tee -a coverage-output.txt
+          cp coverage/lcov.info coverage-parts/doctor.lcov
 
-            bun test src/commands/skills.test.ts --coverage --coverage-reporter=text --coverage-reporter=lcov
-            cp coverage/lcov.info coverage-parts/skills.lcov
+          echo "=== Running info.test.ts ===" | tee -a coverage-output.txt
+          bun test src/commands/info.test.ts --coverage --coverage-reporter=text --coverage-reporter=lcov 2>&1 | tee -a coverage-output.txt
+          cp coverage/lcov.info coverage-parts/info.lcov
 
-            bun test src/config/ --coverage --coverage-reporter=text --coverage-reporter=lcov
-            cp coverage/lcov.info coverage-parts/config.lcov
+          echo "=== Running skills.test.ts ===" | tee -a coverage-output.txt
+          bun test src/commands/skills.test.ts --coverage --coverage-reporter=text --coverage-reporter=lcov 2>&1 | tee -a coverage-output.txt
+          cp coverage/lcov.info coverage-parts/skills.lcov
 
-            bun test src/engine/ --coverage --coverage-reporter=text --coverage-reporter=lcov
-            cp coverage/lcov.info coverage-parts/engine.lcov
+          echo "=== Running src/config/ ===" | tee -a coverage-output.txt
+          bun test src/config/ --coverage --coverage-reporter=text --coverage-reporter=lcov 2>&1 | tee -a coverage-output.txt
+          cp coverage/lcov.info coverage-parts/config.lcov
 
-            bun test src/plugins/ --coverage --coverage-reporter=text --coverage-reporter=lcov
-            cp coverage/lcov.info coverage-parts/plugins.lcov
+          echo "=== Running src/engine/ ===" | tee -a coverage-output.txt
+          bun test src/engine/ --coverage --coverage-reporter=text --coverage-reporter=lcov 2>&1 | tee -a coverage-output.txt
+          cp coverage/lcov.info coverage-parts/engine.lcov
 
-            bun test src/sandbox/ --coverage --coverage-reporter=text --coverage-reporter=lcov
-            cp coverage/lcov.info coverage-parts/sandbox.lcov
+          echo "=== Running src/plugins/ ===" | tee -a coverage-output.txt
+          bun test src/plugins/ --coverage --coverage-reporter=text --coverage-reporter=lcov 2>&1 | tee -a coverage-output.txt
+          cp coverage/lcov.info coverage-parts/plugins.lcov
 
-            bun test src/setup/ --coverage --coverage-reporter=text --coverage-reporter=lcov
-            cp coverage/lcov.info coverage-parts/setup.lcov
+          echo "=== Running src/sandbox/ ===" | tee -a coverage-output.txt
+          bun test src/sandbox/ --coverage --coverage-reporter=text --coverage-reporter=lcov 2>&1 | tee -a coverage-output.txt
+          cp coverage/lcov.info coverage-parts/sandbox.lcov
 
-            bun test src/templates/ --coverage --coverage-reporter=text --coverage-reporter=lcov
-            cp coverage/lcov.info coverage-parts/templates.lcov
+          echo "=== Running src/setup/ ===" | tee -a coverage-output.txt
+          bun test src/setup/ --coverage --coverage-reporter=text --coverage-reporter=lcov 2>&1 | tee -a coverage-output.txt
+          cp coverage/lcov.info coverage-parts/setup.lcov
 
-            bun test src/tui/ --coverage --coverage-reporter=text --coverage-reporter=lcov
-            cp coverage/lcov.info coverage-parts/tui.lcov
-          } 2>&1 | tee coverage-output.txt
+          echo "=== Running src/templates/ ===" | tee -a coverage-output.txt
+          bun test src/templates/ --coverage --coverage-reporter=text --coverage-reporter=lcov 2>&1 | tee -a coverage-output.txt
+          cp coverage/lcov.info coverage-parts/templates.lcov
+
+          echo "=== Running src/tui/ ===" | tee -a coverage-output.txt
+          bun test src/tui/ --coverage --coverage-reporter=text --coverage-reporter=lcov 2>&1 | tee -a coverage-output.txt
+          cp coverage/lcov.info coverage-parts/tui.lcov
+
+          echo "=== All test batches completed ===" | tee -a coverage-output.txt
+          ls -la coverage-parts/
 
       - name: Merge coverage reports
         run: |
