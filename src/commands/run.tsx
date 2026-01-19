@@ -1688,7 +1688,8 @@ export async function executeRunCommand(args: string[]): Promise<void> {
         trackerName: config.tracker.plugin,
         currentModel: config.model,
       });
-      await remoteServer.start();
+      const serverState = await remoteServer.start();
+      const actualPort = serverState.port;
 
       // Display connection info
       console.log('');
@@ -1696,7 +1697,11 @@ export async function executeRunCommand(args: string[]): Promise<void> {
       console.log('                    Remote Listener Enabled                     ');
       console.log('═══════════════════════════════════════════════════════════════');
       console.log('');
-      console.log(`  Port: ${listenPort}`);
+      if (actualPort !== listenPort) {
+        console.log(`  Port: ${actualPort} (requested ${listenPort} was in use)`);
+      } else {
+        console.log(`  Port: ${actualPort}`);
+      }
       if (isNew) {
         console.log('');
         console.log('  New server token generated:');
@@ -1713,7 +1718,7 @@ export async function executeRunCommand(args: string[]): Promise<void> {
       }
       console.log('');
       console.log('  Connect from another machine:');
-      console.log(`    ralph-tui remote add <alias> <this-host>:${listenPort} --token <token>`);
+      console.log(`    ralph-tui remote add <alias> <this-host>:${actualPort} --token <token>`);
       console.log('');
       console.log('═══════════════════════════════════════════════════════════════');
       console.log('');

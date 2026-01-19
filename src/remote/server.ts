@@ -94,8 +94,11 @@ interface ClientState {
  * Server options
  */
 export interface RemoteServerOptions {
-  /** Port to bind to */
+  /** Port to bind to (will try subsequent ports if in use) */
   port: number;
+
+  /** Maximum number of ports to try if initial port is in use (default: 10) */
+  maxPortRetries?: number;
 
   /** Whether a token is configured (determines bind host) */
   hasToken: boolean;
@@ -169,6 +172,8 @@ export class RemoteServer {
   private engineUnsubscribe: (() => void) | null = null;
   /** Token cleanup interval */
   private tokenCleanupInterval: ReturnType<typeof setInterval> | null = null;
+  /** The actual port the server bound to (may differ from requested if port was in use) */
+  private _actualPort: number | null = null;
 
   constructor(options: RemoteServerOptions) {
     this.options = options;
@@ -198,6 +203,14 @@ export class RemoteServer {
    */
   setTracker(tracker: TrackerPlugin): void {
     this.options.tracker = tracker;
+  }
+
+  /**
+   * Get the actual port the server is bound to.
+   * May differ from requested port if that port was in use.
+   */
+  get actualPort(): number | null {
+    return this._actualPort;
   }
 
   /**
@@ -236,6 +249,7 @@ export class RemoteServer {
 
   /**
    * Start the WebSocket server.
+   * If the requested port is in use, tries subsequent ports up to maxPortRetries.
    */
   async start(): Promise<RemoteServerState> {
     if (this.server) {
@@ -293,36 +307,66 @@ export class RemoteServer {
       },
     };
 
-    this.server = Bun.serve<WebSocketData>({
-      port: this.options.port,
-      hostname: host,
+    // Try binding to port, incrementing if in use
+    const maxRetries = this.options.maxPortRetries ?? 10;
+    let boundPort = this.options.port;
+    let lastError: Error | null = null;
 
-      fetch(req, server) {
-        // Upgrade HTTP request to WebSocket
-        const clientIp = server.requestIP(req)?.address ?? 'unknown';
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      const tryPort = this.options.port + attempt;
+      try {
+        this.server = Bun.serve<WebSocketData>({
+          port: tryPort,
+          hostname: host,
 
-        if (server.upgrade(req, { data: { ip: clientIp } })) {
-          return; // Upgrade successful
-        }
+          fetch(req, server) {
+            // Upgrade HTTP request to WebSocket
+            const clientIp = server.requestIP(req)?.address ?? 'unknown';
 
-        // Non-WebSocket request - return simple info
-        return new Response(JSON.stringify({
-          service: 'ralph-tui-remote',
-          version: '0.2.1',
-          websocket: true,
-        }), {
-          headers: { 'Content-Type': 'application/json' },
+            if (server.upgrade(req, { data: { ip: clientIp } })) {
+              return; // Upgrade successful
+            }
+
+            // Non-WebSocket request - return simple info
+            return new Response(JSON.stringify({
+              service: 'ralph-tui-remote',
+              version: '0.2.1',
+              websocket: true,
+            }), {
+              headers: { 'Content-Type': 'application/json' },
+            });
+          },
+
+          websocket: websocketHandler,
         });
-      },
 
-      websocket: websocketHandler,
-    });
+        // Success - record the port we bound to
+        boundPort = tryPort;
+        break;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        // Check if error is "address in use" - try next port
+        const errorMessage = lastError.message.toLowerCase();
+        if (errorMessage.includes('eaddrinuse') || errorMessage.includes('address already in use') || errorMessage.includes('address in use')) {
+          continue;
+        }
+        // Different error - rethrow
+        throw lastError;
+      }
+    }
 
+    // If we still don't have a server after all retries, throw
+    if (!this.server) {
+      throw lastError ?? new Error(`Failed to bind to any port in range ${this.options.port}-${this.options.port + maxRetries - 1}`);
+    }
+
+    // Store the actual port we bound to
+    this._actualPort = boundPort;
     this.startedAt = new Date().toISOString();
 
     const state: RemoteServerState = {
       running: true,
-      port: this.options.port,
+      port: boundPort,
       host,
       startedAt: this.startedAt,
       connectedClients: 0,
@@ -330,9 +374,10 @@ export class RemoteServer {
     };
 
     await this.auditLogger.logServerEvent('start', {
-      port: this.options.port,
+      port: boundPort,
       host,
       pid: process.pid,
+      requestedPort: this.options.port !== boundPort ? this.options.port : undefined,
     });
 
     // Start periodic cleanup of expired connection tokens (every 5 minutes)
