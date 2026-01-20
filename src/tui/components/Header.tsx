@@ -179,6 +179,7 @@ export function Header({
   currentModel,
   sandboxConfig,
   remoteInfo,
+  trackerRealtimeStatus,
 }: HeaderProps): ReactNode {
   const statusDisplay = getStatusDisplay(status);
   const formattedTime = formatElapsedTime(elapsedTime);
@@ -244,6 +245,12 @@ export function Header({
             <span fg={statusDisplay.color}>{statusDisplay.indicator}</span>
             <span fg={statusDisplay.color}> {statusDisplay.label}</span>
           </text>
+          {trackerRealtimeStatus === 'stale' && (
+            <text>
+              <span fg={colors.fg.dim}> │ </span>
+              <span fg={colors.status.warning}>{statusIndicators.paused} Stale</span>
+            </text>
+          )}
           {taskDisplay && (
             <text>
               <span fg={colors.fg.muted}> → </span>
