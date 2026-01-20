@@ -55,3 +55,6 @@ examples/
 prd-example.json
 coverage/
 .beads/
+
+# Worker
+worktrees
