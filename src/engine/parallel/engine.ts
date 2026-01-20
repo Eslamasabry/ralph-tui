@@ -10,10 +10,13 @@ import type {
   EngineEventListener,
   EngineState,
   IterationResult,
+  TrackerRealtimeStatus,
 } from '../types.js';
 import { getTrackerRegistry } from '../../plugins/trackers/registry.js';
 import { ParallelCoordinator } from './coordinator.js';
 import type { ParallelEvent } from './types.js';
+import { BeadsRealtimeWatcher } from '../beads-realtime.js';
+import { join } from 'node:path';
 
 export interface ParallelEngineOptions {
   maxWorkers: number;
@@ -29,6 +32,7 @@ export class ParallelExecutionEngine implements EngineController {
   private iterationCounter = 0;
   private taskIterations = new Map<string, number>();
   private stopReason: 'completed' | 'max_iterations' | 'interrupted' | 'error' | 'no_tasks' | null = null;
+  private trackerRealtimeWatcher: BeadsRealtimeWatcher | null = null;
 
   constructor(config: RalphConfig, options: ParallelEngineOptions) {
     this.config = config;
@@ -62,6 +66,8 @@ export class ParallelExecutionEngine implements EngineController {
 
     const tasks = await this.tracker.getTasks({ status: ['open', 'in_progress'] });
     this.state.totalTasks = tasks.length;
+
+    this.startTrackerRealtimeWatcher();
 
     await this.coordinator.initialize();
     this.coordinator.on((event) => this.handleParallelEvent(event));
@@ -200,6 +206,67 @@ export class ParallelExecutionEngine implements EngineController {
 
   async dispose(): Promise<void> {
     await this.coordinator.dispose();
+    if (this.trackerRealtimeWatcher) {
+      this.trackerRealtimeWatcher.stop();
+      this.trackerRealtimeWatcher = null;
+    }
+  }
+
+  private startTrackerRealtimeWatcher(): void {
+    if (this.trackerRealtimeWatcher) {
+      this.trackerRealtimeWatcher.stop();
+      this.trackerRealtimeWatcher = null;
+    }
+
+    if (!this.tracker) {
+      return;
+    }
+
+    if (!this.config.tracker.plugin.includes('beads')) {
+      return;
+    }
+
+    const trackerOptions = this.config.tracker.options as Record<string, unknown> | undefined;
+    const workingDir = (trackerOptions?.workingDir as string) ?? this.config.cwd ?? process.cwd();
+    const beadsDir = (trackerOptions?.beadsDir as string) ?? '.beads';
+    const dbPath = join(workingDir, beadsDir, 'db.sqlite');
+
+    this.trackerRealtimeWatcher = new BeadsRealtimeWatcher({
+      dbPath,
+      liveIntervalMs: 1000,
+      fallbackIntervalMs: 5000,
+      onChange: async () => {
+        await this.refreshTasks();
+      },
+      onStatusChange: (status, intervalMs, reason) => {
+        this.setTrackerRealtimeStatus(status, intervalMs, reason);
+      },
+    });
+
+    this.trackerRealtimeWatcher.start();
+  }
+
+  private setTrackerRealtimeStatus(
+    status: TrackerRealtimeStatus,
+    intervalMs: number,
+    reason?: string
+  ): void {
+    if (
+      this.state.trackerRealtimeStatus === status &&
+      this.state.trackerRealtimeIntervalMs === intervalMs
+    ) {
+      return;
+    }
+
+    this.state.trackerRealtimeStatus = status;
+    this.state.trackerRealtimeIntervalMs = intervalMs;
+    this.emit({
+      type: 'tracker:realtime',
+      timestamp: new Date().toISOString(),
+      status,
+      intervalMs,
+      reason,
+    });
   }
 
   private handleParallelEvent(event: ParallelEvent): void {
@@ -252,6 +319,16 @@ export class ParallelExecutionEngine implements EngineController {
         data: event.data,
         iteration,
         taskId: event.taskId,
+      });
+      return;
+    }
+
+    if (event.type === 'parallel:merge-failed') {
+      this.emit({
+        type: 'task:blocked',
+        timestamp: new Date().toISOString(),
+        task: event.task,
+        reason: event.reason,
       });
       return;
     }

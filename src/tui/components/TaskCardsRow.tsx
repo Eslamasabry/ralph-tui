@@ -3,11 +3,11 @@
  * Shows task ID, title, status, and worker/slot label with distinct Active vs Queued visual hierarchy.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useTerminalDimensions } from '@opentui/react';
-import { colors, getTaskStatusColor, getTaskStatusIndicator } from '../theme.js';
-import type { TaskItem } from '../types.js';
+import { colors, formatElapsedTime, getTaskStatusColor, getTaskStatusIndicator } from '../theme.js';
+import type { IterationTimingInfo, TaskItem } from '../types.js';
 
 /**
  * Props for TaskCardsRow component
@@ -17,6 +17,8 @@ export interface TaskCardsRowProps {
   tasks: TaskItem[];
   /** Currently selected task index */
   selectedIndex: number;
+  /** Per-task timing information */
+  timingByTaskId?: Map<string, IterationTimingInfo>;
   /** Whether the panel is focused */
   isFocused?: boolean;
 }
@@ -36,6 +38,25 @@ function truncateText(text: string, maxWidth: number): string {
  */
 function getWorkerLabel(index: number): string {
   return `Slot ${index + 1}`;
+}
+
+function formatTimestamp(isoString?: string): string {
+  if (!isoString) return '—';
+  const date = new Date(isoString);
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function getDurationDisplay(timing: IterationTimingInfo | undefined, nowMs: number): string {
+  if (!timing) return '—';
+  if (timing.isRunning && timing.startedAt) {
+    const durationSeconds = Math.floor((nowMs - new Date(timing.startedAt).getTime()) / 1000);
+    return formatElapsedTime(durationSeconds);
+  }
+  if (timing.durationMs !== undefined) {
+    const durationSeconds = Math.floor(timing.durationMs / 1000);
+    return formatElapsedTime(durationSeconds);
+  }
+  return '—';
 }
 
 /**
@@ -99,12 +120,16 @@ function TaskCard({
   isSelected,
   isFocused,
   pulseOn,
+  timing,
+  nowMs,
 }: {
   task: TaskItem;
   index: number;
   isSelected: boolean;
   isFocused: boolean;
   pulseOn: boolean;
+  timing?: IterationTimingInfo;
+  nowMs: number;
 }): ReactNode {
   const statusColor = getTaskStatusColor(task.status);
   const statusIndicator = getTaskStatusIndicator(task.status);
@@ -125,6 +150,9 @@ function TaskCard({
   // Determine if task is actively running vs queued
   const isRunning = task.status === 'active';
   const statusLabel = isRunning ? 'Active' : 'Queued';
+  const durationDisplay = useMemo(() => getDurationDisplay(timing, nowMs), [timing, nowMs]);
+  const startedDisplay = timing?.startedAt ? formatTimestamp(timing.startedAt) : '—';
+  const endedDisplay = timing?.endedAt ? formatTimestamp(timing.endedAt) : '—';
 
   return (
     <box
@@ -173,9 +201,33 @@ function TaskCard({
                 : colors.fg.secondary
           }
         >
-          {truncateText(task.title, titleMaxWidth)}
+          {isRunning ? (
+            <strong>{truncateText(task.title, titleMaxWidth)}</strong>
+          ) : (
+            truncateText(task.title, titleMaxWidth)
+          )}
         </text>
       </box>
+
+      {timing && (timing.startedAt || timing.endedAt || timing.durationMs !== undefined) && (
+        <box style={{ marginTop: 0, flexDirection: 'row', gap: 2 }}>
+          {isRunning ? (
+            <>
+              <text fg={colors.fg.muted}>Start</text>
+              <text fg={colors.fg.secondary}>{startedDisplay}</text>
+              <text fg={colors.fg.muted}>Dur</text>
+              <text fg={colors.status.info}>{durationDisplay}</text>
+            </>
+          ) : (
+            <>
+              <text fg={colors.fg.muted}>End</text>
+              <text fg={colors.fg.secondary}>{endedDisplay}</text>
+              <text fg={colors.fg.muted}>Dur</text>
+              <text fg={colors.accent.primary}>{durationDisplay}</text>
+            </>
+          )}
+        </box>
+      )}
 
       {/* Task ID and priority/label info (compact) */}
       <box
@@ -207,9 +259,11 @@ function TaskCard({
 export function TaskCardsRow({
   tasks,
   selectedIndex,
+  timingByTaskId,
   isFocused = true,
 }: TaskCardsRowProps): ReactNode {
   const [pulseOn, setPulseOn] = useState(true);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const hasActive = tasks.some((task) => task.status === 'active');
 
   useEffect(() => {
@@ -221,6 +275,18 @@ export function TaskCardsRow({
     const interval = setInterval(() => {
       setPulseOn((prev) => !prev);
     }, 650);
+
+    return () => clearInterval(interval);
+  }, [hasActive]);
+
+  useEffect(() => {
+    if (!hasActive) {
+      return;
+    }
+
+    const interval = setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
 
     return () => clearInterval(interval);
   }, [hasActive]);
@@ -273,6 +339,8 @@ export function TaskCardsRow({
           isSelected={index === selectedIndex}
           isFocused={isFocused}
           pulseOn={pulseOn}
+          timing={timingByTaskId?.get(task.id)}
+          nowMs={nowMs}
         />
       ))}
     </box>

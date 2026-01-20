@@ -6,11 +6,10 @@
  */
 
 import type { ReactNode } from 'react';
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo } from 'react';
 import { colors, getTaskStatusColor, getTaskStatusIndicator } from '../theme.js';
 import type { RightPanelProps, DetailsViewMode, IterationTimingInfo, TaskPriority } from '../types.js';
 import { stripAnsiCodes, type FormattedSegment } from '../../plugins/agents/output-formatting.js';
-import { formatElapsedTime } from '../theme.js';
 import { parseAgentOutput } from '../output-parser.js';
 
 /**
@@ -125,15 +124,6 @@ function extractDescription(description?: string): string {
   }
 
   return result.join('\n').trim();
-}
-
-/**
- * Format an ISO 8601 timestamp to a human-readable time string.
- * Returns time in HH:MM:SS format.
- */
-function formatTimestamp(isoString: string): string {
-  const date = new Date(isoString);
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
 /**
@@ -503,102 +493,6 @@ function TaskMetadataView({
 }
 
 /**
- * Timing summary component for the output view
- * Shows started time immediately, duration that updates every second while running,
- * and ended time when complete. Also displays model info when available.
- */
-function TimingSummary({ timing }: { timing?: IterationTimingInfo }): ReactNode {
-  // Track elapsed time for running iterations
-  const [elapsedMs, setElapsedMs] = useState<number>(0);
-
-  useEffect(() => {
-    if (!timing?.isRunning || !timing?.startedAt) {
-      return;
-    }
-
-    // Calculate initial elapsed time
-    const startTime = new Date(timing.startedAt).getTime();
-    const updateElapsed = () => {
-      setElapsedMs(Date.now() - startTime);
-    };
-
-    // Update immediately
-    updateElapsed();
-
-    // Update every second
-    const interval = setInterval(updateElapsed, 1000);
-
-    return () => clearInterval(interval);
-  }, [timing?.isRunning, timing?.startedAt]);
-
-  if (!timing || (!timing.startedAt && !timing.isRunning)) {
-    return null;
-  }
-
-  // Calculate duration for display
-  let durationDisplay: string;
-  if (timing.isRunning && timing.startedAt) {
-    // Show live elapsed time
-    const durationSeconds = Math.floor(elapsedMs / 1000);
-    durationDisplay = formatElapsedTime(durationSeconds);
-  } else if (timing.durationMs !== undefined) {
-    const durationSeconds = Math.floor(timing.durationMs / 1000);
-    durationDisplay = formatElapsedTime(durationSeconds);
-  } else {
-    durationDisplay = '—';
-  }
-
-  // Parse model info for display
-  const modelDisplay = timing.model
-    ? (() => {
-        const [provider, model] = timing.model!.includes('/') ? timing.model!.split('/') : ['', timing.model!];
-        return { provider, model, full: timing.model!, display: provider ? `${provider}/${model}` : model };
-      })()
-    : null;
-
-  return (
-    <box
-      style={{
-        marginBottom: 1,
-        padding: 1,
-        border: true,
-        borderColor: colors.border.muted,
-        backgroundColor: colors.bg.tertiary,
-      }}
-    >
-      {/* Model info row - show when model is available */}
-      {modelDisplay && (
-        <box style={{ flexDirection: 'row', marginBottom: 1 }}>
-          <text fg={colors.fg.muted}>Model: </text>
-          <text fg={colors.accent.primary}>{modelDisplay.display}</text>
-        </box>
-      )}
-      {/* Timing info row */}
-      <box style={{ flexDirection: 'row', gap: 3 }}>
-        <text fg={colors.fg.muted}>
-          Started:{' '}
-          <span fg={colors.fg.secondary}>
-            {timing.startedAt ? formatTimestamp(timing.startedAt) : '—'}
-          </span>
-        </text>
-        <text fg={colors.fg.muted}>
-          Ended:{' '}
-          <span fg={colors.fg.secondary}>
-            {timing.endedAt ? formatTimestamp(timing.endedAt) : '—'}
-          </span>
-        </text>
-        <text fg={colors.fg.muted}>
-          Duration:{' '}
-          <span fg={timing.isRunning ? colors.status.info : colors.accent.primary}>
-            {durationDisplay}
-          </span>
-        </text>
-      </box>
-    </box>
-  );
-}
-
-/**
  * Prompt preview view - shows the full rendered prompt that will be sent to the agent.
  * Displays the template source indicator and scrollable prompt content.
  *
@@ -712,13 +606,13 @@ function PromptPreviewView({
  * with optional collapsible subagent sections
  */
 function TaskOutputView({
-  task,
+  task: _task,
   currentIteration,
   iterationOutput,
   iterationSegments,
   iterationTiming,
   agentName,
-  currentModel,
+  currentModel: _currentModel,
 }: {
   task: NonNullable<RightPanelProps['selectedTask']>;
   currentIteration: number;
@@ -728,9 +622,6 @@ function TaskOutputView({
   agentName?: string;
   currentModel?: string;
 }): ReactNode {
-  const statusColor = getTaskStatusColor(task.status);
-  const statusIndicator = getTaskStatusIndicator(task.status);
-
   // Check if we're live streaming
   const isLiveStreaming = iterationTiming?.isRunning === true;
 
@@ -753,56 +644,26 @@ function TaskOutputView({
   // Using simple line-based coloring for tool calls instead.
   void iterationSegments;
 
-  // Parse model info for display
-  const modelDisplay = currentModel
-    ? (() => {
-        const [provider, model] = currentModel.includes('/') ? currentModel.split('/') : ['', currentModel];
-        return { provider, model, full: currentModel, display: provider ? `${provider}/${model}` : model };
-      })()
-    : null;
+  void _task;
+  void _currentModel;
 
   return (
-    <box style={{ flexDirection: 'column', padding: 1, flexGrow: 1 }}>
-      {/* Compact task header with agent/model info */}
-      <box style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 1 }}>
-        <box>
-          <text>
-            <span fg={statusColor}>{statusIndicator}</span>
-            <span fg={colors.fg.primary}> {task.title}</span>
-            <span fg={colors.fg.muted}> ({task.id})</span>
-          </text>
-        </box>
-        {(agentName || modelDisplay) && (
-          <box style={{ flexDirection: 'row', gap: 1 }}>
-            {agentName && <text fg={colors.accent.secondary}>{agentName}</text>}
-            {agentName && modelDisplay && <text fg={colors.fg.muted}>|</text>}
-            {modelDisplay && (
-              <text fg={colors.accent.primary}>{modelDisplay.display}</text>
-            )}
-          </box>
-        )}
-      </box>
-
-      {/* Timing summary - shows start/end/duration */}
-      <TimingSummary timing={iterationTiming} />
-
-      {/* Full-height iteration output */}
-      <box
-        title={
-          currentIteration === -1
-            ? 'Historical Output'
-            : currentIteration > 0
-              ? `Iteration ${currentIteration}`
-              : 'Output'
-        }
-        style={{
-          flexGrow: 1,
-          border: true,
-          borderColor: colors.border.normal,
-          backgroundColor: colors.bg.secondary,
-        }}
-      >
-        <scrollbox style={{ flexGrow: 1, padding: 1 }}>
+    <box
+      title={
+        currentIteration === -1
+          ? 'Historical Output'
+          : currentIteration > 0
+            ? `Iteration ${currentIteration}`
+            : 'Output'
+      }
+      style={{
+        flexGrow: 1,
+        border: true,
+        borderColor: colors.border.normal,
+        backgroundColor: colors.bg.secondary,
+      }}
+    >
+      <scrollbox style={{ flexGrow: 1, padding: 1 }}>
           {/* Line-based coloring with tool names in green */}
           {displayOutput !== undefined && displayOutput.length > 0 ? (
             <box style={{ flexDirection: 'column' }}>
@@ -832,6 +693,52 @@ function TaskOutputView({
           ) : (
             <text fg={colors.fg.muted}>Waiting for output...</text>
           )}
+      </scrollbox>
+    </box>
+  );
+}
+
+/**
+ * Raw CLI output view (unparsed), useful for debugging agent/CLI logs.
+ */
+function CliOutputView({
+  task,
+  currentIteration,
+  cliOutput,
+}: {
+  task: NonNullable<RightPanelProps['selectedTask']>;
+  currentIteration: number;
+  cliOutput?: string;
+}): ReactNode {
+  const displayOutput = useMemo(() => {
+    if (!cliOutput) return undefined;
+    return stripAnsiCodes(cliOutput);
+  }, [cliOutput]);
+
+  return (
+    <box style={{ flexGrow: 1, flexDirection: 'column' }}>
+      <box style={{ marginBottom: 1 }}>
+        <text fg={colors.fg.muted}>
+          Raw CLI Logs • Iter {currentIteration} • {task.id}
+        </text>
+      </box>
+      <box style={{ flexGrow: 1 }}>
+        <scrollbox height="100%" focused>
+          {displayOutput !== undefined && displayOutput.length > 0 ? (
+            <box style={{ flexDirection: 'column', gap: 0 }}>
+              {displayOutput.split('\n').map((line, i) => (
+                <text key={i} fg={colors.fg.secondary}>
+                  {line}
+                </text>
+              ))}
+            </box>
+          ) : displayOutput === '' ? (
+            <text fg={colors.fg.muted}>No CLI output captured</text>
+          ) : currentIteration === 0 ? (
+            <text fg={colors.fg.muted}>Task not yet executed</text>
+          ) : (
+            <text fg={colors.fg.muted}>Waiting for CLI output...</text>
+          )}
         </scrollbox>
       </box>
     </box>
@@ -846,10 +753,9 @@ function TaskDetails({
   currentIteration,
   iterationOutput,
   iterationSegments,
+  cliOutput,
   viewMode = 'details',
-  iterationTiming,
   agentName,
-  currentModel,
   promptPreview,
   templateSource,
 }: {
@@ -857,10 +763,9 @@ function TaskDetails({
   currentIteration: number;
   iterationOutput?: string;
   iterationSegments?: FormattedSegment[];
+  cliOutput?: string;
   viewMode?: DetailsViewMode;
-  iterationTiming?: IterationTimingInfo;
   agentName?: string;
-  currentModel?: string;
   promptPreview?: string;
   templateSource?: string;
 }): ReactNode {
@@ -871,9 +776,7 @@ function TaskDetails({
         currentIteration={currentIteration}
         iterationOutput={iterationOutput}
         iterationSegments={iterationSegments}
-        iterationTiming={iterationTiming}
         agentName={agentName}
-        currentModel={currentModel}
       />
     );
   }
@@ -884,6 +787,16 @@ function TaskDetails({
         task={task}
         promptPreview={promptPreview}
         templateSource={templateSource}
+      />
+    );
+  }
+
+  if (viewMode === 'cli') {
+    return (
+      <CliOutputView
+        task={task}
+        currentIteration={currentIteration}
+        cliOutput={cliOutput}
       />
     );
   }
@@ -899,10 +812,11 @@ export function RightPanel({
   currentIteration,
   iterationOutput,
   iterationSegments,
+  cliOutput,
   viewMode = 'details',
-  iterationTiming,
+  iterationTiming: _iterationTiming,
   agentName,
-  currentModel,
+  currentModel: _currentModel,
   promptPreview,
   templateSource,
   isViewingRemote = false,
@@ -913,6 +827,7 @@ export function RightPanel({
   const modeIndicators: Record<typeof viewMode, string> = {
     details: '[Details]',
     output: '[Output]',
+    cli: '[CLI]',
     prompt: '[Prompt]',
   };
   const modeIndicator = modeIndicators[viewMode];
@@ -937,10 +852,9 @@ export function RightPanel({
           currentIteration={currentIteration}
           iterationOutput={iterationOutput}
           iterationSegments={iterationSegments}
+          cliOutput={cliOutput}
           viewMode={viewMode}
-          iterationTiming={iterationTiming}
           agentName={agentName}
-          currentModel={currentModel}
           promptPreview={promptPreview}
           templateSource={templateSource}
         />

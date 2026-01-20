@@ -344,27 +344,7 @@ export class JsonTrackerPlugin extends BaseTrackerPlugin {
     return lockDir;
   }
 
-  override async claimTask(id: string, workerId: string): Promise<boolean> {
-    const lockDir = await this.getClaimLockDir();
-    const lockPath = join(lockDir, `${id}.lock`);
-
-    try {
-      const handle = await open(lockPath, 'wx');
-      await handle.writeFile(
-        JSON.stringify({ taskId: id, workerId, claimedAt: new Date().toISOString() }),
-        'utf-8'
-      );
-      await handle.close();
-      return true;
-    } catch (err) {
-      if (err && typeof err === 'object' && 'code' in err && err.code === 'EEXIST') {
-        return false;
-      }
-      throw err;
-    }
-  }
-
-  override async releaseTask(id: string, _workerId: string): Promise<void> {
+  private async removeClaimLock(id: string): Promise<void> {
     const lockDir = await this.getClaimLockDir();
     const lockPath = join(lockDir, `${id}.lock`);
     try {
@@ -375,6 +355,43 @@ export class JsonTrackerPlugin extends BaseTrackerPlugin {
       }
       throw err;
     }
+  }
+
+  override async claimTask(id: string, workerId: string): Promise<boolean> {
+    const lockDir = await this.getClaimLockDir();
+    const lockPath = join(lockDir, `${id}.lock`);
+
+    const tryCreateLock = async (): Promise<boolean> => {
+      try {
+        const handle = await open(lockPath, 'wx');
+        await handle.writeFile(
+          JSON.stringify({ taskId: id, workerId, claimedAt: new Date().toISOString() }),
+          'utf-8'
+        );
+        await handle.close();
+        return true;
+      } catch (err) {
+        if (err && typeof err === 'object' && 'code' in err && err.code === 'EEXIST') {
+          return false;
+        }
+        throw err;
+      }
+    };
+
+    let locked = await tryCreateLock();
+    if (!locked) {
+      const existing = await this.getTask(id);
+      if (existing && existing.status !== 'in_progress') {
+        await unlink(lockPath).catch(() => undefined);
+        locked = await tryCreateLock();
+      }
+    }
+
+    return locked;
+  }
+
+  override async releaseTask(id: string, _workerId: string): Promise<void> {
+    await this.removeClaimLock(id);
   }
 
   override async initialize(config: Record<string, unknown>): Promise<void> {
@@ -550,6 +567,8 @@ export class JsonTrackerPlugin extends BaseTrackerPlugin {
 
       // Write back to file
       await this.writePrd(prd);
+
+      await this.removeClaimLock(id);
 
       return {
         success: true,

@@ -207,12 +207,19 @@ export type EngineEventType =
   | 'task:selected'
   | 'task:activated'
   | 'task:completed'
+  | 'task:blocked'
   | 'agent:output'
   | 'agent:switched'
   | 'agent:all-limited'
   | 'agent:recovery-attempted'
   | 'all:complete'
-  | 'tasks:refreshed';
+  | 'tasks:refreshed'
+  | 'tracker:realtime';
+
+/**
+ * Tracker realtime status
+ */
+export type TrackerRealtimeStatus = 'live' | 'stale';
 
 /**
  * Base engine event
@@ -435,6 +442,17 @@ export interface TaskCompletedEvent extends EngineEventBase {
 }
 
 /**
+ * Task blocked event (e.g., merge conflict)
+ */
+export interface TaskBlockedEvent extends EngineEventBase {
+  type: 'task:blocked';
+  /** Blocked task */
+  task: TrackerTask;
+  /** Reason for blocking */
+  reason: string;
+}
+
+/**
  * Agent output event (streaming)
  */
 export interface AgentOutputEvent extends EngineEventBase {
@@ -517,6 +535,19 @@ export interface TasksRefreshedEvent extends EngineEventBase {
 }
 
 /**
+ * Tracker realtime status event
+ */
+export interface TrackerRealtimeEvent extends EngineEventBase {
+  type: 'tracker:realtime';
+  /** Current realtime status */
+  status: TrackerRealtimeStatus;
+  /** Polling interval used for this mode */
+  intervalMs: number;
+  /** Optional reason for fallback */
+  reason?: string;
+}
+
+/**
  * Union of all engine events
  */
 export type EngineEvent =
@@ -536,12 +567,14 @@ export type EngineEvent =
   | TaskSelectedEvent
   | TaskActivatedEvent
   | TaskCompletedEvent
+  | TaskBlockedEvent
   | AgentOutputEvent
   | AgentSwitchedEvent
   | AllAgentsLimitedEvent
   | AgentRecoveryAttemptedEvent
   | AllCompleteEvent
-  | TasksRefreshedEvent;
+  | TasksRefreshedEvent
+  | TrackerRealtimeEvent;
 
 /**
  * Event listener function type
@@ -633,4 +666,9 @@ export interface EngineState {
    * Persists across iterations until primary agent is recovered.
    */
   rateLimitState: RateLimitState | null;
+
+  /** Tracker realtime status (if supported by tracker) */
+  trackerRealtimeStatus?: TrackerRealtimeStatus;
+  /** Polling interval for realtime/fallback mode */
+  trackerRealtimeIntervalMs?: number;
 }

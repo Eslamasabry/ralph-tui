@@ -663,6 +663,8 @@ export class RemoteServer {
       currentStderr: engineState.currentStderr,
       activeAgent: engineState.activeAgent,
       rateLimitState: engineState.rateLimitState,
+      trackerRealtimeStatus: engineState.trackerRealtimeStatus,
+      trackerRealtimeIntervalMs: engineState.trackerRealtimeIntervalMs,
       maxIterations: iterationInfo?.maxIterations ?? 0,
       tasks: [], // Will be populated by get_tasks
       // Include config info for remote TUI display

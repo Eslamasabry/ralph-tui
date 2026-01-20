@@ -37,7 +37,14 @@ import { Toast, formatConnectionToast } from './Toast.js';
 import type { ConnectionToastMessage } from './Toast.js';
 import type { InstanceTab } from '../../remote/client.js';
 import { addRemote, removeRemote, getRemote } from '../../remote/config.js';
-import type { EngineEvent, EngineController, IterationResult, ActiveAgentState, RateLimitState } from '../../engine/types.js';
+import type {
+  EngineEvent,
+  EngineController,
+  IterationResult,
+  ActiveAgentState,
+  RateLimitState,
+  TrackerRealtimeStatus,
+} from '../../engine/types.js';
 import type { TrackerTask } from '../../plugins/trackers/types.js';
 import type { StoredConfig, SubagentDetailLevel, SandboxConfig, SandboxMode } from '../../config/types.js';
 import type { AgentPluginMeta } from '../../plugins/agents/types.js';
@@ -374,6 +381,7 @@ export function RunApp({
   });
   const [currentOutput, setCurrentOutput] = useState('');
   const [currentSegments, setCurrentSegments] = useState<FormattedSegment[]>([]);
+  const [currentCliOutput, setCurrentCliOutput] = useState('');
   const [parallelOutputs, setParallelOutputs] = useState<Map<string, string>>(() => new Map());
   const [parallelTimings, setParallelTimings] = useState<Map<string, IterationTimingInfo>>(() => new Map());
   const [parallelIterations, setParallelIterations] = useState<Map<string, number>>(() => new Map());
@@ -483,6 +491,8 @@ export function RunApp({
   const [activeAgentState, setActiveAgentState] = useState<ActiveAgentState | null>(null);
   // Rate limit state from engine - tracks primary agent rate limiting
   const [rateLimitState, setRateLimitState] = useState<RateLimitState | null>(null);
+  // Tracker realtime status (live vs fallback polling)
+  const [trackerRealtimeStatus, setTrackerRealtimeStatus] = useState<TrackerRealtimeStatus | undefined>(undefined);
 
   // Remote viewing state
   const isViewingRemote = selectedTabIndex > 0;
@@ -494,6 +504,7 @@ export function RunApp({
   const [remoteCurrentTaskId, setRemoteCurrentTaskId] = useState<string | undefined>(undefined);
   const [remoteActiveAgent, setRemoteActiveAgent] = useState<ActiveAgentState | null>(null);
   const [remoteRateLimitState, setRemoteRateLimitState] = useState<RateLimitState | null>(null);
+  const [remoteTrackerRealtimeStatus, setRemoteTrackerRealtimeStatus] = useState<TrackerRealtimeStatus | undefined>(undefined);
   const [remoteCurrentTaskTitle, setRemoteCurrentTaskTitle] = useState<string | undefined>(undefined);
   const [remoteAgentName, setRemoteAgentName] = useState<string | undefined>(undefined);
   const [remoteTrackerName, setRemoteTrackerName] = useState<string | undefined>(undefined);
@@ -562,6 +573,7 @@ export function RunApp({
         if (state.rateLimitState) {
           setRemoteRateLimitState(state.rateLimitState);
         }
+        setRemoteTrackerRealtimeStatus(state.trackerRealtimeStatus);
         // Capture remote config info for display
         if (state.agentName) {
           setRemoteAgentName(state.agentName);
@@ -687,6 +699,9 @@ export function RunApp({
             setRemoteRateLimitState(event.rateLimitState);
           }
           break;
+        case 'tracker:realtime':
+          setRemoteTrackerRealtimeStatus(event.status);
+          break;
       }
     });
 
@@ -703,6 +718,7 @@ export function RunApp({
   const displayMaxIterations = isViewingRemote ? remoteMaxIterations : maxIterations;
   const displayCurrentTaskId = isViewingRemote ? remoteCurrentTaskId : currentTaskId;
   const displayCurrentTaskTitle = isViewingRemote ? remoteCurrentTaskTitle : currentTaskTitle;
+  const displayTrackerRealtimeStatus = isViewingRemote ? remoteTrackerRealtimeStatus : trackerRealtimeStatus;
 
   // Compute display agent name - prefer active agent from engine state, fallback to config
   // For remote viewing, use remote active agent state, then remote config, then local config
@@ -880,6 +896,7 @@ export function RunApp({
         case 'iteration:started':
           setCurrentIteration(event.iteration);
           setCurrentOutput('');
+          setCurrentCliOutput('');
           setCurrentSegments([]);
           // Reset the streaming parser for the new iteration
           outputParserRef.current.reset();
@@ -1000,22 +1017,36 @@ export function RunApp({
           );
           break;
 
+        case 'task:blocked':
+          setTasks((prev) =>
+            prev.map((t) =>
+              t.id === event.task.id ? { ...t, status: 'blocked' as TaskStatus } : t
+            )
+          );
+          setInfoFeedback(`Merge blocked: ${event.reason}`);
+          break;
+
         case 'agent:output':
-          if (event.stream === 'stdout') {
+          if (event.stream === 'stdout' || event.stream === 'stderr') {
             const taskId = event.taskId;
             if (taskId) {
               setParallelOutputs((prev) => {
                 const next = new Map(prev);
                 const existing = next.get(taskId) ?? '';
-                next.set(taskId, existing + event.data);
+                const prefix = event.stream === 'stderr' ? '[stderr] ' : '';
+                next.set(taskId, existing + prefix + event.data);
                 return next;
               });
             } else {
-              // Use streaming parser to extract readable content (filters out verbose JSONL)
-              outputParserRef.current.push(event.data);
-              setCurrentOutput(outputParserRef.current.getOutput());
-              // Also update segments for TUI-native color rendering
-              setCurrentSegments(outputParserRef.current.getSegments());
+              const prefix = event.stream === 'stderr' ? '[stderr] ' : '';
+              setCurrentCliOutput((prev) => prev + prefix + event.data);
+              if (event.stream === 'stdout') {
+                // Use streaming parser to extract readable content (filters out verbose JSONL)
+                outputParserRef.current.push(event.data);
+                setCurrentOutput(outputParserRef.current.getOutput());
+                // Also update segments for TUI-native color rendering
+                setCurrentSegments(outputParserRef.current.getSegments());
+              }
             }
           }
           // Always refresh subagent tree from engine (subagent events are processed in engine).
@@ -1071,6 +1102,9 @@ export function RunApp({
           // Update maxIterations state when iterations are removed at runtime
           setMaxIterations(event.newMax);
           break;
+        case 'tracker:realtime':
+          setTrackerRealtimeStatus(event.status);
+          break;
       }
     });
 
@@ -1111,6 +1145,7 @@ export function RunApp({
     if (state.rateLimitState) {
       setRateLimitState(state.rateLimitState);
     }
+    setTrackerRealtimeStatus(state.trackerRealtimeStatus);
   }, [engine, agentName]);
 
   // Sync task selection → agent tree selection
@@ -1336,10 +1371,16 @@ export function RunApp({
         // so we can't distinguish between "stop" and "copy". Users should use 'q' to quit.
 
         case 'v':
-          // Toggle between tasks and iterations view (only if not in detail view)
-          if (viewMode !== 'iteration-detail') {
-            setViewMode((prev) => (prev === 'tasks' ? 'iterations' : 'tasks'));
+          // Shift+V toggles tasks/iterations view
+          if (key.sequence === 'V') {
+            if (viewMode !== 'iteration-detail') {
+              setViewMode((prev) => (prev === 'tasks' ? 'iterations' : 'tasks'));
+            }
+            break;
           }
+
+          // lowercase 'v' toggles CLI log view in right panel
+          setDetailsViewMode((prev) => (prev === 'cli' ? 'output' : 'cli'));
           break;
 
         case 'd':
@@ -1539,7 +1580,7 @@ export function RunApp({
             // lowercase 'o': Cycle through views
             // The effect handles generating the preview when detailsViewMode changes to 'prompt'
             setDetailsViewMode((prev) => {
-              const modes: DetailsViewMode[] = ['details', 'output', 'prompt'];
+              const modes: DetailsViewMode[] = ['details', 'output', 'cli', 'prompt'];
               const currentIdx = modes.indexOf(prev);
               const nextIdx = (currentIdx + 1) % modes.length;
               return modes[nextIdx]!;
@@ -1857,6 +1898,18 @@ export function RunApp({
     return { iteration: 0, output: undefined, segments: undefined, timing: undefined };
   }, [effectiveTaskId, selectedTask, selectedIteration, viewMode, currentTaskId, currentIteration, currentOutput, currentSegments, iterations, historicalOutputCache, currentIterationStartedAt, isViewingRemote, remoteStatus, remoteCurrentIteration, remoteOutput, remoteIterationCache, remoteCurrentTaskId, parallelOutputs, parallelTimings, parallelIterations]);
 
+  const displayCliOutput = useMemo(() => {
+    if (isViewingRemote) {
+      return remoteOutput || undefined;
+    }
+
+    if (effectiveTaskId && parallelOutputs.has(effectiveTaskId)) {
+      return parallelOutputs.get(effectiveTaskId);
+    }
+
+    return currentCliOutput || undefined;
+  }, [isViewingRemote, remoteOutput, effectiveTaskId, parallelOutputs, currentCliOutput]);
+
   // Compute the actual output to display based on selectedSubagentId
   // When a subagent is selected (not task root), try to get its specific output
   // NOTE: Only use selectedSubagentId when viewing the current task - subagent tree
@@ -2020,6 +2073,7 @@ export function RunApp({
       total: sourceTasks.length,
       active: sourceTasks.filter((t) => t.status === 'active').length,
       queued: sourceTasks.filter((t) => t.status === 'actionable' || t.status === 'pending').length,
+      blocked: sourceTasks.filter((t) => t.status === 'blocked').length,
       completed: sourceTasks.filter((t) => t.status === 'done' || t.status === 'closed').length,
       failed: sourceTasks.filter((t) => t.status === 'error').length,
     };
@@ -2245,6 +2299,7 @@ export function RunApp({
         currentModel={displayModel}
         sandboxConfig={isViewingRemote ? remoteSandboxConfig : sandboxConfig}
         resolvedSandboxMode={isViewingRemote ? remoteResolvedSandboxMode : resolvedSandboxMode}
+        trackerRealtimeStatus={displayTrackerRealtimeStatus}
         remoteInfo={
           isViewingRemote && instanceTabs?.[selectedTabIndex]
             ? {
@@ -2318,18 +2373,20 @@ export function RunApp({
               }}
             >
               {/* Dashboard Banner - shows task counts */}
-              <DashboardBanner
-                totalTasks={taskCounts.total}
-                activeTasks={taskCounts.active}
-                queuedTasks={taskCounts.queued}
-                completedTasks={taskCounts.completed}
-                failedTasks={taskCounts.failed}
-              />
+            <DashboardBanner
+              totalTasks={taskCounts.total}
+              activeTasks={taskCounts.active}
+              queuedTasks={taskCounts.queued}
+              blockedTasks={taskCounts.blocked}
+              completedTasks={taskCounts.completed}
+              failedTasks={taskCounts.failed}
+            />
 
               {/* Task Cards Row - horizontal cards for tasks */}
               <TaskCardsRow
                 tasks={runningTasks}
                 selectedIndex={selectedIndex}
+                timingByTaskId={parallelTimings}
                 isFocused={!subagentPanelVisible || focusedPane === 'output'}
               />
             </box>
@@ -2345,6 +2402,7 @@ export function RunApp({
                 currentIteration={selectedTaskIteration.iteration}
                 iterationOutput={displayIterationOutput}
                 iterationSegments={selectedTaskIteration.segments}
+                cliOutput={displayCliOutput}
                 viewMode={detailsViewMode}
                 iterationTiming={selectedTaskIteration.timing}
                 agentName={displayAgentInfo.agent}

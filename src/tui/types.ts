@@ -4,7 +4,13 @@
  */
 
 import type { TaskStatus, RalphStatus } from './theme.js';
-import type { IterationResult, SubagentTreeNode, ActiveAgentState, RateLimitState } from '../engine/types.js';
+import type {
+  IterationResult,
+  SubagentTreeNode,
+  ActiveAgentState,
+  RateLimitState,
+  TrackerRealtimeStatus,
+} from '../engine/types.js';
 import type { TaskPriority } from '../plugins/trackers/types.js';
 import type { SubagentDetailLevel, SandboxConfig, SandboxMode } from '../config/types.js';
 import type { FormattedSegment } from '../plugins/agents/output-formatting.js';
@@ -111,6 +117,8 @@ export interface HeaderProps {
     host: string;
     port: number;
   };
+  /** Tracker realtime status (live vs fallback polling) */
+  trackerRealtimeStatus?: TrackerRealtimeStatus;
 }
 
 /**
@@ -133,7 +141,7 @@ export interface LeftPanelProps {
  * - 'output': Show full-height scrollable iteration output
  * - 'prompt': Show the rendered prompt that will be sent to the agent
  */
-export type DetailsViewMode = 'details' | 'output' | 'prompt';
+export type DetailsViewMode = 'details' | 'output' | 'cli' | 'prompt';
 
 /**
  * Timing information for an iteration (for output view display)
@@ -166,6 +174,8 @@ export interface RightPanelProps {
   currentIteration: number;
   /** Current iteration output/log (legacy string format) */
   iterationOutput?: string;
+  /** Raw CLI output/log stream (unparsed) */
+  cliOutput?: string;
   /** Current iteration output segments for TUI-native color rendering */
   iterationSegments?: FormattedSegment[];
   /** View mode for the details panel (details or output) */

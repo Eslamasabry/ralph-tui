@@ -11,10 +11,13 @@ import { getRecentProgressSummary, getCodebasePatternsForPrompt } from '../../lo
 export async function buildParallelPrompt(
   task: TrackerTask,
   config: RalphConfig,
-  tracker?: TrackerPlugin
+  tracker?: TrackerPlugin,
+  worktreePath?: string
 ): Promise<string> {
-  const recentProgress = await getRecentProgressSummary(config.cwd, 5);
-  const codebasePatterns = await getCodebasePatternsForPrompt(config.cwd);
+  const cwd = worktreePath ?? config.cwd;
+  const workerConfig: RalphConfig = { ...config, cwd };
+  const recentProgress = await getRecentProgressSummary(cwd, 5);
+  const codebasePatterns = await getCodebasePatternsForPrompt(cwd);
   const trackerTemplate = tracker?.getTemplate?.();
   const prdContext = await tracker?.getPrdContext?.();
 
@@ -24,10 +27,25 @@ export async function buildParallelPrompt(
     prd: prdContext ?? undefined,
   };
 
-  const result = renderPrompt(task, config, undefined, extendedContext, trackerTemplate);
+  const result = renderPrompt(task, workerConfig, undefined, extendedContext, trackerTemplate);
 
   if (result.success && result.prompt) {
-    return result.prompt;
+    return [
+      result.prompt,
+      '',
+      '## Worktree + Merge Phase',
+      '- You are working in an isolated git worktree.',
+      '- Do NOT merge, rebase, or push to main.',
+      '- Do NOT switch branches (no `git checkout main`).',
+      '- Do NOT use `bd` or modify `.beads` / `.ralph-tui`.',
+      '- Do NOT run tests or lint unless explicitly asked.',
+      '- After finishing, ensure your changes are committed in THIS worktree.',
+      '- Commit message format: "<task-id>: <short title>".',
+      '- The coordinator will cherry-pick your commit into main.',
+      '',
+      '## Completion',
+      'When finished, output: <promise>COMPLETE</promise>',
+    ].join('\n');
   }
 
   console.error(`Template rendering failed: ${result.error}`);
@@ -47,6 +65,17 @@ export async function buildParallelPrompt(
   lines.push('## Instructions');
   lines.push('Complete the task described above. When finished, signal completion with:');
   lines.push('<promise>COMPLETE</promise>');
+
+  lines.push('');
+  lines.push('## Worktree + Merge Phase');
+  lines.push('- You are working in an isolated git worktree.');
+  lines.push('- Do NOT merge, rebase, or push to main.');
+  lines.push('- Do NOT switch branches (no `git checkout main`).');
+  lines.push('- Do NOT use `bd` or modify `.beads` / `.ralph-tui`.');
+  lines.push('- Do NOT run tests or lint unless explicitly asked.');
+  lines.push('- After finishing, ensure your changes are committed in THIS worktree.');
+  lines.push('- Commit message format: "<task-id>: <short title>".');
+  lines.push('- The coordinator will cherry-pick your commit into main.');
 
   return lines.join('\n');
 }

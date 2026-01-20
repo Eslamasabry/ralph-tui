@@ -3,6 +3,7 @@
  */
 
 import type { RalphConfig } from '../../config/types.js';
+import { spawn } from 'node:child_process';
 import type { TrackerPlugin, TrackerTask } from '../../plugins/trackers/types.js';
 import type { AgentPlugin } from '../../plugins/agents/types.js';
 import { getAgentRegistry } from '../../plugins/agents/registry.js';
@@ -24,6 +25,10 @@ export class ParallelCoordinator {
   private listeners: Array<(event: ParallelEvent) => void> = [];
   private running = false;
   private paused = false;
+  private mergeQueue: Array<{ task: TrackerTask; workerId: string; commit: string }> = [];
+  private merging = false;
+  private pendingMergeCounts = new Map<string, number>();
+  private workerBaseCommits = new Map<string, string>();
 
   constructor(config: RalphConfig, options: ParallelCoordinatorOptions) {
     this.config = config;
@@ -64,6 +69,7 @@ export class ParallelCoordinator {
 
   private async initializeWorkers(): Promise<void> {
     const agentRegistry = getAgentRegistry();
+    const baseCommit = await this.resolveCommit('HEAD');
 
     for (let i = 0; i < this.maxWorkers; i++) {
       const workerId = `worker-${i + 1}`;
@@ -76,6 +82,7 @@ export class ParallelCoordinator {
 
       const agent = await this.createAgentInstance(agentRegistry);
       const worker = new ParallelWorker(workerId, worktreePath, agent, this.config);
+      this.workerBaseCommits.set(workerId, baseCommit);
       this.workers.push(worker);
     }
   }
@@ -120,9 +127,12 @@ export class ParallelCoordinator {
       if (!task) {
         const busyWorkers = this.workers.some((worker) => worker.isBusy());
         if (!busyWorkers) {
-          break;
+          const hasPending = await this.hasPendingWork();
+          if (!hasPending) {
+            break;
+          }
         }
-        await this.delay(100);
+        await this.delay(150);
         continue;
       }
 
@@ -164,7 +174,7 @@ export class ParallelCoordinator {
   private async runTaskOnWorker(worker: ParallelWorker, task: TrackerTask): Promise<void> {
     if (!this.tracker) return;
 
-    const prompt = await buildParallelPrompt(task, this.config, this.tracker);
+    const prompt = await buildParallelPrompt(task, this.config, this.tracker, worker.worktreePath);
 
     this.emit({ type: 'parallel:task-started', timestamp: new Date().toISOString(), workerId: worker.workerId, task });
 
@@ -223,7 +233,16 @@ export class ParallelCoordinator {
     if (!this.tracker) return;
 
     if (taskResult.completed) {
-      await this.tracker.completeTask(taskResult.task.id, 'Completed by parallel worker');
+      const commits = await this.collectCommits(taskResult.task, workerId);
+      if (commits.length === 0) {
+        await this.tracker.completeTask(taskResult.task.id, 'Completed by parallel worker');
+        return;
+      }
+
+      this.pendingMergeCounts.set(taskResult.task.id, commits.length);
+      for (const commit of commits) {
+        this.enqueueMerge({ task: taskResult.task, workerId, commit });
+      }
       return;
     }
 
@@ -234,6 +253,258 @@ export class ParallelCoordinator {
   private async getNextReadyTask(): Promise<TrackerTask | undefined> {
     if (!this.tracker) return undefined;
     return this.tracker.getNextTask({ status: 'open', ready: true });
+  }
+
+  private async hasPendingWork(): Promise<boolean> {
+    if (!this.tracker) return false;
+    const tasks = await this.tracker.getTasks({ status: ['open', 'in_progress'] });
+    return tasks.length > 0;
+  }
+
+  private enqueueMerge(entry: { task: TrackerTask; workerId: string; commit: string }): void {
+    this.mergeQueue.push(entry);
+    this.emit({
+      type: 'parallel:merge-queued',
+      timestamp: new Date().toISOString(),
+      workerId: entry.workerId,
+      task: entry.task,
+      commit: entry.commit,
+    });
+    void this.processMergeQueue();
+  }
+
+  private async processMergeQueue(): Promise<void> {
+    if (this.merging) return;
+    this.merging = true;
+
+    while (this.mergeQueue.length > 0) {
+      const entry = this.mergeQueue.shift();
+      if (!entry) break;
+
+      const clean = await this.isRepoClean(this.config.cwd);
+      if (!clean) {
+        const reason = 'Main working tree has uncommitted changes. Resolve before merge.';
+        this.emit({
+          type: 'parallel:merge-failed',
+          timestamp: new Date().toISOString(),
+          workerId: entry.workerId,
+          task: entry.task,
+          commit: entry.commit,
+          reason,
+        });
+        continue;
+      }
+
+      const result = await this.execGitIn(this.config.cwd, ['cherry-pick', entry.commit]);
+      if (result.exitCode !== 0) {
+        await this.execGitIn(this.config.cwd, ['cherry-pick', '--abort']);
+        const resolved = await this.attemptMergeResolution(entry);
+        if (!resolved.success || !resolved.commit) {
+          const stderr = result.stderr.trim();
+          const reason = resolved.reason ?? (stderr || 'Cherry-pick failed');
+          this.emit({
+            type: 'parallel:merge-failed',
+            timestamp: new Date().toISOString(),
+            workerId: entry.workerId,
+            task: entry.task,
+            commit: entry.commit,
+            reason,
+          });
+          continue;
+        }
+
+        const resolvedResult = await this.execGitIn(this.config.cwd, ['cherry-pick', resolved.commit]);
+        if (resolvedResult.exitCode !== 0) {
+          await this.execGitIn(this.config.cwd, ['cherry-pick', '--abort']);
+          const reason = resolvedResult.stderr.trim() || 'Cherry-pick failed after auto-resolve';
+          this.emit({
+            type: 'parallel:merge-failed',
+            timestamp: new Date().toISOString(),
+            workerId: entry.workerId,
+            task: entry.task,
+            commit: resolved.commit,
+            reason,
+          });
+          continue;
+        }
+
+        this.emit({
+          type: 'parallel:merge-succeeded',
+          timestamp: new Date().toISOString(),
+          workerId: entry.workerId,
+          task: entry.task,
+          commit: resolved.commit,
+        });
+
+        const remaining = (this.pendingMergeCounts.get(entry.task.id) ?? 1) - 1;
+        if (remaining <= 0) {
+          this.pendingMergeCounts.delete(entry.task.id);
+          await this.tracker?.completeTask(entry.task.id, 'Completed by parallel worker');
+        } else {
+          this.pendingMergeCounts.set(entry.task.id, remaining);
+        }
+        continue;
+      }
+
+      this.emit({
+        type: 'parallel:merge-succeeded',
+        timestamp: new Date().toISOString(),
+        workerId: entry.workerId,
+        task: entry.task,
+        commit: entry.commit,
+      });
+
+      const remaining = (this.pendingMergeCounts.get(entry.task.id) ?? 1) - 1;
+      if (remaining <= 0) {
+        this.pendingMergeCounts.delete(entry.task.id);
+        await this.tracker?.completeTask(entry.task.id, 'Completed by parallel worker');
+      } else {
+        this.pendingMergeCounts.set(entry.task.id, remaining);
+      }
+    }
+
+    this.merging = false;
+  }
+
+  private async collectCommits(task: TrackerTask, workerId: string): Promise<string[]> {
+    const worker = this.workers.find((candidate) => candidate.workerId === workerId);
+    if (!worker) return [];
+
+    const worktreePath = worker.worktreePath;
+    const status = await this.execGitIn(worktreePath, ['status', '--porcelain', '--untracked-files=no']);
+    if (status.stdout.trim().length > 0) {
+      await this.execGitIn(worktreePath, ['add', '-A']);
+      const message = this.buildCommitMessage(task);
+      await this.execGitIn(worktreePath, ['commit', '-m', message]);
+    }
+
+    const baseCommit = this.workerBaseCommits.get(workerId) ?? (await this.resolveCommit('HEAD'));
+    const revList = await this.execGitIn(worktreePath, ['rev-list', '--reverse', `${baseCommit}..HEAD`]);
+    const commits = revList.stdout.split('\n').map((line) => line.trim()).filter(Boolean);
+    const headCommit = await this.execGitIn(worktreePath, ['rev-parse', 'HEAD']);
+    if (headCommit.exitCode === 0) {
+      this.workerBaseCommits.set(workerId, headCommit.stdout.trim());
+    }
+    return commits;
+  }
+
+  private async attemptMergeResolution(entry: { task: TrackerTask; workerId: string; commit: string }): Promise<{ success: boolean; commit?: string; reason?: string }> {
+    const mergeWorkerId = `merge-${entry.workerId}-${Date.now()}`;
+    const branchName = `merge/${entry.task.id}/${Date.now()}`;
+    const worktreePath = await this.worktreeManager.createWorktree({
+      workerId: mergeWorkerId,
+      branchName,
+      lockReason: 'merge resolution',
+    });
+
+    try {
+      const cherryResult = await this.execGitIn(worktreePath, ['cherry-pick', entry.commit]);
+      if (cherryResult.exitCode === 0) {
+        const headCommit = await this.execGitIn(worktreePath, ['rev-parse', 'HEAD']);
+        return { success: true, commit: headCommit.stdout.trim() };
+      }
+
+      const conflicts = await this.execGitIn(worktreePath, ['diff', '--name-only', '--diff-filter=U']);
+      const prompt = this.buildMergePrompt(entry.task, entry.commit, conflicts.stdout.trim());
+
+      const agentRegistry = getAgentRegistry();
+      const agent = await this.createAgentInstance(agentRegistry);
+      const resolver = new ParallelWorker(mergeWorkerId, worktreePath, agent, this.config);
+      const result = await resolver.executeTask(entry.task, prompt);
+      await resolver.dispose();
+
+      if (!result.completed) {
+        return { success: false, reason: 'Merge resolution agent did not complete' };
+      }
+
+      const unresolved = await this.execGitIn(worktreePath, ['diff', '--name-only', '--diff-filter=U']);
+      if (unresolved.stdout.trim().length > 0) {
+        return { success: false, reason: 'Conflicts remain after auto-resolve' };
+      }
+
+      await this.execGitIn(worktreePath, ['add', '-A']);
+      const continueResult = await this.execGitIn(worktreePath, ['cherry-pick', '--continue']);
+      if (continueResult.exitCode !== 0) {
+        const cherryHead = await this.execGitIn(worktreePath, ['rev-parse', '-q', '--verify', 'CHERRY_PICK_HEAD']);
+        if (cherryHead.exitCode === 0) {
+          return { success: false, reason: continueResult.stderr.trim() || 'Cherry-pick continue failed' };
+        }
+      }
+
+      const headCommit = await this.execGitIn(worktreePath, ['rev-parse', 'HEAD']);
+      return { success: true, commit: headCommit.stdout.trim() };
+    } catch (error) {
+      return { success: false, reason: error instanceof Error ? error.message : 'Merge resolution failed' };
+    } finally {
+      await this.worktreeManager.removeWorktree(mergeWorkerId).catch(() => undefined);
+    }
+  }
+
+  private buildMergePrompt(task: TrackerTask, commit: string, conflictFiles: string): string {
+    const files = conflictFiles ? conflictFiles.split('\n').filter(Boolean).map((file) => `- ${file}`) : [];
+    return [
+      `## Merge Conflict Resolution`,
+      `Task: ${task.id} - ${task.title}`,
+      `Commit: ${commit}`,
+      '',
+      'Conflicting files:',
+      files.length > 0 ? files.join('\n') : '- (unknown)',
+      '',
+      '## Instructions',
+      '- Resolve merge conflicts in the listed files.',
+      '- Do NOT refactor unrelated code.',
+      '- Do NOT switch branches (no `git checkout main`).',
+      '- Do NOT run tests or lint unless explicitly asked.',
+      '- After resolving, run: git add -A',
+      '- Then run: git cherry-pick --continue',
+      '- If cherry-pick already completed, ensure changes are committed.',
+      '',
+      'When done, output: <promise>COMPLETE</promise>',
+    ].join('\n');
+  }
+
+  private buildCommitMessage(task: TrackerTask): string {
+    const title = task.title.replace(/\s+/g, ' ').trim();
+    const truncated = title.length > 60 ? `${title.slice(0, 57)}...` : title;
+    return `${task.id}: ${truncated}`;
+  }
+
+  private async isRepoClean(repoPath: string): Promise<boolean> {
+    const status = await this.execGitIn(repoPath, ['status', '--porcelain', '--untracked-files=no']);
+    return status.stdout.trim().length === 0;
+  }
+
+  private async resolveCommit(ref: string): Promise<string> {
+    const result = await this.execGitIn(this.config.cwd, ['rev-parse', ref]);
+    return result.stdout.trim();
+  }
+
+  private execGitIn(path: string, args: string[]): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+    return new Promise((resolve) => {
+      const proc = spawn('git', ['-C', path, ...args], {
+        env: { ...process.env },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+
+      let stdout = '';
+      let stderr = '';
+
+      proc.stdout.on('data', (data: Buffer) => {
+        stdout += data.toString();
+      });
+
+      proc.stderr.on('data', (data: Buffer) => {
+        stderr += data.toString();
+      });
+
+      proc.on('close', (code: number | null) => {
+        resolve({ stdout, stderr, exitCode: code ?? 1 });
+      });
+
+      proc.on('error', (err: Error) => {
+        resolve({ stdout, stderr: err.message, exitCode: 1 });
+      });
+    });
   }
 
   private async claimTask(task: TrackerTask, workerId: string): Promise<boolean> {

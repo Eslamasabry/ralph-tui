@@ -450,6 +450,35 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
     const filterWithoutParent = filter ? { ...filter, parentId: undefined } : undefined;
     tasks = this.filterTasks(tasks, filterWithoutParent);
 
+    // Hydrate dependencies if bd list didn't include them
+    const needsDeps = tasks.filter((task) => {
+      if (task.dependsOn && task.dependsOn.length > 0) {
+        return false;
+      }
+      const dependencyCount = typeof task.metadata?.dependencyCount === 'number'
+        ? task.metadata.dependencyCount
+        : 0;
+      return dependencyCount > 0;
+    });
+
+    if (needsDeps.length > 0) {
+      const hydrated = await Promise.all(needsDeps.map((task) => this.getTask(task.id)));
+      const taskMap = new Map(tasks.map((task) => [task.id, task]));
+      for (const hydratedTask of hydrated) {
+        if (hydratedTask) {
+          const existing = taskMap.get(hydratedTask.id);
+          if (existing) {
+            taskMap.set(hydratedTask.id, {
+              ...existing,
+              dependsOn: hydratedTask.dependsOn,
+              blocks: hydratedTask.blocks,
+            });
+          }
+        }
+      }
+      return Array.from(taskMap.values());
+    }
+
     return tasks;
   }
 
@@ -501,6 +530,9 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
       };
     }
 
+    // Clean up claim lock if present
+    await this.removeTaskLock(id);
+
     // Fetch the updated task
     const task = await this.getTask(id);
 
@@ -530,7 +562,15 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
   }
 
   override async claimTask(id: string, workerId: string): Promise<boolean> {
-    const locked = await this.createTaskLock(id, workerId);
+    let locked = await this.createTaskLock(id, workerId);
+    if (!locked) {
+      const existing = await this.getTask(id);
+      if (existing && existing.status !== 'in_progress') {
+        await this.removeTaskLock(id);
+        locked = await this.createTaskLock(id, workerId);
+      }
+    }
+
     if (!locked) {
       return false;
     }

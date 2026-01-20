@@ -254,6 +254,7 @@ import type {
   IterationResult,
   ActiveAgentState,
   RateLimitState,
+  TrackerRealtimeStatus,
   SubagentTreeNode,
 } from '../engine/types.js';
 
@@ -339,6 +340,8 @@ export interface RemoteEngineState {
   currentStderr: string;
   activeAgent: ActiveAgentState | null;
   rateLimitState: RateLimitState | null;
+  trackerRealtimeStatus?: TrackerRealtimeStatus;
+  trackerRealtimeIntervalMs?: number;
   maxIterations: number;
   /** Tasks list (replaces tracker access) */
   tasks: TrackerTask[];

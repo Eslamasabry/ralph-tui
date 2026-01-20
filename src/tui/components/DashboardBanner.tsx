@@ -16,6 +16,8 @@ export interface DashboardBannerProps {
   activeTasks: number;
   /** Number of queued tasks (status: actionable + pending) */
   queuedTasks: number;
+  /** Number of blocked tasks */
+  blockedTasks: number;
   /** Number of completed tasks */
   completedTasks: number;
   /** Number of failed tasks */
@@ -51,6 +53,7 @@ export function DashboardBanner({
   totalTasks,
   activeTasks,
   queuedTasks,
+  blockedTasks,
   completedTasks,
   failedTasks,
 }: DashboardBannerProps): ReactNode {
@@ -100,12 +103,14 @@ export function DashboardBanner({
         style={{
           flexDirection: 'row',
           gap: 3,
+          flexWrap: 'wrap',
           justifyContent: 'space-between',
         }}
       >
         <StatItem label="Total" value={totalTasks} color={colors.fg.primary} />
         <StatItem label="Active" value={activeTasks} color={colors.task.active} />
         <StatItem label="Queued" value={queuedTasks} color={colors.status.warning} />
+        <StatItem label="Blocked" value={blockedTasks} color={colors.task.blocked} />
         <StatItem label="Done" value={completedTasks} color={colors.status.success} />
         <StatItem label="Failed" value={failedTasks} color={colors.status.error} />
       </box>

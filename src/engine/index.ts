@@ -21,6 +21,7 @@ import type {
   IterationStatus,
   IterationRateLimitedEvent,
   RateLimitState,
+  TrackerRealtimeStatus,
   SubagentTreeNode,
 } from './types.js';
 import { toEngineSubagentState } from './types.js';
@@ -43,6 +44,8 @@ import { updateSessionIteration, updateSessionStatus, updateSessionMaxIterations
 import { saveIterationLog, buildSubagentTrace, createProgressEntry, appendProgress, getRecentProgressSummary, getCodebasePatternsForPrompt } from '../logs/index.js';
 import type { AgentSwitchEntry } from '../logs/index.js';
 import { renderPrompt } from '../templates/index.js';
+import { BeadsRealtimeWatcher } from './beads-realtime.js';
+import { join } from 'node:path';
 
 /**
  * Pattern to detect completion signal in agent output
@@ -152,6 +155,8 @@ export class ExecutionEngine {
   private primaryAgentInstance: AgentPlugin | null = null;
   /** Track agent switches during the current iteration for logging */
   private currentIterationAgentSwitches: AgentSwitchEntry[] = [];
+  /** Beads realtime watcher (SQLite data_version polling) */
+  private trackerRealtimeWatcher: BeadsRealtimeWatcher | null = null;
 
   constructor(config: RalphConfig) {
     this.config = config;
@@ -237,6 +242,65 @@ export class ExecutionEngine {
     // Get initial task count
     const tasks = await this.tracker.getTasks({ status: ['open', 'in_progress'] });
     this.state.totalTasks = tasks.length;
+
+    this.startTrackerRealtimeWatcher();
+  }
+
+  private startTrackerRealtimeWatcher(): void {
+    if (this.trackerRealtimeWatcher) {
+      this.trackerRealtimeWatcher.stop();
+      this.trackerRealtimeWatcher = null;
+    }
+
+    if (!this.tracker) {
+      return;
+    }
+
+    if (!this.config.tracker.plugin.includes('beads')) {
+      return;
+    }
+
+    const trackerOptions = this.config.tracker.options as Record<string, unknown> | undefined;
+    const workingDir = (trackerOptions?.workingDir as string) ?? this.config.cwd ?? process.cwd();
+    const beadsDir = (trackerOptions?.beadsDir as string) ?? '.beads';
+    const dbPath = join(workingDir, beadsDir, 'db.sqlite');
+
+    this.trackerRealtimeWatcher = new BeadsRealtimeWatcher({
+      dbPath,
+      liveIntervalMs: 1000,
+      fallbackIntervalMs: 5000,
+      onChange: async () => {
+        await this.refreshTasks();
+      },
+      onStatusChange: (status, intervalMs, reason) => {
+        this.setTrackerRealtimeStatus(status, intervalMs, reason);
+      },
+    });
+
+    this.trackerRealtimeWatcher.start();
+  }
+
+  private setTrackerRealtimeStatus(
+    status: TrackerRealtimeStatus,
+    intervalMs: number,
+    reason?: string
+  ): void {
+    if (
+      this.state.trackerRealtimeStatus === status &&
+      this.state.trackerRealtimeIntervalMs === intervalMs
+    ) {
+      return;
+    }
+
+    this.state.trackerRealtimeStatus = status;
+    this.state.trackerRealtimeIntervalMs = intervalMs;
+    this.emit({
+      type: 'tracker:realtime',
+      timestamp: new Date().toISOString(),
+      status,
+      intervalMs,
+      reason,
+    });
   }
 
   /**
@@ -1877,6 +1941,10 @@ export class ExecutionEngine {
    */
   async dispose(): Promise<void> {
     await this.stop();
+    if (this.trackerRealtimeWatcher) {
+      this.trackerRealtimeWatcher.stop();
+      this.trackerRealtimeWatcher = null;
+    }
     this.listeners = [];
   }
 }
