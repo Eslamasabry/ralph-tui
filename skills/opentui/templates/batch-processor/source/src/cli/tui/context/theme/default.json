@@ -1,0 +1,24 @@
+{
+  "defs": {
+    "darkPrimary": "#A855F7",
+    "darkSecondary": "#C084FC",
+    "darkRed": "#ef4444",
+    "darkGreen": "#22c55e",
+    "darkYellow": "#eab308",
+    "darkText": "#f3f4f6",
+    "darkMuted": "#9ca3af",
+    "darkBorder": "#5a4f7a",
+    "darkBorderSubtle": "#473e64"
+  },
+  "theme": {
+    "primary": { "dark": "darkPrimary", "light": "#6d28d9" },
+    "secondary": { "dark": "darkSecondary", "light": "#9333ea" },
+    "error": { "dark": "darkRed", "light": "#dc2626" },
+    "warning": { "dark": "darkYellow", "light": "#ca8a04" },
+    "success": { "dark": "darkGreen", "light": "#16a34a" },
+    "text": { "dark": "darkText", "light": "#1e1b2e" },
+    "textMuted": { "dark": "darkMuted", "light": "#7c3aed" },
+    "border": { "dark": "darkBorder", "light": "#c084fc" },
+    "borderSubtle": { "dark": "darkBorderSubtle", "light": "#d8b4fe" }
+  }
+}

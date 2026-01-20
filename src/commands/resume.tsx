@@ -26,7 +26,8 @@ import {
 } from '../session/index.js';
 import { buildConfig, validateConfig } from '../config/index.js';
 import type { RuntimeOptions } from '../config/types.js';
-import { ExecutionEngine } from '../engine/index.js';
+import type { EngineController } from '../engine/types.js';
+import { ParallelExecutionEngine } from '../engine/parallel/index.js';
 import { registerBuiltinAgents } from '../plugins/agents/builtin/index.js';
 import { registerBuiltinTrackers } from '../plugins/trackers/builtin/index.js';
 import { getAgentRegistry } from '../plugins/agents/registry.js';
@@ -87,7 +88,7 @@ async function initializePlugins(): Promise<void> {
  * Run the execution engine with TUI (resume mode)
  */
 async function runWithTui(
-  engine: ExecutionEngine,
+  engine: EngineController,
   cwd: string,
   initialState: PersistedSessionState,
   trackerType?: string,
@@ -175,7 +176,7 @@ async function runWithTui(
  * Run in headless mode (resume)
  */
 async function runHeadless(
-  engine: ExecutionEngine,
+  engine: EngineController,
   cwd: string,
   initialState: PersistedSessionState
 ): Promise<PersistedSessionState> {
@@ -377,7 +378,7 @@ export async function executeResumeCommand(args: string[]): Promise<void> {
   console.log('');
 
   // Create and initialize engine
-  const engine = new ExecutionEngine(config);
+  const engine = new ParallelExecutionEngine(config, { maxWorkers: 5 });
 
   try {
     await engine.initialize();

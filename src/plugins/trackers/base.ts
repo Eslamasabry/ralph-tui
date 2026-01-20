@@ -101,6 +101,22 @@ export abstract class BaseTrackerPlugin implements TrackerPlugin {
   ): Promise<TaskCompletionResult>;
 
   /**
+   * Optional: claim a task for exclusive processing.
+   * Default implementation returns false (unsupported).
+   */
+  async claimTask(_id: string, _workerId: string): Promise<boolean> {
+    return false;
+  }
+
+  /**
+   * Optional: release a previously claimed task.
+   * Default implementation is a no-op.
+   */
+  async releaseTask(_id: string, _workerId: string): Promise<void> {
+    return;
+  }
+
+  /**
    * Update a task's status.
    * Must be implemented by subclasses.
    */

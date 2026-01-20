@@ -280,6 +280,19 @@ export interface TrackerPlugin {
   completeTask(id: string, reason?: string): Promise<TaskCompletionResult>;
 
   /**
+   * Atomically claim a task for exclusive processing by a worker.
+   * Returns true if claim succeeded, false if already claimed.
+   * Optional - used by parallel execution coordinator.
+   */
+  claimTask?(id: string, workerId: string): Promise<boolean>;
+
+  /**
+   * Release a previously claimed task.
+   * Optional - used by parallel execution coordinator.
+   */
+  releaseTask?(id: string, workerId: string): Promise<void>;
+
+  /**
    * Update a task's status.
    * @param id The task ID to update
    * @param status The new status

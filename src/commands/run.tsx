@@ -38,7 +38,8 @@ import {
   detectAndRecoverStaleSession,
   type PersistedSessionState,
 } from '../session/index.js';
-import { ExecutionEngine } from '../engine/index.js';
+import type { EngineController } from '../engine/types.js';
+import { ParallelExecutionEngine } from '../engine/parallel/index.js';
 import { registerBuiltinAgents } from '../plugins/agents/builtin/index.js';
 import { registerBuiltinTrackers } from '../plugins/trackers/builtin/index.js';
 import { getAgentRegistry } from '../plugins/agents/registry.js';
@@ -669,7 +670,7 @@ async function showEpicSelectionTui(
  * Props for the RunAppWrapper component
  */
 interface RunAppWrapperProps {
-  engine: ExecutionEngine;
+  engine: EngineController;
   interruptHandler: InterruptHandler;
   onQuit: () => Promise<void>;
   onInterruptConfirmed: () => Promise<void>;
@@ -921,7 +922,7 @@ interface NotificationRunOptions {
 }
 
 async function runWithTui(
-  engine: ExecutionEngine,
+  engine: EngineController,
   persistedState: PersistedSessionState,
   config: RalphConfig,
   initialTasks: TrackerTask[],
@@ -1180,7 +1181,7 @@ interface HeadlessOptions {
 }
 
 async function runHeadless(
-  engine: ExecutionEngine,
+  engine: EngineController,
   persistedState: PersistedSessionState,
   config: RalphConfig,
   headlessOptions?: HeadlessOptions
@@ -1697,7 +1698,7 @@ export async function executeRunCommand(args: string[]): Promise<void> {
   console.log('');
 
   // Create and initialize engine
-  const engine = new ExecutionEngine(config);
+  const engine = new ParallelExecutionEngine(config, { maxWorkers: 5 });
 
   let tasks: TrackerTask[] = [];
   let tracker: TrackerPlugin;

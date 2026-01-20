@@ -51,7 +51,7 @@ import {
   getOrCreateServerToken,
 } from './token.js';
 import { createAuditLogger, type AuditLogger } from './audit.js';
-import type { ExecutionEngine, EngineEvent } from '../engine/index.js';
+import type { EngineController, EngineEvent, SubagentTreeNode } from '../engine/types.js';
 import type { TrackerPlugin } from '../plugins/trackers/types.js';
 
 /**
@@ -116,7 +116,7 @@ export interface RemoteServerOptions {
   onDisconnect?: (clientId: string) => void;
 
   /** Execution engine for remote control (US-4) */
-  engine?: ExecutionEngine;
+  engine?: EngineController;
 
   /** Tracker plugin for task queries (US-4) */
   tracker?: TrackerPlugin;
@@ -212,7 +212,7 @@ export class RemoteServer {
    * Set the execution engine for remote control.
    * Can be called after construction to attach an engine.
    */
-  setEngine(engine: ExecutionEngine): void {
+  setEngine(engine: EngineController): void {
     // Unsubscribe from old engine if present
     if (this.engineUnsubscribe) {
       this.engineUnsubscribe();
@@ -648,7 +648,7 @@ export class RemoteServer {
     }
 
     const engineState = this.options.engine.getState();
-    const iterationInfo = this.options.engine.getIterationInfo();
+    const iterationInfo = this.options.engine.getIterationInfo?.();
 
     // Convert to remote-serializable state
     const remoteState: RemoteEngineState = {
@@ -663,14 +663,16 @@ export class RemoteServer {
       currentStderr: engineState.currentStderr,
       activeAgent: engineState.activeAgent,
       rateLimitState: engineState.rateLimitState,
-      maxIterations: iterationInfo.maxIterations,
+      maxIterations: iterationInfo?.maxIterations ?? 0,
       tasks: [], // Will be populated by get_tasks
       // Include config info for remote TUI display
       agentName: this.options.agentName,
       trackerName: this.options.trackerName,
       currentModel: this.options.currentModel,
       // Include subagent tree for TUI rendering
-      subagentTree: this.options.engine.getSubagentTree(),
+      subagentTree: this.options.engine.getSubagentTree
+        ? this.options.engine.getSubagentTree() as SubagentTreeNode[]
+        : undefined,
       // Include config settings for TUI display
       autoCommit: this.options.autoCommit,
       // Include sandbox info for TUI display
@@ -769,14 +771,14 @@ export class RemoteServer {
     }
 
     // stop() interrupts the current execution and emits engine:stopped with reason: 'interrupted'
-    this.options.engine.stop().then(() => {
+    Promise.resolve(this.options.engine.stop()).then(() => {
       const response = createMessage<OperationResultMessage>('operation_result', {
         operation: 'interrupt',
         success: true,
       });
       response.id = message.id;
       this.send(ws, response);
-    }).catch((error) => {
+    }).catch((error: unknown) => {
       this.sendOperationError(
         ws,
         message.id,
@@ -813,6 +815,11 @@ export class RemoteServer {
   ): Promise<void> {
     if (!this.options.engine) {
       this.sendOperationError(ws, message.id, 'add_iterations', 'No engine attached');
+      return;
+    }
+
+    if (!this.options.engine.addIterations) {
+      this.sendOperationError(ws, message.id, 'add_iterations', 'Engine does not support adding iterations');
       return;
     }
 
@@ -853,6 +860,11 @@ export class RemoteServer {
       return;
     }
 
+    if (!this.options.engine.removeIterations) {
+      this.sendOperationError(ws, message.id, 'remove_iterations', 'Engine does not support removing iterations');
+      return;
+    }
+
     // Validate iteration count
     if (typeof message.count !== 'number' || !Number.isInteger(message.count) || message.count <= 0) {
       this.sendOperationError(ws, message.id, 'remove_iterations', 'Invalid iteration count');
@@ -860,11 +872,10 @@ export class RemoteServer {
     }
 
     try {
-      const success = await this.options.engine.removeIterations(message.count);
+      await this.options.engine.removeIterations(message.count);
       const response = createMessage<OperationResultMessage>('operation_result', {
         operation: 'remove_iterations',
-        success,
-        error: success ? undefined : 'Cannot reduce below current iteration or minimum',
+        success: true,
       });
       response.id = message.id;
       this.send(ws, response);
@@ -884,6 +895,11 @@ export class RemoteServer {
   private handleContinue(ws: ServerWebSocket<WebSocketData>, message: ContinueMessage): void {
     if (!this.options.engine) {
       this.sendOperationError(ws, message.id, 'continue', 'No engine attached');
+      return;
+    }
+
+    if (!this.options.engine.continueExecution) {
+      this.sendOperationError(ws, message.id, 'continue', 'Engine does not support continue');
       return;
     }
 
@@ -914,6 +930,9 @@ export class RemoteServer {
     }
 
     try {
+      if (!this.options.engine.generatePromptPreview) {
+        throw new Error('Prompt preview not supported');
+      }
       const result = await this.options.engine.generatePromptPreview(message.taskId);
       const response = createMessage<PromptPreviewResponseMessage>('prompt_preview_response', {
         success: result.success,

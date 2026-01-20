@@ -14,12 +14,14 @@ import type { RalphStatus, TaskStatus } from '../theme.js';
 import type { TaskItem, BlockerInfo, DetailsViewMode, IterationTimingInfo, SubagentTreeNode } from '../types.js';
 import { Header } from './Header.js';
 import { Footer } from './Footer.js';
-import { LeftPanel } from './LeftPanel.js';
 import { RightPanel } from './RightPanel.js';
 import { IterationHistoryView } from './IterationHistoryView.js';
 import { IterationDetailView } from './IterationDetailView.js';
 import type { HistoricExecutionContext } from './IterationDetailView.js';
 import { ProgressDashboard } from './ProgressDashboard.js';
+import { DashboardBanner } from './DashboardBanner.js';
+import { TaskCardsRow } from './TaskCardsRow.js';
+import { LogPane } from './LogPane.js';
 import { ConfirmationDialog } from './ConfirmationDialog.js';
 import { HelpOverlay } from './HelpOverlay.js';
 import { SettingsView } from './SettingsView.js';
@@ -35,13 +37,7 @@ import { Toast, formatConnectionToast } from './Toast.js';
 import type { ConnectionToastMessage } from './Toast.js';
 import type { InstanceTab } from '../../remote/client.js';
 import { addRemote, removeRemote, getRemote } from '../../remote/config.js';
-import type {
-  ExecutionEngine,
-  EngineEvent,
-  IterationResult,
-  ActiveAgentState,
-  RateLimitState,
-} from '../../engine/index.js';
+import type { EngineEvent, EngineController, IterationResult, ActiveAgentState, RateLimitState } from '../../engine/types.js';
 import type { TrackerTask } from '../../plugins/trackers/types.js';
 import type { StoredConfig, SubagentDetailLevel, SandboxConfig, SandboxMode } from '../../config/types.js';
 import type { AgentPluginMeta } from '../../plugins/agents/types.js';
@@ -74,7 +70,7 @@ type FocusedPane = 'output' | 'subagentTree';
  */
 export interface RunAppProps {
   /** The execution engine instance */
-  engine: ExecutionEngine;
+  engine: EngineController;
   /** Current working directory for loading historical logs */
   cwd: string;
   /** Callback when quit is requested */
@@ -373,11 +369,14 @@ export function RunApp({
   const [currentIteration, setCurrentIteration] = useState(0);
   const [maxIterations, setMaxIterations] = useState(() => {
     // Initialize from engine if available
-    const info = engine.getIterationInfo();
-    return info.maxIterations;
+    const info = engine.getIterationInfo?.();
+    return info?.maxIterations ?? 0;
   });
   const [currentOutput, setCurrentOutput] = useState('');
   const [currentSegments, setCurrentSegments] = useState<FormattedSegment[]>([]);
+  const [parallelOutputs, setParallelOutputs] = useState<Map<string, string>>(() => new Map());
+  const [parallelTimings, setParallelTimings] = useState<Map<string, IterationTimingInfo>>(() => new Map());
+  const [parallelIterations, setParallelIterations] = useState<Map<string, number>>(() => new Map());
   // Streaming parser for live output - extracts readable content and prevents memory bloat
   // Use agentPlugin prop (from resolved config with CLI override) with fallback to storedConfig
   const resolvedAgentName = agentPlugin || storedConfig?.defaultAgent || storedConfig?.agent || 'claude';
@@ -436,9 +435,6 @@ export function RunApp({
   const epicLoaderMode: EpicLoaderMode = trackerType === 'json' ? 'file-prompt' : 'list';
   // Details panel view mode (details, output, or prompt) - default to details
   const [detailsViewMode, setDetailsViewMode] = useState<DetailsViewMode>('details');
-  // Prompt preview content and template source (for prompt view mode)
-  const [promptPreview, setPromptPreview] = useState<string | undefined>(undefined);
-  const [templateSource, setTemplateSource] = useState<string | undefined>(undefined);
   // Subagent tracing detail level - initialized from config, can be cycled with 't' key
   // Default to 'moderate' to show inline subagent sections by default
   const [subagentDetailLevel, setSubagentDetailLevel] = useState<SubagentDetailLevel>(
@@ -756,12 +752,19 @@ export function RunApp({
     });
   }, [tasks, remoteTasks, isViewingRemote, showClosedTasks]);
 
+  // Running tasks displayed as cards (parallel dashboard)
+  const runningTasks = useMemo(() => {
+    return displayedTasks.filter(
+      (task) => task.status === 'active' || task.status === 'actionable' || task.status === 'pending'
+    );
+  }, [displayedTasks]);
+
   // Clamp selectedIndex when displayedTasks shrinks (e.g., when hiding closed tasks)
   useEffect(() => {
-    if (displayedTasks.length > 0 && selectedIndex >= displayedTasks.length) {
-      setSelectedIndex(displayedTasks.length - 1);
+    if (runningTasks.length > 0 && selectedIndex >= runningTasks.length) {
+      setSelectedIndex(runningTasks.length - 1);
     }
-  }, [displayedTasks.length, selectedIndex]);
+  }, [runningTasks.length, selectedIndex]);
 
   // Auto-show subagent panel when first subagent spawns (unless user manually hid it)
   // This makes subagent activity discoverable without requiring users to know about 'T' key
@@ -772,75 +775,6 @@ export function RunApp({
       onSubagentPanelVisibilityChange?.(true);
     }
   }, [subagentTree.length, subagentPanelVisible, userManuallyHidPanel, onSubagentPanelVisibilityChange]);
-
-  // Regenerate prompt preview when selected task changes (if in prompt view mode)
-  // This keeps the prompt preview in sync with the currently selected task/iteration
-  // Works for both tasks view (uses selectedIndex) and iterations view (uses iteration's task)
-  useEffect(() => {
-    // Compute effective task ID based on current view mode
-    // In iterations view, use the task from the selected iteration
-    // In tasks view, use the task from the task list
-    const selectedIteration = viewMode === 'iterations' && iterations.length > 0
-      ? iterations[iterationSelectedIndex]
-      : undefined;
-    const effectiveTaskId = viewMode === 'iterations'
-      ? selectedIteration?.task?.id
-      : displayedTasks[selectedIndex]?.id;
-
-    // If not in prompt view mode, do nothing
-    if (detailsViewMode !== 'prompt') {
-      return;
-    }
-
-    // If no task is selected, clear the preview
-    if (!effectiveTaskId) {
-      setPromptPreview('No task selected');
-      setTemplateSource(undefined);
-      return;
-    }
-
-    // Track if this effect has been superseded by a newer one
-    let cancelled = false;
-
-    setPromptPreview('Generating prompt preview...');
-    setTemplateSource(undefined);
-
-    void (async () => {
-      // Use remote API when viewing remote, local engine otherwise
-      if (isViewingRemote && instanceManager) {
-        const result = await instanceManager.getRemotePromptPreview(effectiveTaskId);
-        if (cancelled) return;
-
-        if (result === null) {
-          setPromptPreview('Unable to fetch prompt preview from remote.\n\nConnection may not be ready.');
-          setTemplateSource(undefined);
-        } else if (result.success) {
-          setPromptPreview(result.prompt);
-          setTemplateSource(result.source);
-        } else {
-          setPromptPreview(`Error: ${result.error}`);
-          setTemplateSource(undefined);
-        }
-      } else {
-        const result = await engine.generatePromptPreview(effectiveTaskId);
-        // Don't update state if this effect was cancelled (user changed task again)
-        if (cancelled) return;
-
-        if (result.success) {
-          setPromptPreview(result.prompt);
-          setTemplateSource(result.source);
-        } else {
-          setPromptPreview(`Error: ${result.error}`);
-          setTemplateSource(undefined);
-        }
-      }
-    })();
-
-    // Cleanup: mark this effect as cancelled if it re-runs before completing
-    return () => {
-      cancelled = true;
-    };
-  }, [detailsViewMode, viewMode, displayedTasks, selectedIndex, iterations, iterationSelectedIndex, engine, isViewingRemote, instanceManager]);
 
   // Fetch remote iteration output when selecting a different task (for remote viewing)
   // This fills the remoteIterationCache so the useMemo can use it synchronously
@@ -958,6 +892,16 @@ export function RunApp({
           // Set current task info for display
           setCurrentTaskId(event.task.id);
           setCurrentTaskTitle(event.task.title);
+          setParallelTimings((prev) => {
+            const next = new Map(prev);
+            next.set(event.task.id, { startedAt: event.timestamp, isRunning: true });
+            return next;
+          });
+          setParallelIterations((prev) => {
+            const next = new Map(prev);
+            next.set(event.task.id, event.iteration);
+            return next;
+          });
           // Capture the iteration start time for timing display
           setCurrentIterationStartedAt(event.timestamp);
           setStatus('executing');
@@ -1004,6 +948,21 @@ export function RunApp({
             }
             return [...prev, event.result];
           });
+          setParallelTimings((prev) => {
+            const next = new Map(prev);
+            next.set(event.result.task.id, {
+              startedAt: event.result.startedAt,
+              endedAt: event.result.endedAt,
+              durationMs: event.result.durationMs,
+              isRunning: false,
+            });
+            return next;
+          });
+          setParallelIterations((prev) => {
+            const next = new Map(prev);
+            next.set(event.result.task.id, event.result.iteration);
+            return next;
+          });
           break;
 
         case 'iteration:failed':
@@ -1043,16 +1002,28 @@ export function RunApp({
 
         case 'agent:output':
           if (event.stream === 'stdout') {
-            // Use streaming parser to extract readable content (filters out verbose JSONL)
-            outputParserRef.current.push(event.data);
-            setCurrentOutput(outputParserRef.current.getOutput());
-            // Also update segments for TUI-native color rendering
-            setCurrentSegments(outputParserRef.current.getSegments());
+            const taskId = event.taskId;
+            if (taskId) {
+              setParallelOutputs((prev) => {
+                const next = new Map(prev);
+                const existing = next.get(taskId) ?? '';
+                next.set(taskId, existing + event.data);
+                return next;
+              });
+            } else {
+              // Use streaming parser to extract readable content (filters out verbose JSONL)
+              outputParserRef.current.push(event.data);
+              setCurrentOutput(outputParserRef.current.getOutput());
+              // Also update segments for TUI-native color rendering
+              setCurrentSegments(outputParserRef.current.getSegments());
+            }
           }
           // Always refresh subagent tree from engine (subagent events are processed in engine).
           // This decouples data collection from display preferences - the subagentDetailLevel
           // only affects how much detail to show inline, not whether to track subagents.
-          setSubagentTree(engine.getSubagentTree());
+          if (engine.getSubagentTree) {
+            setSubagentTree(engine.getSubagentTree() as SubagentTreeNode[]);
+          }
           break;
 
         case 'agent:switched':
@@ -1301,12 +1272,12 @@ export function RunApp({
             break;
           }
           // Default: navigate task/iteration lists
-          if (viewMode === 'tasks') {
-            setSelectedIndex((prev) => Math.max(0, prev - 1));
-          } else if (viewMode === 'iterations') {
-            setIterationSelectedIndex((prev) => Math.max(0, prev - 1));
-          }
-          break;
+            if (viewMode === 'tasks') {
+              setSelectedIndex((prev) => Math.max(0, prev - 1));
+            } else if (viewMode === 'iterations') {
+              setIterationSelectedIndex((prev) => Math.max(0, prev - 1));
+            }
+            break;
 
         case 'down':
         case 'j':
@@ -1316,12 +1287,13 @@ export function RunApp({
             break;
           }
           // Default: navigate task/iteration lists
-          if (viewMode === 'tasks') {
-            setSelectedIndex((prev) => Math.min(displayedTasks.length - 1, prev + 1));
-          } else if (viewMode === 'iterations') {
-            setIterationSelectedIndex((prev) => Math.min(iterationHistoryLength - 1, prev + 1));
-          }
-          break;
+            if (viewMode === 'tasks') {
+              const maxIndex = Math.max(0, runningTasks.length - 1);
+              setSelectedIndex((prev) => Math.min(maxIndex, prev + 1));
+            } else if (viewMode === 'iterations') {
+              setIterationSelectedIndex((prev) => Math.min(iterationHistoryLength - 1, prev + 1));
+            }
+            break;
 
         case 'p':
           // Toggle pause/resume
@@ -1400,20 +1372,15 @@ export function RunApp({
               onStart();
             } else if (status === 'stopped' || status === 'idle') {
               // Continue after stop - use engine.continueExecution()
-              if (currentIteration >= maxIterations) {
+              if (currentIteration >= maxIterations && engine.addIterations && engine.continueExecution) {
                 // At max iterations, add one more then continue
-                engine.addIterations(1).then((shouldContinue) => {
-                  if (shouldContinue) {
-                    setStatus('running');
-                    engine.continueExecution();
-                  }
-                }).catch((err) => {
-                  console.error('Failed to add iteration:', err);
-                });
+                engine.addIterations(1);
+                setStatus('running');
+                engine.continueExecution();
               } else {
                 // Have iterations remaining, just continue
                 setStatus('running');
-                engine.continueExecution();
+                engine.continueExecution?.();
               }
             }
           }
@@ -1448,24 +1415,13 @@ export function RunApp({
             } else {
               // Local engine control
               if (isPlus) {
-                engine.addIterations(10).then((shouldContinue) => {
-                  if (shouldContinue || status === 'complete') {
-                    setStatus('running');
-                    engine.continueExecution();
-                  }
-                }).catch((err) => {
-                  console.error('Failed to add iterations:', err);
-                });
+                engine.addIterations?.(10);
+                if (status === 'complete') {
+                  setStatus('running');
+                  engine.continueExecution?.();
+                }
               } else {
-                engine.removeIterations(10)
-                  .then((success) => {
-                    if (!success) {
-                      console.log('Cannot reduce below current iteration or minimum of 1');
-                    }
-                  })
-                  .catch((err) => {
-                    console.error('Failed to remove iterations:', err);
-                  });
+                engine.removeIterations?.(10);
               }
             }
           }
@@ -1746,6 +1702,11 @@ export function RunApp({
     height - layout.header.height - layout.footer.height - dashboardHeight - tabBarHeight
   );
   const isCompact = width < 80;
+  const minTopHeight = 8;
+  const minBottomHeight = 8;
+  const preferredTopHeight = Math.floor(contentHeight * (isCompact ? 0.5 : 0.4));
+  const maxTopHeight = Math.max(minTopHeight, contentHeight - minBottomHeight);
+  const topSectionHeight = Math.max(minTopHeight, Math.min(preferredTopHeight, maxTopHeight));
 
   // Calculate completed tasks (counting both 'done' and 'closed' as completed)
   // 'done' = completed in current session, 'closed' = historically completed
@@ -1755,7 +1716,7 @@ export function RunApp({
   const totalTasks = tasks.length;
 
   // Get selected task from filtered list (used for display in tasks view)
-  const selectedTask = displayedTasks[selectedIndex] ?? null;
+  const selectedTask = runningTasks[selectedIndex] ?? null;
 
   // Get selected iteration when in iterations view
   const selectedIteration = viewMode === 'iterations' && iterations.length > 0
@@ -1820,6 +1781,20 @@ export function RunApp({
       };
     }
 
+    if (effectiveTaskId) {
+      const parallelOutput = parallelOutputs.get(effectiveTaskId);
+      const parallelTiming = parallelTimings.get(effectiveTaskId);
+      const parallelIteration = parallelIterations.get(effectiveTaskId);
+      if (parallelOutput !== undefined) {
+        return {
+          iteration: parallelIteration ?? currentIteration,
+          output: parallelOutput,
+          segments: undefined,
+          timing: parallelTiming ?? { isRunning: true },
+        };
+      }
+    }
+
     // If no effective task ID, check if there's currently executing task and show that
     if (!effectiveTaskId) {
       // If there's a current task executing, show its output even if no task selected
@@ -1880,7 +1855,7 @@ export function RunApp({
 
     // Task hasn't been run yet (or historical log not yet loaded)
     return { iteration: 0, output: undefined, segments: undefined, timing: undefined };
-  }, [effectiveTaskId, selectedTask, selectedIteration, viewMode, currentTaskId, currentIteration, currentOutput, currentSegments, iterations, historicalOutputCache, currentIterationStartedAt, isViewingRemote, remoteStatus, remoteCurrentIteration, remoteOutput, remoteIterationCache, remoteCurrentTaskId]);
+  }, [effectiveTaskId, selectedTask, selectedIteration, viewMode, currentTaskId, currentIteration, currentOutput, currentSegments, iterations, historicalOutputCache, currentIterationStartedAt, isViewingRemote, remoteStatus, remoteCurrentIteration, remoteOutput, remoteIterationCache, remoteCurrentTaskId, parallelOutputs, parallelTimings, parallelIterations]);
 
   // Compute the actual output to display based on selectedSubagentId
   // When a subagent is selected (not task root), try to get its specific output
@@ -1964,13 +1939,20 @@ export function RunApp({
     }
 
     // Local instance: get subagent-specific output from engine
-    const subagentOutput = engine.getSubagentOutput(selectedSubagentId);
+    const subagentOutput = engine.getSubagentOutput
+      ? engine.getSubagentOutput(selectedSubagentId)
+      : undefined;
 
     // Build rich output based on subagent state
     // We have: metadata, prompt, result, child subagents, timing
     if (subagentNode) {
       const { state } = subagentNode;
-      const details = engine.getSubagentDetails(selectedSubagentId);
+      const details = engine.getSubagentDetails
+        ? engine.getSubagentDetails(selectedSubagentId)
+        : undefined;
+      const detailInfo = details && typeof details === 'object'
+        ? (details as { spawnedAt?: string; endedAt?: string; prompt?: string })
+        : undefined;
 
       // Build header
       const lines: string[] = [];
@@ -1985,9 +1967,9 @@ export function RunApp({
       lines.push(statusLine + durationLine);
 
       // Timestamps
-      if (details) {
-        const startTime = new Date(details.spawnedAt).toLocaleTimeString();
-        const endTime = details.endedAt ? new Date(details.endedAt).toLocaleTimeString() : 'running';
+      if (detailInfo?.spawnedAt) {
+        const startTime = new Date(detailInfo.spawnedAt).toLocaleTimeString();
+        const endTime = detailInfo.endedAt ? new Date(detailInfo.endedAt).toLocaleTimeString() : 'running';
         lines.push(`Started: ${startTime}  |  Ended: ${endTime}`);
       }
 
@@ -1999,9 +1981,9 @@ export function RunApp({
       lines.push('');
 
       // Show the prompt/task given to the subagent
-      if (details?.prompt) {
+      if (detailInfo?.prompt) {
         lines.push('─── Task Given ───');
-        lines.push(details.prompt);
+        lines.push(detailInfo.prompt);
         lines.push('');
       }
 
@@ -2030,6 +2012,18 @@ export function RunApp({
 
     return `[Subagent ${selectedSubagentId}]\nNo output available`;
   }, [selectedSubagentId, currentTaskId, remoteCurrentTaskId, selectedTask?.id, selectedIteration?.task?.id, viewMode, selectedTaskIteration.output, engine, subagentTree, remoteSubagentTree, isViewingRemote]);
+
+  // Compute task counts for dashboard banner
+  const taskCounts = useMemo(() => {
+    const sourceTasks = isViewingRemote ? remoteTasks : tasks;
+    return {
+      total: sourceTasks.length,
+      active: sourceTasks.filter((t) => t.status === 'active').length,
+      queued: sourceTasks.filter((t) => t.status === 'actionable' || t.status === 'pending').length,
+      completed: sourceTasks.filter((t) => t.status === 'done' || t.status === 'closed').length,
+      failed: sourceTasks.filter((t) => t.status === 'error').length,
+    };
+  }, [tasks, remoteTasks, isViewingRemote]);
 
   // Compute historic agent/model for display when viewing completed iterations
   // Falls back to current values if viewing a live iteration or no historic data available
@@ -2292,7 +2286,7 @@ export function RunApp({
       <box
         style={{
           flexGrow: 1,
-          flexDirection: isCompact ? 'column' : 'row',
+          flexDirection: isCompact || viewMode === 'tasks' ? 'column' : 'row',
           height: contentHeight,
         }}
       >
@@ -2314,29 +2308,53 @@ export function RunApp({
           />
         ) : viewMode === 'tasks' ? (
           <>
-            <LeftPanel
-              tasks={displayedTasks}
-              selectedIndex={selectedIndex}
-              isFocused={!subagentPanelVisible || focusedPane === 'output'}
-              isViewingRemote={isViewingRemote}
-              remoteConnectionStatus={instanceTabs?.[selectedTabIndex]?.status}
-              remoteAlias={instanceTabs?.[selectedTabIndex]?.alias}
-            />
-            <RightPanel
-              selectedTask={selectedTask}
-              currentIteration={selectedTaskIteration.iteration}
-              iterationOutput={displayIterationOutput}
-              iterationSegments={selectedTaskIteration.segments}
-              viewMode={detailsViewMode}
-              iterationTiming={selectedTaskIteration.timing}
-              agentName={displayAgentInfo.agent}
-              currentModel={displayAgentInfo.model}
-              promptPreview={promptPreview}
-              templateSource={templateSource}
-              isViewingRemote={isViewingRemote}
-              remoteConnectionStatus={instanceTabs?.[selectedTabIndex]?.status}
-              remoteAlias={instanceTabs?.[selectedTabIndex]?.alias}
-            />
+            {/* Top half: Dashboard Banner + Task Cards Row */}
+            <box
+              style={{
+                flexDirection: 'column',
+                height: topSectionHeight,
+                flexShrink: 0,
+                gap: 1,
+              }}
+            >
+              {/* Dashboard Banner - shows task counts */}
+              <DashboardBanner
+                totalTasks={taskCounts.total}
+                activeTasks={taskCounts.active}
+                queuedTasks={taskCounts.queued}
+                completedTasks={taskCounts.completed}
+                failedTasks={taskCounts.failed}
+              />
+
+              {/* Task Cards Row - horizontal cards for tasks */}
+              <TaskCardsRow
+                tasks={runningTasks}
+                selectedIndex={selectedIndex}
+                isFocused={!subagentPanelVisible || focusedPane === 'output'}
+              />
+            </box>
+
+            {/* Bottom half: RightPanel (log viewer) */}
+            <box
+              style={{
+                flexGrow: 1,
+              }}
+            >
+              <RightPanel
+                selectedTask={selectedTask}
+                currentIteration={selectedTaskIteration.iteration}
+                iterationOutput={displayIterationOutput}
+                iterationSegments={selectedTaskIteration.segments}
+                viewMode={detailsViewMode}
+                iterationTiming={selectedTaskIteration.timing}
+                agentName={displayAgentInfo.agent}
+                currentModel={displayAgentInfo.model}
+                isViewingRemote={isViewingRemote}
+                remoteConnectionStatus={instanceTabs?.[selectedTabIndex]?.status}
+                remoteAlias={instanceTabs?.[selectedTabIndex]?.alias}
+              />
+            </box>
+
             {/* Subagent Tree Panel - shown on right side when toggled with 'T' key */}
             {subagentPanelVisible && (
               <SubagentTreePanel
@@ -2362,20 +2380,15 @@ export function RunApp({
               width={isCompact ? width : Math.floor(width * 0.5)}
               subagentStats={subagentStatsCache}
             />
-            <RightPanel
-              selectedTask={selectedTask}
+            <LogPane
+              taskTitle={selectedTask?.title}
+              taskId={selectedTask?.id}
               currentIteration={selectedTaskIteration.iteration}
               iterationOutput={displayIterationOutput}
-              iterationSegments={selectedTaskIteration.segments}
-              viewMode={detailsViewMode}
               iterationTiming={selectedTaskIteration.timing}
               agentName={displayAgentInfo.agent}
               currentModel={displayAgentInfo.model}
-              promptPreview={promptPreview}
-              templateSource={templateSource}
-              isViewingRemote={isViewingRemote}
-              remoteConnectionStatus={instanceTabs?.[selectedTabIndex]?.status}
-              remoteAlias={instanceTabs?.[selectedTabIndex]?.alias}
+              isFocused={!subagentPanelVisible || focusedPane === 'output'}
             />
             {/* Subagent Tree Panel - shown on right side when toggled with 'T' key */}
             {subagentPanelVisible && (

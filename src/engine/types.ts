@@ -3,7 +3,7 @@
  * Defines events, iteration results, engine state types, and error handling strategies.
  */
 
-import type { TrackerTask } from '../plugins/trackers/types.js';
+import type { TrackerTask, TrackerPlugin } from '../plugins/trackers/types.js';
 import type { AgentExecutionResult } from '../plugins/agents/types.js';
 import type { SubagentState as ParserSubagentState } from '../plugins/agents/tracing/types.js';
 
@@ -445,6 +445,8 @@ export interface AgentOutputEvent extends EngineEventBase {
   data: string;
   /** Iteration number */
   iteration: number;
+  /** Task ID for parallel execution (optional) */
+  taskId?: string;
 }
 
 /**
@@ -545,6 +547,33 @@ export type EngineEvent =
  * Event listener function type
  */
 export type EngineEventListener = (event: EngineEvent) => void;
+
+/**
+ * Shared engine controller interface for sequential and parallel engines.
+ */
+export interface EngineController {
+  initialize(): Promise<void>;
+  start(): Promise<void>;
+  stop(): void | Promise<void>;
+  pause(): void;
+  resume(): void;
+  refreshTasks(): Promise<void>;
+  getState(): Readonly<EngineState>;
+  getTracker(): TrackerPlugin | null;
+  resetTasksToOpen(taskIds: string[]): Promise<number>;
+  dispose(): Promise<void>;
+  on(listener: EngineEventListener): () => void;
+  getIterationInfo?: () => { currentIteration: number; maxIterations: number };
+  addIterations?: (count: number) => void;
+  removeIterations?: (count: number) => void;
+  continueExecution?: () => Promise<void>;
+  getSubagentTree?: () => unknown;
+  getSubagentOutput?: (subagentId: string) => string | undefined;
+  getSubagentDetails?: (subagentId: string) => unknown;
+  generatePromptPreview?: (
+    taskId: string
+  ) => Promise<{ success: true; prompt: string; source: string } | { success: false; error: string }>;
+}
 
 /**
  * Engine status

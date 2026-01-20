@@ -4,7 +4,7 @@
  * Implements full CRUD operations for file-based task tracking with the prd.json format.
  */
 
-import { readFile, writeFile, access, constants } from 'node:fs/promises';
+import { readFile, writeFile, access, constants, mkdir, open, unlink } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { BaseTrackerPlugin } from '../../base.js';
@@ -336,6 +336,46 @@ export class JsonTrackerPlugin extends BaseTrackerPlugin {
   private cacheTime: number = 0;
   private readonly CACHE_TTL_MS = 1000; // 1 second cache TTL
   private epicId: string = ''; // Stores prd:<name> or empty
+
+  private async getClaimLockDir(): Promise<string> {
+    const baseDir = this.filePath ? resolve(this.filePath, '..') : process.cwd();
+    const lockDir = join(baseDir, '.ralph-tui', 'claims');
+    await mkdir(lockDir, { recursive: true });
+    return lockDir;
+  }
+
+  override async claimTask(id: string, workerId: string): Promise<boolean> {
+    const lockDir = await this.getClaimLockDir();
+    const lockPath = join(lockDir, `${id}.lock`);
+
+    try {
+      const handle = await open(lockPath, 'wx');
+      await handle.writeFile(
+        JSON.stringify({ taskId: id, workerId, claimedAt: new Date().toISOString() }),
+        'utf-8'
+      );
+      await handle.close();
+      return true;
+    } catch (err) {
+      if (err && typeof err === 'object' && 'code' in err && err.code === 'EEXIST') {
+        return false;
+      }
+      throw err;
+    }
+  }
+
+  override async releaseTask(id: string, _workerId: string): Promise<void> {
+    const lockDir = await this.getClaimLockDir();
+    const lockPath = join(lockDir, `${id}.lock`);
+    try {
+      await unlink(lockPath);
+    } catch (err) {
+      if (err && typeof err === 'object' && 'code' in err && err.code === 'ENOENT') {
+        return;
+      }
+      throw err;
+    }
+  }
 
   override async initialize(config: Record<string, unknown>): Promise<void> {
     await super.initialize(config);

@@ -6,7 +6,7 @@
 
 import { spawn } from 'node:child_process';
 import { access, constants, readFileSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { readFile, mkdir, open, unlink } from 'node:fs/promises';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BaseTrackerPlugin } from '../../base.js';
@@ -232,6 +232,44 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
   private epicId: string = '';
   protected labels: string[] = [];
   private workingDir: string = process.cwd();
+
+  private async getLockDir(): Promise<string> {
+    const lockDir = join(this.workingDir, this.beadsDir, '.locks');
+    await mkdir(lockDir, { recursive: true });
+    return lockDir;
+  }
+
+  private async createTaskLock(taskId: string, workerId: string): Promise<boolean> {
+    const lockDir = await this.getLockDir();
+    const lockPath = join(lockDir, `${taskId}.lock`);
+    try {
+      const handle = await open(lockPath, 'wx');
+      await handle.writeFile(
+        JSON.stringify({ taskId, workerId, claimedAt: new Date().toISOString() }),
+        'utf-8'
+      );
+      await handle.close();
+      return true;
+    } catch (err) {
+      if (err && typeof err === 'object' && 'code' in err && err.code === 'EEXIST') {
+        return false;
+      }
+      throw err;
+    }
+  }
+
+  private async removeTaskLock(taskId: string): Promise<void> {
+    const lockDir = await this.getLockDir();
+    const lockPath = join(lockDir, `${taskId}.lock`);
+    try {
+      await unlink(lockPath);
+    } catch (err) {
+      if (err && typeof err === 'object' && 'code' in err && err.code === 'ENOENT') {
+        return;
+      }
+      throw err;
+    }
+  }
 
   override async initialize(config: Record<string, unknown>): Promise<void> {
     await super.initialize(config);
@@ -491,6 +529,26 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
     return this.getTask(id);
   }
 
+  override async claimTask(id: string, workerId: string): Promise<boolean> {
+    const locked = await this.createTaskLock(id, workerId);
+    if (!locked) {
+      return false;
+    }
+
+    const updated = await this.updateTaskStatus(id, 'in_progress');
+    if (!updated) {
+      await this.removeTaskLock(id);
+      return false;
+    }
+
+    return true;
+  }
+
+  override async releaseTask(id: string, _workerId: string): Promise<void> {
+    await this.updateTaskStatus(id, 'open');
+    await this.removeTaskLock(id);
+  }
+
   override async sync(): Promise<SyncResult> {
     // Run bd sync to synchronize with git
     const { exitCode, stderr, stdout } = await execBd(
@@ -641,10 +699,26 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
       return undefined;
     }
 
-    // Prefer in_progress tasks over open tasks (same as base implementation)
-    const inProgress = tasks.find((t) => t.status === 'in_progress');
-    if (inProgress) {
-      return inProgress;
+    const statusFilter = filter?.status
+      ? Array.isArray(filter.status)
+        ? filter.status
+        : [filter.status]
+      : undefined;
+
+    if (statusFilter) {
+      tasks = tasks.filter((t) => statusFilter.includes(t.status));
+    }
+
+    if (tasks.length === 0) {
+      return undefined;
+    }
+
+    // Prefer in_progress tasks only when allowed by filter
+    if (!statusFilter || statusFilter.includes('in_progress')) {
+      const inProgress = tasks.find((t) => t.status === 'in_progress');
+      if (inProgress) {
+        return inProgress;
+      }
     }
 
     // Return the first ready task (bd ready already sorted by priority/hybrid)
