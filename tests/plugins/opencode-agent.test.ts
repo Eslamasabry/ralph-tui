@@ -1,10 +1,35 @@
 /**
  * ABOUTME: Tests for the OpenCodeAgentPlugin.
  * Tests specific behaviors like model validation, setup questions, and agent types.
+ * Also tests stdin input handling for Windows shell interpretation safety.
  */
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { OpenCodeAgentPlugin } from '../../src/plugins/agents/builtin/opencode.js';
+import type { AgentFileContext, AgentExecuteOptions } from '../../src/plugins/agents/types.js';
+
+/**
+ * Test subclass to expose protected methods for testing.
+ */
+class TestableOpenCodePlugin extends OpenCodeAgentPlugin {
+  /** Expose buildArgs for testing */
+  testBuildArgs(
+    prompt: string,
+    files?: AgentFileContext[],
+    options?: AgentExecuteOptions
+  ): string[] {
+    return this['buildArgs'](prompt, files, options);
+  }
+
+  /** Expose getStdinInput for testing */
+  testGetStdinInput(
+    prompt: string,
+    files?: AgentFileContext[],
+    options?: AgentExecuteOptions
+  ): string | undefined {
+    return this['getStdinInput'](prompt, files, options);
+  }
+}
 
 describe('OpenCodeAgentPlugin', () => {
   let plugin: OpenCodeAgentPlugin;
@@ -204,6 +229,116 @@ describe('OpenCodeAgentPlugin', () => {
       await plugin.initialize({});
       await plugin.dispose();
       expect(await plugin.isReady()).toBe(false);
+    });
+  });
+
+  describe('buildArgs (stdin input for Windows safety)', () => {
+    let testablePlugin: TestableOpenCodePlugin;
+
+    beforeEach(async () => {
+      testablePlugin = new TestableOpenCodePlugin();
+      await testablePlugin.initialize({});
+    });
+
+    afterEach(async () => {
+      await testablePlugin.dispose();
+    });
+
+    test('does NOT include prompt in args (passed via stdin instead)', () => {
+      const prompt = 'Hello world';
+      const args = testablePlugin.testBuildArgs(prompt);
+
+      // The prompt should NOT be in args - it's passed via stdin
+      expect(args).not.toContain(prompt);
+      // Should still have basic args
+      expect(args).toContain('run');
+      expect(args).toContain('--format');
+      expect(args).toContain('json');
+    });
+
+    test('does NOT include prompt with special characters in args', () => {
+      // These characters would cause "syntax error" on Windows cmd.exe
+      const prompt = 'feature with & special | characters > test "quoted"';
+      const args = testablePlugin.testBuildArgs(prompt);
+
+      // The prompt with special chars should NOT be in args
+      expect(args).not.toContain(prompt);
+      // None of the special chars should appear in any arg
+      for (const arg of args) {
+        expect(arg).not.toContain('&');
+        expect(arg).not.toContain('|');
+        expect(arg).not.toContain('>');
+      }
+    });
+
+    test('includes file context in args', () => {
+      const prompt = 'Review this file';
+      const files: AgentFileContext[] = [
+        { path: '/path/to/file.ts' },
+      ];
+      const args = testablePlugin.testBuildArgs(prompt, files);
+
+      expect(args).toContain('--file');
+      expect(args).toContain('/path/to/file.ts');
+    });
+
+    test('includes multiple file contexts', () => {
+      const prompt = 'Review these files';
+      const files: AgentFileContext[] = [
+        { path: '/path/to/file1.ts' },
+        { path: '/path/to/file2.ts' },
+      ];
+      const args = testablePlugin.testBuildArgs(prompt, files);
+
+      // Should have --file for each file
+      const fileFlags = args.filter((arg) => arg === '--file');
+      expect(fileFlags.length).toBe(2);
+      expect(args).toContain('/path/to/file1.ts');
+      expect(args).toContain('/path/to/file2.ts');
+    });
+  });
+
+  describe('getStdinInput', () => {
+    let testablePlugin: TestableOpenCodePlugin;
+
+    beforeEach(async () => {
+      testablePlugin = new TestableOpenCodePlugin();
+      await testablePlugin.initialize({});
+    });
+
+    afterEach(async () => {
+      await testablePlugin.dispose();
+    });
+
+    test('returns the prompt for stdin', () => {
+      const prompt = 'Hello world';
+      const stdinInput = testablePlugin.testGetStdinInput(prompt);
+
+      expect(stdinInput).toBe(prompt);
+    });
+
+    test('returns prompt with special characters unchanged', () => {
+      // These characters would cause issues if passed as CLI args on Windows
+      const prompt = 'feature with & special | characters > test "quoted"';
+      const stdinInput = testablePlugin.testGetStdinInput(prompt);
+
+      // Stdin should contain the prompt exactly as-is (no escaping needed)
+      expect(stdinInput).toBe(prompt);
+    });
+
+    test('returns prompt with newlines', () => {
+      const prompt = 'Line 1\nLine 2\nLine 3';
+      const stdinInput = testablePlugin.testGetStdinInput(prompt);
+
+      expect(stdinInput).toBe(prompt);
+      expect(stdinInput).toContain('\n');
+    });
+
+    test('returns prompt with unicode characters', () => {
+      const prompt = 'Hello 世界 🎉 émojis';
+      const stdinInput = testablePlugin.testGetStdinInput(prompt);
+
+      expect(stdinInput).toBe(prompt);
     });
   });
 });
