@@ -28,6 +28,7 @@ import { SettingsView } from './SettingsView.js';
 import { EpicLoaderOverlay } from './EpicLoaderOverlay.js';
 import type { EpicLoaderMode } from './EpicLoaderOverlay.js';
 import { SubagentTreePanel } from './SubagentTreePanel.js';
+import { ActivityLog, type ActivityFilter } from './ActivityLog.js';
 import { TabBar } from './TabBar.js';
 import { RemoteConfigView } from './RemoteConfigView.js';
 import type { RemoteConfigData } from './RemoteConfigView.js';
@@ -70,8 +71,9 @@ type ViewMode = 'tasks' | 'iterations' | 'iteration-detail';
  * Focused pane for TAB-based navigation between panels.
  * - 'output': RightPanel output view has keyboard focus (j/k scroll output)
  * - 'subagentTree': SubagentTreePanel has keyboard focus (j/k select nodes)
+ * - 'activity': ActivityLog panel has keyboard focus (j/k scroll events)
  */
-type FocusedPane = 'output' | 'subagentTree';
+type FocusedPane = 'output' | 'subagentTree' | 'activity';
 
 /**
  * Props for the RunApp component
@@ -488,10 +490,17 @@ export function RunApp({
   // Track if user manually hid the panel (to respect user intent for auto-show logic)
   // When true, auto-show will not override user's explicit hide action
   const [userManuallyHidPanel, setUserManuallyHidPanel] = useState(false);
+  // Activity panel visibility state (toggled with 'L' key)
+  const [activityPanelVisible, setActivityPanelVisible] = useState(false);
+  // Activity filter state (all/tasks/merges)
+  const [activityFilter, setActivityFilter] = useState<ActivityFilter>('all');
+  // Parallel events list for activity log
+  const [parallelEvents, setParallelEvents] = useState<ParallelEvent[]>([]);
 
   // Focused pane for TAB-based navigation between output and subagent tree
   // - 'output': j/k scroll output content (default)
   // - 'subagentTree': j/k select nodes in the tree
+  // - 'activity': j/k scroll activity events
   const [focusedPane, setFocusedPane] = useState<FocusedPane>('output');
 
   // Selected node in subagent tree for keyboard navigation
@@ -1132,6 +1141,9 @@ export function RunApp({
 
     const unsubscribe = engine.onParallel((event) => {
       const parallelEvent = event as ParallelEvent;
+      // Add event to the activity log
+      setParallelEvents((prev) => [...prev, parallelEvent]);
+
       switch (parallelEvent.type) {
         case 'parallel:started':
           setMergeStats({
@@ -1363,10 +1375,18 @@ export function RunApp({
           break;
 
         case 'tab':
-          // Toggle focus between output and subagent tree panels
-          // Only works when subagent panel is visible and in output view mode
-          if (subagentPanelVisible && detailsViewMode === 'output') {
-            setFocusedPane((prev) => prev === 'output' ? 'subagentTree' : 'output');
+          // Toggle focus between output, subagent tree, and activity panels
+          // Only works when panels are visible and in output view mode
+          if (detailsViewMode === 'output') {
+            const panes: FocusedPane[] = [];
+            if (true) panes.push('output'); // RightPanel always available
+            if (subagentPanelVisible) panes.push('subagentTree');
+            if (activityPanelVisible) panes.push('activity');
+            if (panes.length > 1) {
+              const currentIdx = panes.indexOf(focusedPane);
+              const nextIdx = (currentIdx + 1) % panes.length;
+              setFocusedPane(panes[nextIdx]!);
+            }
           }
           break;
 
@@ -1706,6 +1726,31 @@ export function RunApp({
               }
               return nextLevel;
             });
+          }
+          break;
+
+        case 'l':
+          // Toggle activity panel visibility
+          setActivityPanelVisible((prev) => !prev);
+          break;
+
+        // Activity filter keys: 1 = all, 2 = tasks, 3 = merges
+        // Only active when activity panel is visible
+        case '1':
+          if (activityPanelVisible) {
+            setActivityFilter('all');
+          }
+          break;
+
+        case '2':
+          if (activityPanelVisible) {
+            setActivityFilter('tasks');
+          }
+          break;
+
+        case '3':
+          if (activityPanelVisible) {
+            setActivityFilter('merges');
           }
           break;
 
@@ -2517,6 +2562,16 @@ export function RunApp({
                 selectedId={selectedSubagentId}
                 onSelect={setSelectedSubagentId}
                 isFocused={focusedPane === 'subagentTree'}
+              />
+            )}
+
+            {/* Activity Log Panel - shown on right side when toggled with 'L' key */}
+            {activityPanelVisible && (
+              <ActivityLog
+                events={parallelEvents}
+                filter={activityFilter}
+                width={50}
+                isFocused={focusedPane === 'activity'}
               />
             )}
           </>

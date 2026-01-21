@@ -34,6 +34,8 @@ export { PrdChatApp } from './PrdChatApp.js';
 export type { PrdChatAppProps } from './PrdChatApp.js';
 export { SubagentTreePanel } from './SubagentTreePanel.js';
 export type { SubagentTreePanelProps } from './SubagentTreePanel.js';
+export { ActivityLog } from './ActivityLog.js';
+export type { ActivityLogProps, ActivityFilter } from './ActivityLog.js';
 export { TabBar } from './TabBar.js';
 export type { TabBarProps } from './TabBar.js';
 export { Toast, formatConnectionToast } from './Toast.js';
