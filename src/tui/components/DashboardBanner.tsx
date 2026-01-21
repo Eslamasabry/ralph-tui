@@ -113,10 +113,7 @@ export function DashboardBanner({
         <text fg={colors.fg.primary}>
           <strong>Parallel Command Center</strong>
           {appVersion && appVersion !== 'unknown' && (
-            <text>
-              <span fg={colors.fg.muted}> </span>
-              <span fg={colors.fg.muted}>{appVersion}</span>
-            </text>
+            <span fg={colors.fg.muted}> {appVersion}</span>
           )}
         </text>
         <text>
