@@ -24,6 +24,7 @@ import { TaskCardsRow } from './TaskCardsRow.js';
 import { LogPane } from './LogPane.js';
 import { ConfirmationDialog } from './ConfirmationDialog.js';
 import { HelpOverlay } from './HelpOverlay.js';
+import { ActivityView } from './ActivityView.js';
 import { SettingsView } from './SettingsView.js';
 import { EpicLoaderOverlay } from './EpicLoaderOverlay.js';
 import type { EpicLoaderMode } from './EpicLoaderOverlay.js';
@@ -424,6 +425,8 @@ export function RunApp({
   const [detailIteration, setDetailIteration] = useState<IterationResult | null>(null);
   // Help overlay state
   const [showHelp, setShowHelp] = useState(false);
+  // Activity view state (full-screen timeline overlay)
+  const [showActivityView, setShowActivityView] = useState(false);
   // Settings view state
   const [showSettings, setShowSettings] = useState(false);
   // Remote config view state
@@ -1334,6 +1337,14 @@ export function RunApp({
         return; // Don't process other keys when help is showing
       }
 
+      // When activity view is showing, A or Esc closes it
+      if (showActivityView) {
+        if (key.name === 'a' || key.name === 'escape') {
+          setShowActivityView(false);
+        }
+        return; // Don't process other keys when activity view is showing
+      }
+
       // When settings view is showing, let it handle its own keyboard events
       // Closing is handled by SettingsView internally via onClose callback
       if (showSettings) {
@@ -1809,6 +1820,11 @@ export function RunApp({
           setShowRemoteManagement(true);
           break;
 
+        // Activity view: 'A' (Shift+A) to toggle full-screen activity timeline
+        case 'A':
+          setShowActivityView((prev) => !prev);
+          break;
+
         // Remote management: 'e' to edit current remote (only when viewing a remote tab)
         case 'e':
           if (isViewingRemote && instanceTabs && selectedTabIndex > 0) {
@@ -1860,7 +1876,7 @@ export function RunApp({
           break;
       }
     },
-    [displayedTasks, selectedIndex, status, engine, onQuit, viewMode, iterations, iterationSelectedIndex, iterationHistoryLength, onIterationDrillDown, showInterruptDialog, onInterruptConfirm, onInterruptCancel, showHelp, showSettings, showQuitDialog, showEpicLoader, showRemoteManagement, onStart, storedConfig, onSaveSettings, onLoadEpics, subagentDetailLevel, onSubagentPanelVisibilityChange, currentIteration, maxIterations, renderer, detailsViewMode, subagentPanelVisible, focusedPane, navigateSubagentTree, instanceTabs, selectedTabIndex, onSelectTab, isViewingRemote, displayStatus, instanceManager]
+    [displayedTasks, selectedIndex, status, engine, onQuit, viewMode, iterations, iterationSelectedIndex, iterationHistoryLength, onIterationDrillDown, showInterruptDialog, onInterruptConfirm, onInterruptCancel, showHelp, showActivityView, showSettings, showQuitDialog, showEpicLoader, showRemoteManagement, onStart, storedConfig, onSaveSettings, onLoadEpics, subagentDetailLevel, onSubagentPanelVisibilityChange, currentIteration, maxIterations, renderer, detailsViewMode, subagentPanelVisible, focusedPane, navigateSubagentTree, instanceTabs, selectedTabIndex, onSelectTab, isViewingRemote, displayStatus, instanceManager]
   );
 
   useKeyboard(handleKeyboard);
@@ -2705,6 +2721,24 @@ export function RunApp({
 
       {/* Help Overlay */}
       <HelpOverlay visible={showHelp} />
+
+      {/* Activity View (full-screen timeline) */}
+      <ActivityView
+        visible={showActivityView}
+        onClose={() => setShowActivityView(false)}
+        currentIteration={currentIteration}
+        maxIterations={maxIterations}
+        currentTaskId={currentTaskId}
+        currentTaskTitle={currentTaskTitle}
+        currentStatus={iterations.find(i => i.iteration === currentIteration)?.status ?? (status === 'running' || status === 'executing' ? 'running' : undefined)}
+        currentStartedAt={currentIterationStartedAt}
+        currentDurationMs={iterations.find(i => i.iteration === currentIteration)?.durationMs}
+        elapsedTime={elapsedTime}
+        isExecuting={status === 'running' || status === 'executing'}
+        subagentTree={subagentTree}
+        subagentStats={subagentStatsCache.get(currentIteration)}
+        iterations={iterations}
+      />
 
       {/* Settings View */}
       {storedConfig && onSaveSettings && (
