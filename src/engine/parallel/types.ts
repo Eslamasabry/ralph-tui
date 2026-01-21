@@ -95,4 +95,5 @@ export type ParallelEvent =
   | { type: 'parallel:merge-succeeded'; timestamp: string; workerId: string; task: TrackerTask; commit: string; commitMetadata: CommitMetadata; resolved?: boolean; filesChanged?: string[]; conflictFiles?: string[] }
   | { type: 'parallel:merge-failed'; timestamp: string; workerId: string; task: TrackerTask; commit: string; commitMetadata: CommitMetadata; reason: string; conflictFiles?: string[] }
   | { type: 'parallel:main-sync-skipped'; timestamp: string; reason: string }
-  | { type: 'parallel:main-sync-succeeded'; timestamp: string; commit: string };
+  | { type: 'parallel:main-sync-succeeded'; timestamp: string; commit: string }
+  | { type: 'parallel:main-sync-failed'; timestamp: string; task: TrackerTask; reason: string };
