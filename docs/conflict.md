@@ -1,1 +1,1 @@
-Conflict version A
+Conflict version B
