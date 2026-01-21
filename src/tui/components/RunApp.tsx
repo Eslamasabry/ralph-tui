@@ -45,6 +45,7 @@ import type {
   RateLimitState,
   TrackerRealtimeStatus,
 } from '../../engine/types.js';
+import type { ParallelEvent } from '../../engine/parallel/types.js';
 import type { TrackerTask } from '../../plugins/trackers/types.js';
 import type { StoredConfig, SubagentDetailLevel, SandboxConfig, SandboxMode } from '../../config/types.js';
 import type { AgentPluginMeta } from '../../plugins/agents/types.js';
@@ -385,6 +386,14 @@ export function RunApp({
   const [parallelOutputs, setParallelOutputs] = useState<Map<string, string>>(() => new Map());
   const [parallelTimings, setParallelTimings] = useState<Map<string, IterationTimingInfo>>(() => new Map());
   const [parallelIterations, setParallelIterations] = useState<Map<string, number>>(() => new Map());
+  const [mergeStats, setMergeStats] = useState({
+    worktrees: 0,
+    queued: 0,
+    merged: 0,
+    resolved: 0,
+    failed: 0,
+    syncPending: 0,
+  });
   // Streaming parser for live output - extracts readable content and prevents memory bloat
   // Use agentPlugin prop (from resolved config with CLI override) with fallback to storedConfig
   const resolvedAgentName = agentPlugin || storedConfig?.defaultAgent || storedConfig?.agent || 'claude';
@@ -564,8 +573,8 @@ export function RunApp({
         setRemoteOutput(state.currentOutput || '');
         if (state.currentTask) {
           setRemoteCurrentTaskId(state.currentTask.id);
-          setRemoteCurrentTaskTitle(state.currentTask.title);
-        }
+        setRemoteCurrentTaskTitle(state.currentTask.title);
+      }
         // Capture remote agent and rate limit state
         if (state.activeAgent) {
           setRemoteActiveAgent(state.activeAgent);
@@ -573,7 +582,9 @@ export function RunApp({
         if (state.rateLimitState) {
           setRemoteRateLimitState(state.rateLimitState);
         }
-        setRemoteTrackerRealtimeStatus(state.trackerRealtimeStatus);
+        if ('trackerRealtimeStatus' in state) {
+          setRemoteTrackerRealtimeStatus(state.trackerRealtimeStatus);
+        }
         // Capture remote config info for display
         if (state.agentName) {
           setRemoteAgentName(state.agentName);
@@ -1104,6 +1115,63 @@ export function RunApp({
           break;
         case 'tracker:realtime':
           setTrackerRealtimeStatus(event.status);
+          break;
+      }
+    });
+
+    return unsubscribe;
+  }, [engine]);
+
+  useEffect(() => {
+    if (!engine.onParallel) {
+      return;
+    }
+
+    const unsubscribe = engine.onParallel((event) => {
+      const parallelEvent = event as ParallelEvent;
+      switch (parallelEvent.type) {
+        case 'parallel:started':
+          setMergeStats({
+            worktrees: parallelEvent.workerCount + 1,
+            queued: 0,
+            merged: 0,
+            resolved: 0,
+            failed: 0,
+            syncPending: 0,
+          });
+          break;
+        case 'parallel:stopped':
+          setMergeStats((prev) => ({ ...prev, worktrees: 0 }));
+          break;
+        case 'parallel:merge-queued':
+          setMergeStats((prev) => ({ ...prev, queued: prev.queued + 1 }));
+          break;
+        case 'parallel:merge-succeeded':
+          setMergeStats((prev) => ({
+            ...prev,
+            queued: Math.max(0, prev.queued - 1),
+            merged: prev.merged + 1,
+            resolved: parallelEvent.resolved ? prev.resolved + 1 : prev.resolved,
+          }));
+          break;
+        case 'parallel:merge-failed':
+          setMergeStats((prev) => ({
+            ...prev,
+            queued: Math.max(0, prev.queued - 1),
+            failed: prev.failed + 1,
+          }));
+          break;
+        case 'parallel:main-sync-skipped':
+          setMergeStats((prev) => ({
+            ...prev,
+            syncPending: 1,
+          }));
+          break;
+        case 'parallel:main-sync-succeeded':
+          setMergeStats((prev) => ({
+            ...prev,
+            syncPending: 0,
+          }));
           break;
       }
     });
@@ -2380,6 +2448,12 @@ export function RunApp({
               blockedTasks={taskCounts.blocked}
               completedTasks={taskCounts.completed}
               failedTasks={taskCounts.failed}
+              worktreeCount={mergeStats.worktrees}
+              mergesQueued={mergeStats.queued}
+              mergesSucceeded={mergeStats.merged}
+              mergesResolved={mergeStats.resolved}
+              mergesFailed={mergeStats.failed}
+              mainSyncPending={mergeStats.syncPending}
             />
 
               {/* Task Cards Row - horizontal cards for tasks */}

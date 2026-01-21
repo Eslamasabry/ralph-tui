@@ -4,7 +4,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { mkdir, rm, access } from 'node:fs/promises';
+import { mkdir, rm, access, writeFile, chmod } from 'node:fs/promises';
 import { join } from 'node:path';
 
 interface GitCommandResult {
@@ -51,7 +51,10 @@ export class WorktreeManager {
     // Clean any stale worktree state before creating a new one
     await this.cleanupWorktree(workerId);
 
-    const args = ['-C', this.repoRoot, 'worktree', 'add', '-b', branchName, worktreePath, baseRef];
+    const branchExists = await this.branchExists(branchName);
+    const args = branchExists
+      ? ['-C', this.repoRoot, 'worktree', 'add', worktreePath, branchName]
+      : ['-C', this.repoRoot, 'worktree', 'add', '-b', branchName, worktreePath, baseRef];
     let result = await this.execGit(args);
 
     if (result.exitCode !== 0) {
@@ -67,6 +70,8 @@ export class WorktreeManager {
     if (lockReason) {
       await this.lockWorktree(worktreePath, lockReason);
     }
+
+    await this.ensureWorktreeShims(worktreePath);
 
     return worktreePath;
   }
@@ -118,6 +123,11 @@ export class WorktreeManager {
     }
   }
 
+  private async branchExists(branchName: string): Promise<boolean> {
+    const result = await this.execGit(['-C', this.repoRoot, 'rev-parse', '--verify', `refs/heads/${branchName}`]);
+    return result.exitCode === 0;
+  }
+
   private async cleanupWorktree(workerId: string): Promise<void> {
     const worktreePath = this.getWorktreePath(workerId);
     await this.execGitAllowFailure(['-C', this.repoRoot, 'worktree', 'unlock', worktreePath]);
@@ -129,6 +139,18 @@ export class WorktreeManager {
     } catch {
       // ignore missing path
     }
+  }
+
+  private async ensureWorktreeShims(worktreePath: string): Promise<void> {
+    const binDir = join(worktreePath, '.ralph-tui', 'bin');
+    await mkdir(binDir, { recursive: true });
+
+    const bdShimPath = join(binDir, 'bd');
+    const content = '#!/usr/bin/env bash\n' +
+      'echo "bd is disabled in worker worktrees. Use tracker APIs only." >&2\n' +
+      'exit 1\n';
+    await writeFile(bdShimPath, content, 'utf-8');
+    await chmod(bdShimPath, 0o755);
   }
 
   private async execGitAllowFailure(args: string[]): Promise<GitCommandResult> {

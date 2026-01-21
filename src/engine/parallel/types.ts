@@ -28,6 +28,8 @@ export type ParallelEvent =
   | { type: 'parallel:task-output'; timestamp: string; workerId: string; taskId: string; data: string; stream: 'stdout' | 'stderr' }
   | { type: 'parallel:task-segments'; timestamp: string; workerId: string; taskId: string; segments: FormattedSegment[] }
   | { type: 'parallel:task-finished'; timestamp: string; workerId: string; task: TrackerTask; result: AgentExecutionResult; completed: boolean }
-  | { type: 'parallel:merge-queued'; timestamp: string; workerId: string; task: TrackerTask; commit: string }
-  | { type: 'parallel:merge-succeeded'; timestamp: string; workerId: string; task: TrackerTask; commit: string }
-  | { type: 'parallel:merge-failed'; timestamp: string; workerId: string; task: TrackerTask; commit: string; reason: string };
+  | { type: 'parallel:merge-queued'; timestamp: string; workerId: string; task: TrackerTask; commit: string; filesChanged?: string[] }
+  | { type: 'parallel:merge-succeeded'; timestamp: string; workerId: string; task: TrackerTask; commit: string; resolved?: boolean; filesChanged?: string[]; conflictFiles?: string[] }
+  | { type: 'parallel:merge-failed'; timestamp: string; workerId: string; task: TrackerTask; commit: string; reason: string; conflictFiles?: string[] }
+  | { type: 'parallel:main-sync-skipped'; timestamp: string; reason: string }
+  | { type: 'parallel:main-sync-succeeded'; timestamp: string; commit: string };

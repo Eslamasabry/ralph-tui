@@ -121,6 +121,8 @@ function mapStatus(bdStatus: string): TrackerTaskStatus {
       return 'open';
     case 'in_progress':
       return 'in_progress';
+    case 'blocked':
+      return 'blocked';
     case 'closed':
       return 'completed';
     case 'cancelled':
@@ -144,8 +146,7 @@ function mapStatusToBd(status: TrackerTaskStatus): string {
     case 'cancelled':
       return 'cancelled';
     case 'blocked':
-      // Beads doesn't have a blocked status; keep as open
-      return 'open';
+      return 'blocked';
     default:
       return 'open';
   }
@@ -585,7 +586,6 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
   }
 
   override async releaseTask(id: string, _workerId: string): Promise<void> {
-    await this.updateTaskStatus(id, 'open');
     await this.removeTaskLock(id);
   }
 
@@ -735,10 +735,6 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
       tasks = tasks.filter((t) => !excludeSet.has(t.id));
     }
 
-    if (tasks.length === 0) {
-      return undefined;
-    }
-
     const statusFilter = filter?.status
       ? Array.isArray(filter.status)
         ? filter.status
@@ -750,6 +746,19 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
     }
 
     if (tasks.length === 0) {
+      const shouldFallback = !statusFilter || statusFilter.includes('open');
+      if (shouldFallback) {
+        const fallbackTasks = await this.getTasks({
+          ...filter,
+          status: 'open',
+          ready: true,
+        });
+        if (fallbackTasks.length === 0) {
+          return undefined;
+        }
+        fallbackTasks.sort((a, b) => a.priority - b.priority);
+        return fallbackTasks[0];
+      }
       return undefined;
     }
 

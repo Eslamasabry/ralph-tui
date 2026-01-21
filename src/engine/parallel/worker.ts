@@ -3,6 +3,7 @@
  */
 
 import type { AgentPlugin, AgentExecutionResult } from '../../plugins/agents/types.js';
+import { join } from 'node:path';
 import type { TrackerTask } from '../../plugins/trackers/types.js';
 import type { RalphConfig } from '../../config/types.js';
 import type { FormattedSegment } from '../../plugins/agents/output-formatting.js';
@@ -51,11 +52,18 @@ export class ParallelWorker {
     }
 
     const supportsTracing = this.agent.meta.supportsSubagentTracing;
+    const shimPath = join(this.worktreePath, '.ralph-tui', 'bin');
+    const env = {
+      ...process.env,
+      PATH: `${shimPath}:${process.env.PATH ?? ''}`,
+      RALPH_TUI_DISABLE_BD: '1',
+    };
 
     try {
       const handle = this.agent.execute(prompt, [], {
         cwd: this.worktreePath,
         flags,
+        env,
         sandbox: this.config.sandbox,
         subagentTracing: supportsTracing,
         onStdout: callbacks.onStdout,

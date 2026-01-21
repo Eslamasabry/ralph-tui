@@ -596,6 +596,7 @@ export interface EngineController {
   resetTasksToOpen(taskIds: string[]): Promise<number>;
   dispose(): Promise<void>;
   on(listener: EngineEventListener): () => void;
+  onParallel?: (listener: (event: unknown) => void) => () => void;
   getIterationInfo?: () => { currentIteration: number; maxIterations: number };
   addIterations?: (count: number) => void;
   removeIterations?: (count: number) => void;

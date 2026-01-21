@@ -22,6 +22,18 @@ export interface DashboardBannerProps {
   completedTasks: number;
   /** Number of failed tasks */
   failedTasks: number;
+  /** Number of active worktrees */
+  worktreeCount: number;
+  /** Number of queued merges */
+  mergesQueued: number;
+  /** Number of successful merges */
+  mergesSucceeded: number;
+  /** Number of merges resolved after conflict */
+  mergesResolved: number;
+  /** Number of failed merges */
+  mergesFailed: number;
+  /** Number of main sync pending events */
+  mainSyncPending: number;
 }
 
 /**
@@ -56,6 +68,12 @@ export function DashboardBanner({
   blockedTasks,
   completedTasks,
   failedTasks,
+  worktreeCount,
+  mergesQueued,
+  mergesSucceeded,
+  mergesResolved,
+  mergesFailed,
+  mainSyncPending,
 }: DashboardBannerProps): ReactNode {
   const hasActive = activeTasks > 0;
   const hasQueued = queuedTasks > 0;
@@ -67,7 +85,7 @@ export function DashboardBanner({
     <box
       style={{
         width: '100%',
-        height: 4,
+        height: 5,
         flexDirection: 'column',
         backgroundColor: colors.bg.secondary,
         border: true,
@@ -113,6 +131,23 @@ export function DashboardBanner({
         <StatItem label="Blocked" value={blockedTasks} color={colors.task.blocked} />
         <StatItem label="Done" value={completedTasks} color={colors.status.success} />
         <StatItem label="Failed" value={failedTasks} color={colors.status.error} />
+      </box>
+
+      {/* Merge status row */}
+      <box
+        style={{
+          flexDirection: 'row',
+          gap: 3,
+          flexWrap: 'wrap',
+          justifyContent: 'space-between',
+        }}
+      >
+        <StatItem label="Worktrees" value={worktreeCount} color={colors.accent.primary} />
+        <StatItem label="Merge Q" value={mergesQueued} color={colors.fg.muted} />
+        <StatItem label="Merged" value={mergesSucceeded} color={colors.status.success} />
+        <StatItem label="Resolved" value={mergesResolved} color={colors.status.info} />
+        <StatItem label="Merge Fail" value={mergesFailed} color={colors.status.error} />
+        <StatItem label="Sync Pending" value={mainSyncPending} color={colors.status.warning} />
       </box>
     </box>
   );
