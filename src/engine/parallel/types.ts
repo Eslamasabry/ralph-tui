@@ -6,6 +6,69 @@ import type { TrackerTask } from '../../plugins/trackers/types.js';
 import type { AgentExecutionResult } from '../../plugins/agents/types.js';
 import type { FormattedSegment } from '../../plugins/agents/output-formatting.js';
 
+/**
+ * Commit metadata captured for merge events.
+ * Provides detailed information about commits being merged.
+ */
+export interface CommitMetadata {
+  /** Full commit hash */
+  hash: string;
+  /** Abbreviated commit hash (first 7 characters) */
+  shortHash: string;
+  /** Commit message (first line) */
+  message: string;
+  /** Full commit message including body */
+  fullMessage: string;
+  /** Author name */
+  authorName: string;
+  /** Author email */
+  authorEmail: string;
+  /** Author date (ISO 8601) */
+  authorDate: string;
+  /** Committer name */
+  committerName: string;
+  /** Committer email */
+  committerEmail: string;
+  /** Committer date (ISO 8601) */
+  committerDate: string;
+  /** Number of files changed */
+  filesChanged: number;
+  /** Number of insertions (additions) */
+  insertions: number;
+  /** Number of deletions */
+  deletions: number;
+  /** List of files changed */
+  fileNames: string[];
+  /** Parent commit hashes */
+  parents: string[];
+  /** Tree hash */
+  treeHash: string;
+}
+
+/**
+ * File change details for a single file in a commit.
+ */
+export interface FileChange {
+  /** File path */
+  path: string;
+  /** Type of change: 'added', 'modified', 'deleted', 'renamed' */
+  type: 'added' | 'modified' | 'deleted' | 'renamed';
+  /** Old path (for renames) */
+  oldPath?: string;
+  /** Number of insertions */
+  insertions: number;
+  /** Number of deletions */
+  deletions: number;
+}
+
+/**
+ * Extended commit metadata with file-level details.
+ */
+export interface CommitMetadataDetailed extends CommitMetadata {
+  /** Detailed file changes */
+  files: FileChange[];
+}
+
 export interface ParallelWorkerState {
   workerId: string;
   worktreePath: string;
@@ -28,8 +91,8 @@ export type ParallelEvent =
   | { type: 'parallel:task-output'; timestamp: string; workerId: string; taskId: string; data: string; stream: 'stdout' | 'stderr' }
   | { type: 'parallel:task-segments'; timestamp: string; workerId: string; taskId: string; segments: FormattedSegment[] }
   | { type: 'parallel:task-finished'; timestamp: string; workerId: string; task: TrackerTask; result: AgentExecutionResult; completed: boolean }
-  | { type: 'parallel:merge-queued'; timestamp: string; workerId: string; task: TrackerTask; commit: string; filesChanged?: string[] }
-  | { type: 'parallel:merge-succeeded'; timestamp: string; workerId: string; task: TrackerTask; commit: string; resolved?: boolean; filesChanged?: string[]; conflictFiles?: string[] }
-  | { type: 'parallel:merge-failed'; timestamp: string; workerId: string; task: TrackerTask; commit: string; reason: string; conflictFiles?: string[] }
+  | { type: 'parallel:merge-queued'; timestamp: string; workerId: string; task: TrackerTask; commit: string; commitMetadata: CommitMetadata; filesChanged?: string[] }
+  | { type: 'parallel:merge-succeeded'; timestamp: string; workerId: string; task: TrackerTask; commit: string; commitMetadata: CommitMetadata; resolved?: boolean; filesChanged?: string[]; conflictFiles?: string[] }
+  | { type: 'parallel:merge-failed'; timestamp: string; workerId: string; task: TrackerTask; commit: string; commitMetadata: CommitMetadata; reason: string; conflictFiles?: string[] }
   | { type: 'parallel:main-sync-skipped'; timestamp: string; reason: string }
   | { type: 'parallel:main-sync-succeeded'; timestamp: string; commit: string };

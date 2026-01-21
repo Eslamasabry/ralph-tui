@@ -11,7 +11,7 @@ import { getTrackerRegistry } from '../../plugins/trackers/registry.js';
 import { buildParallelPrompt } from './prompt.js';
 import { WorktreeManager } from './worktree-manager.js';
 import { ParallelWorker } from './worker.js';
-import type { ParallelEvent, ParallelTaskResult } from './types.js';
+import type { ParallelEvent, ParallelTaskResult, CommitMetadata } from './types.js';
 
 export interface ParallelCoordinatorOptions {
   maxWorkers: number;
@@ -294,12 +294,14 @@ export class ParallelCoordinator {
     reason: string,
     conflictFiles?: string[]
   ): Promise<void> {
+    const commitMetadata = await this.getCommitMetadata(entry.commit, this.config.cwd);
     this.emit({
       type: 'parallel:merge-failed',
       timestamp: new Date().toISOString(),
       workerId: entry.workerId,
       task: entry.task,
       commit: entry.commit,
+      commitMetadata,
       reason,
       conflictFiles,
     });
@@ -320,12 +322,14 @@ export class ParallelCoordinator {
     filesChanged?: string[],
     conflictFiles?: string[]
   ): Promise<void> {
+    const commitMetadata = await this.getCommitMetadata(entry.commit, this.config.cwd);
     this.emit({
       type: 'parallel:merge-succeeded',
       timestamp: new Date().toISOString(),
       workerId: entry.workerId,
       task: entry.task,
       commit: entry.commit,
+      commitMetadata,
       resolved,
       filesChanged,
       conflictFiles,
@@ -390,6 +394,115 @@ export class ParallelCoordinator {
       return [];
     }
     return result.stdout.split('\n').map((line) => line.trim()).filter(Boolean);
+  }
+
+  /**
+   * Get detailed commit metadata using git log with format options.
+   * Falls back to basic info if full metadata unavailable.
+   */
+  private async getCommitMetadata(commit: string, repoPath: string): Promise<CommitMetadata> {
+    // Use git log with format strings for detailed commit info
+    const formatArgs = [
+      commit,
+      '--format=',
+      '%H%n%h%n%s%n%B%n%an%n%ae%n%ad%n%cn%n%ce%n%cd%n%P%n%T',
+    ];
+
+    const result = await this.execGitIn(repoPath, ['log', ...formatArgs]);
+
+    if (result.exitCode !== 0 || !result.stdout.trim()) {
+      // Fallback: return basic info from diff-tree
+      const filesResult = await this.execGitIn(repoPath, ['diff-tree', '--no-commit-id', '-r', '--stat', commit]);
+      const fileNames = await this.getCommitFiles(commit, repoPath);
+
+      const statMatch = filesResult.stdout.match(/(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?/);
+      const filesChanged = statMatch ? parseInt(statMatch[1] || '0', 10) : fileNames.length;
+      const insertions = statMatch ? parseInt(statMatch[2] || '0', 10) : 0;
+      const deletions = statMatch ? parseInt(statMatch[3] || '0', 10) : 0;
+
+      return {
+        hash: commit,
+        shortHash: commit.slice(0, 7),
+        message: '',
+        fullMessage: '',
+        authorName: '',
+        authorEmail: '',
+        authorDate: '',
+        committerName: '',
+        committerEmail: '',
+        committerDate: '',
+        filesChanged,
+        insertions,
+        deletions,
+        fileNames,
+        parents: [],
+        treeHash: '',
+      };
+    }
+
+    const lines = result.stdout.split('\n').filter((line) => line.trim() !== '');
+
+    // Parse the output based on the format:
+    // Line 0: full hash
+    // Line 1: short hash
+    // Line 2: subject (first line of message)
+    // Line 3+: body (full message)
+    // Then: author name, author email, author date, committer name, committer email, committer date, parents, tree hash
+
+    let idx = 0;
+    const fullHash = lines[idx++] || commit;
+    const shortHash = lines[idx++] || commit.slice(0, 7);
+
+    // Collect full message (subject + body)
+    const messageLines: string[] = [];
+    while (idx < lines.length && !lines[idx].includes('@')) {
+      messageLines.push(lines[idx]);
+      idx++;
+    }
+
+    const fullMessage = messageLines.join('\n').trim();
+    const message = messageLines[0] || '';
+
+    const authorName = lines[idx++] || '';
+    const authorEmail = lines[idx++] || '';
+    const authorDate = lines[idx++] || '';
+    const committerName = lines[idx++] || '';
+    const committerEmail = lines[idx++] || '';
+    const committerDate = lines[idx++] || '';
+
+    // Parents and tree hash (may be empty)
+    const parents = idx < lines.length && lines[idx] ? lines[idx].split(' ') : [];
+    idx++;
+    const treeHash = idx < lines.length && lines[idx] ? lines[idx] : '';
+
+    // Get file statistics
+    const statResult = await this.execGitIn(repoPath, ['diff-tree', '--no-commit-id', '-r', '--stat', commit]);
+    const statMatch = statResult.stdout.match(/(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?/);
+    const filesChanged = statMatch ? parseInt(statMatch[1] || '0', 10) : 0;
+    const insertions = statMatch ? parseInt(statMatch[2] || '0', 10) : 0;
+    const deletions = statMatch ? parseInt(statMatch[3] || '0', 10) : 0;
+
+    // Get file names
+    const fileNames = await this.getCommitFiles(commit, repoPath);
+
+    return {
+      hash: fullHash,
+      shortHash,
+      message,
+      fullMessage,
+      authorName,
+      authorEmail,
+      authorDate,
+      committerName,
+      committerEmail,
+      committerDate,
+      filesChanged,
+      insertions,
+      deletions,
+      fileNames,
+      parents,
+      treeHash,
+    };
   }
 
   private isEmptyCherryPick(result: { stdout: string; stderr: string }): boolean {
@@ -460,6 +573,7 @@ export class ParallelCoordinator {
 
   private async enqueueMerge(entry: { task: TrackerTask; workerId: string; commit: string }): Promise<void> {
     const filesChanged = await this.getCommitFiles(entry.commit, this.config.cwd);
+    const commitMetadata = await this.getCommitMetadata(entry.commit, this.config.cwd);
     const queuedEntry = { ...entry, filesChanged };
     this.mergeQueue.push(queuedEntry);
     this.emit({
@@ -468,6 +582,7 @@ export class ParallelCoordinator {
       workerId: entry.workerId,
       task: entry.task,
       commit: entry.commit,
+      commitMetadata,
       filesChanged,
     });
     void this.processMergeQueue();
