@@ -262,10 +262,7 @@ export class ParallelCoordinator {
     if (taskResult.completed) {
       const commits = await this.collectCommits(taskResult.task, workerId);
       if (commits.length === 0) {
-        await this.handleMergeFailure(
-          { task: taskResult.task, workerId, commit: 'none' },
-          'No commits produced for task'
-        );
+        await this.markMergeSuccess({ task: taskResult.task, workerId, commit: 'none' }, false, []);
         return;
       }
 
@@ -395,6 +392,11 @@ export class ParallelCoordinator {
     return result.stdout.split('\n').map((line) => line.trim()).filter(Boolean);
   }
 
+  private isEmptyCherryPick(result: { stdout: string; stderr: string }): boolean {
+    const message = `${result.stdout}\n${result.stderr}`.toLowerCase();
+    return message.includes('cherry-pick is now empty') || message.includes('previous cherry-pick is now empty');
+  }
+
   private async resetStaleInProgressTasks(): Promise<number> {
     if (!this.tracker) return 0;
     const tasks = await this.tracker.getTasks({ status: 'in_progress' });
@@ -492,6 +494,15 @@ export class ParallelCoordinator {
         const filesChanged = entry.filesChanged ?? (await this.getCommitFiles(entry.commit, mergePath));
         const result = await this.execGitIn(mergePath, ['cherry-pick', entry.commit]);
         if (result.exitCode !== 0) {
+          if (this.isEmptyCherryPick(result)) {
+            const skipResult = await this.execGitIn(mergePath, ['cherry-pick', '--skip']);
+            if (skipResult.exitCode !== 0) {
+              await this.execGitIn(mergePath, ['cherry-pick', '--abort']);
+            }
+            await this.markMergeSuccess(entry, false, filesChanged);
+            continue;
+          }
+
           await this.execGitIn(mergePath, ['cherry-pick', '--abort']);
           const resolved = await this.attemptMergeResolution(entry);
           if (!resolved.success || !resolved.commit) {
@@ -503,6 +514,15 @@ export class ParallelCoordinator {
 
           const resolvedResult = await this.execGitIn(mergePath, ['cherry-pick', resolved.commit]);
           if (resolvedResult.exitCode !== 0) {
+            if (this.isEmptyCherryPick(resolvedResult)) {
+              const skipResult = await this.execGitIn(mergePath, ['cherry-pick', '--skip']);
+              if (skipResult.exitCode !== 0) {
+                await this.execGitIn(mergePath, ['cherry-pick', '--abort']);
+              }
+              await this.markMergeSuccess({ ...entry, commit: resolved.commit }, false, filesChanged, resolved.conflictFiles);
+              continue;
+            }
+
             await this.execGitIn(mergePath, ['cherry-pick', '--abort']);
             const reason = resolvedResult.stderr.trim() || 'Cherry-pick failed after auto-resolve';
             await this.handleMergeFailure({ ...entry, commit: resolved.commit }, reason, resolved.conflictFiles);
