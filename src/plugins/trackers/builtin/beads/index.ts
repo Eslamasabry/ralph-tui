@@ -10,6 +10,7 @@ import { readFile, mkdir, open, unlink } from 'node:fs/promises';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BaseTrackerPlugin } from '../../base.js';
+import { appendTrackerEvent } from '../../../../logs/index.js';
 import type {
   SetupQuestion,
   SyncResult,
@@ -233,11 +234,38 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
   private epicId: string = '';
   protected labels: string[] = [];
   private workingDir: string = process.cwd();
+  private knownTaskIds: Set<string> | null = null;
 
   private async getLockDir(): Promise<string> {
     const lockDir = join(this.workingDir, this.beadsDir, '.locks');
     await mkdir(lockDir, { recursive: true });
     return lockDir;
+  }
+
+  private async logNewTasks(tasks: TrackerTask[]): Promise<void> {
+    if (!this.knownTaskIds) {
+      this.knownTaskIds = new Set(tasks.map((task) => task.id));
+      return;
+    }
+
+    const newTasks = tasks.filter((task) => !this.knownTaskIds!.has(task.id));
+    if (newTasks.length === 0) {
+      return;
+    }
+
+    for (const task of newTasks) {
+      this.knownTaskIds.add(task.id);
+      await appendTrackerEvent(this.workingDir, {
+        type: 'tracker:new-task',
+        timestamp: new Date().toISOString(),
+        tracker: this.meta.id,
+        taskId: task.id,
+        title: task.title,
+        parentId: task.parentId,
+        status: task.status,
+        priority: task.priority,
+      });
+    }
   }
 
   private async createTaskLock(taskId: string, workerId: string): Promise<boolean> {
@@ -477,9 +505,12 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
           }
         }
       }
-      return Array.from(taskMap.values());
+      const hydratedTasks = Array.from(taskMap.values());
+      void this.logNewTasks(hydratedTasks);
+      return hydratedTasks;
     }
 
+    void this.logNewTasks(tasks);
     return tasks;
   }
 
@@ -590,13 +621,33 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
   }
 
   override async sync(): Promise<SyncResult> {
+    const startedAt = new Date();
+    void appendTrackerEvent(this.workingDir, {
+      type: 'tracker:sync-start',
+      timestamp: startedAt.toISOString(),
+      tracker: this.meta.id,
+      epicId: this.epicId || undefined,
+      workingDir: this.workingDir,
+    });
+
     // Run bd sync to synchronize with git
     const { exitCode, stderr, stdout } = await execBd(
       ['sync'],
       this.workingDir
     );
 
+    const endedAt = new Date();
+    const durationMs = endedAt.getTime() - startedAt.getTime();
+
     if (exitCode !== 0) {
+      void appendTrackerEvent(this.workingDir, {
+        type: 'tracker:sync-complete',
+        timestamp: endedAt.toISOString(),
+        tracker: this.meta.id,
+        success: false,
+        durationMs,
+        error: stderr || stdout,
+      });
       return {
         success: false,
         message: 'Beads sync failed',
@@ -605,6 +656,14 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
       };
     }
 
+    void appendTrackerEvent(this.workingDir, {
+      type: 'tracker:sync-complete',
+      timestamp: endedAt.toISOString(),
+      tracker: this.meta.id,
+      success: true,
+      durationMs,
+      message: 'Beads synced with git',
+    });
     return {
       success: true,
       message: 'Beads synced with git',

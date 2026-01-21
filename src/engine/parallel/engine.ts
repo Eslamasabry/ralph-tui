@@ -17,6 +17,7 @@ import { ParallelCoordinator } from './coordinator.js';
 import type { ParallelEvent } from './types.js';
 import { BeadsRealtimeWatcher } from '../beads-realtime.js';
 import { join } from 'node:path';
+import { appendParallelEvent, appendTrackerEvent } from '../../logs/index.js';
 
 export interface ParallelEngineOptions {
   maxWorkers: number;
@@ -111,6 +112,10 @@ export class ParallelExecutionEngine implements EngineController {
         // ignore listener errors
       }
     }
+  }
+
+  private shouldLogTrackerEvents(): boolean {
+    return this.config.tracker.plugin.includes('beads');
   }
 
   getState(): Readonly<EngineState> {
@@ -270,6 +275,7 @@ export class ParallelExecutionEngine implements EngineController {
   }
 
   private handleParallelEvent(event: ParallelEvent): void {
+    void appendParallelEvent(this.config.cwd, event);
     this.emitParallel(event);
 
     if (event.type === 'parallel:task-claimed') {
@@ -307,6 +313,17 @@ export class ParallelExecutionEngine implements EngineController {
         iteration,
         task: event.task,
       });
+
+      if (this.shouldLogTrackerEvents()) {
+        void appendTrackerEvent(this.config.cwd, {
+          type: 'iteration:started',
+          timestamp: event.timestamp,
+          tracker: this.config.tracker.plugin,
+          iteration,
+          taskId: event.task.id,
+          taskTitle: event.task.title,
+        });
+      }
       return;
     }
 
@@ -369,6 +386,20 @@ export class ParallelExecutionEngine implements EngineController {
         timestamp: new Date().toISOString(),
         result: iterationResult,
       });
+
+      if (this.shouldLogTrackerEvents()) {
+        void appendTrackerEvent(this.config.cwd, {
+          type: 'iteration:completed',
+          timestamp: event.result.endedAt ?? new Date().toISOString(),
+          tracker: this.config.tracker.plugin,
+          iteration,
+          taskId: event.task.id,
+          taskTitle: event.task.title,
+          status: iterationResult.status,
+          durationMs: iterationResult.durationMs ?? 0,
+          taskCompleted: completed,
+        });
+      }
     }
   }
 }

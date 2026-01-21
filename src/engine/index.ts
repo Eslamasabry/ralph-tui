@@ -41,7 +41,15 @@ import {
   openCodeTaskToClaudeMessages,
 } from '../plugins/agents/opencode/outputParser.js';
 import { updateSessionIteration, updateSessionStatus, updateSessionMaxIterations } from '../session/index.js';
-import { saveIterationLog, buildSubagentTrace, createProgressEntry, appendProgress, getRecentProgressSummary, getCodebasePatternsForPrompt } from '../logs/index.js';
+import {
+  saveIterationLog,
+  buildSubagentTrace,
+  createProgressEntry,
+  appendProgress,
+  getRecentProgressSummary,
+  getCodebasePatternsForPrompt,
+  appendTrackerEvent,
+} from '../logs/index.js';
 import type { AgentSwitchEntry } from '../logs/index.js';
 import { renderPrompt } from '../templates/index.js';
 import { BeadsRealtimeWatcher } from './beads-realtime.js';
@@ -327,6 +335,27 @@ export class ExecutionEngine {
         // Ignore listener errors
       }
     }
+  }
+
+  private shouldLogTrackerEvents(): boolean {
+    return this.config.tracker.plugin.includes('beads');
+  }
+
+  private logIterationFailure(task: TrackerTask, error: string, action: 'retry' | 'skip' | 'abort'): void {
+    if (!this.shouldLogTrackerEvents()) {
+      return;
+    }
+
+    void appendTrackerEvent(this.config.cwd, {
+      type: 'iteration:failed',
+      timestamp: new Date().toISOString(),
+      tracker: this.config.tracker.plugin,
+      iteration: this.state.currentIteration,
+      taskId: task.id,
+      taskTitle: task.title,
+      error,
+      action,
+    });
   }
 
   /**
@@ -643,6 +672,7 @@ export class ExecutionEngine {
             task,
             action: 'retry',
           });
+          this.logIterationFailure(task, errorMessage, 'retry');
 
           // Emit retry event
           this.emit({
@@ -679,6 +709,7 @@ export class ExecutionEngine {
             task,
             action: 'skip',
           });
+          this.logIterationFailure(task, skipReason, 'skip');
           this.emitSkipEvent(task, skipReason);
           this.skippedTasks.add(task.id);
           this.retryCountMap.delete(task.id);
@@ -696,6 +727,7 @@ export class ExecutionEngine {
           task,
           action: 'skip',
         });
+        this.logIterationFailure(task, errorMessage, 'skip');
         this.emitSkipEvent(task, errorMessage);
         this.skippedTasks.add(task.id);
         break;
@@ -711,6 +743,7 @@ export class ExecutionEngine {
           task,
           action: 'abort',
         });
+        this.logIterationFailure(task, errorMessage, 'abort');
         break;
       }
     }
@@ -846,6 +879,17 @@ export class ExecutionEngine {
       iteration,
       task,
     });
+
+    if (this.shouldLogTrackerEvents()) {
+      void appendTrackerEvent(this.config.cwd, {
+        type: 'iteration:started',
+        timestamp: startedAt.toISOString(),
+        tracker: this.config.tracker.plugin,
+        iteration,
+        taskId: task.id,
+        taskTitle: task.title,
+      });
+    }
 
     this.emit({
       type: 'task:selected',
@@ -1135,6 +1179,20 @@ export class ExecutionEngine {
         timestamp: endedAt.toISOString(),
         result,
       });
+
+      if (this.shouldLogTrackerEvents()) {
+        void appendTrackerEvent(this.config.cwd, {
+          type: 'iteration:completed',
+          timestamp: endedAt.toISOString(),
+          tracker: this.config.tracker.plugin,
+          iteration,
+          taskId: task.id,
+          taskTitle: task.title,
+          status: result.status,
+          durationMs,
+          taskCompleted,
+        });
+      }
 
       return result;
     } catch (error) {

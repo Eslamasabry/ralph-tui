@@ -60,3 +60,16 @@ export {
   getCodebasePatternsForPrompt,
   clearProgress,
 } from './progress.js';
+
+export {
+  PARALLEL_EVENTS_FILE,
+  appendParallelEvent,
+  shouldLogParallelEvent,
+} from './parallel-events.js';
+
+export {
+  TRACKER_EVENTS_FILE,
+  appendTrackerEvent,
+} from './tracker-events.js';
+
+export type { TrackerLogEvent } from './tracker-events.js';
