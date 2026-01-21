@@ -73,3 +73,16 @@ export {
 } from './tracker-events.js';
 
 export type { TrackerLogEvent } from './tracker-events.js';
+
+export {
+  ActivityEventBuffer,
+  ActivityEvent,
+  ActivityEventCategory,
+  ActivityEventSeverity,
+  TimelineEvent,
+  createEngineEvent,
+  createIterationEvent,
+  createTaskEvent,
+  createAgentEvent,
+  createSubagentEvent,
+} from './activity-events.js';
