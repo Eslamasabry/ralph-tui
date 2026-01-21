@@ -204,6 +204,7 @@ export type EngineEventType =
   | 'iteration:retrying'
   | 'iteration:skipped'
   | 'iteration:rate-limited'
+  | 'iteration:commit-recovery'
   | 'task:selected'
   | 'task:activated'
   | 'task:completed'
@@ -407,6 +408,42 @@ export interface IterationRateLimitedEvent extends EngineEventBase {
 }
 
 /**
+ * Iteration commit recovery event - emitted when agent signals completion but
+ * repo is dirty (has uncommitted changes) or no commits were made.
+ * The engine will rerun the agent with recovery context.
+ */
+export interface IterationCommitRecoveryEvent extends EngineEventBase {
+  type: 'iteration:commit-recovery';
+  /** Iteration number */
+  iteration: number;
+  /** Task being recovered */
+  task: TrackerTask;
+  /** Recovery attempt number (1-based) */
+  retryAttempt: number;
+  /** Maximum recovery retries allowed */
+  maxRetries: number;
+  /** Reason for recovery (dirty repo, no commits, etc.) */
+  reason: string;
+  /** Changed files detected (if any) */
+  changedFiles: string[];
+  /** Stdout tail included in recovery prompt */
+  stdoutTail: string;
+}
+
+/**
+ * Task blocked event (e.g., merge conflict, recovery failed)
+ */
+export interface TaskBlockedEvent extends EngineEventBase {
+  type: 'task:blocked';
+  /** Blocked task */
+  task: TrackerTask;
+  /** Reason for blocking */
+  reason: string;
+  /** If blocked due to recovery failure, the recovery attempt count */
+  recoveryAttemptCount?: number;
+}
+
+/**
  * Task selected event
  */
 export interface TaskSelectedEvent extends EngineEventBase {
@@ -564,6 +601,7 @@ export type EngineEvent =
   | IterationRetryingEvent
   | IterationSkippedEvent
   | IterationRateLimitedEvent
+  | IterationCommitRecoveryEvent
   | TaskSelectedEvent
   | TaskActivatedEvent
   | TaskCompletedEvent

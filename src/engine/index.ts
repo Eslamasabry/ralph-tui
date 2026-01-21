@@ -41,6 +41,7 @@ import {
   openCodeTaskToClaudeMessages,
 } from '../plugins/agents/opencode/outputParser.js';
 import { updateSessionIteration, updateSessionStatus, updateSessionMaxIterations } from '../session/index.js';
+import { spawn } from 'node:child_process';
 import {
   saveIterationLog,
   buildSubagentTrace,
@@ -71,6 +72,21 @@ const PRIMARY_RECOVERY_TEST_TIMEOUT_MS = 5000;
  * Kept simple to minimize token usage and allow fast response.
  */
 const PRIMARY_RECOVERY_TEST_PROMPT = 'Reply with just the word "ok".';
+
+/**
+ * Maximum number of commit recovery attempts before blocking the task.
+ */
+const COMMIT_RECOVERY_MAX_RETRIES = 1;
+
+/**
+ * Maximum lines to include in stdout tail for recovery prompt.
+ */
+const RECOVERY_TAIL_MAX_LINES = 20;
+
+/**
+ * Maximum characters for stdout tail in recovery prompt.
+ */
+const RECOVERY_TAIL_MAX_CHARS = 2000;
 
 /**
  * Build prompt for the agent based on task using the template system.
@@ -165,6 +181,8 @@ export class ExecutionEngine {
   private currentIterationAgentSwitches: AgentSwitchEntry[] = [];
   /** Beads realtime watcher (SQLite data_version polling) */
   private trackerRealtimeWatcher: BeadsRealtimeWatcher | null = null;
+  /** Track commit recovery attempts per task (separate from generic retries) */
+  private commitRecoveryAttempts: Map<string, number> = new Map();
 
   constructor(config: RalphConfig) {
     this.config = config;
@@ -1106,9 +1124,28 @@ export class ExecutionEngine {
       // Check for completion signal
       const promiseComplete = PROMISE_COMPLETE_PATTERN.test(agentResult.stdout);
 
-      // Determine if task was completed
+      // Check if commit recovery is needed (repo is dirty after completion signal)
+      let recoveryNeeded = false;
+      let recoveryResult: { success: boolean; recoveryCount: number; reason?: string } | null = null;
+
+      if (promiseComplete) {
+        recoveryNeeded = await this.needsCommitRecovery(task, agentResult.stdout);
+
+        if (recoveryNeeded) {
+          // Run commit recovery loop
+          recoveryResult = await this.runCommitRecovery(task, iteration, agentResult.stdout);
+
+          if (!recoveryResult.success) {
+            // Recovery failed - task will be blocked, not completed
+            console.log(`[commit-recovery] Task ${task.id} blocked: ${recoveryResult.reason}`);
+          }
+        }
+      }
+
+      // Determine if task was completed (only if no pending recovery or recovery succeeded)
       const taskCompleted =
-        promiseComplete || agentResult.status === 'completed';
+        (promiseComplete || agentResult.status === 'completed') &&
+        (!recoveryNeeded || (recoveryResult?.success ?? false));
 
       // Update tracker if task completed
       if (taskCompleted) {
@@ -1131,6 +1168,9 @@ export class ExecutionEngine {
         status = 'interrupted';
       } else if (agentResult.status === 'failed') {
         status = 'failed';
+      } else if (recoveryNeeded && !recoveryResult?.success) {
+        // Recovery was needed but failed - mark as completed but task not completed
+        status = 'completed';
       } else {
         status = 'completed';
       }
@@ -1986,12 +2026,295 @@ export class ExecutionEngine {
     return `${statusWord} with ${this.currentIterationAgentSwitches.length} agent switch(es)`;
   }
 
-  /**
-   * Clear rate-limited agents tracking.
-   * Called when a task completes successfully to allow agents to be used again.
-   */
+/**
+    * Clear rate-limited agents tracking.
+    * Called when a task completes successfully to allow agents to be used again.
+    */
   private clearRateLimitedAgents(): void {
     this.rateLimitedAgents.clear();
+  }
+
+  /**
+    * Execute a git command and return the result.
+    *
+    * @param args - Git command arguments
+    * @returns Object with stdout, stderr, and exitCode
+    */
+  private execGit(args: string[]): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+    return new Promise((resolve) => {
+      const proc = spawn('git', ['-C', this.config.cwd, ...args], {
+        env: { ...process.env },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+
+      let stdout = '';
+      let stderr = '';
+
+      proc.stdout.on('data', (data: Buffer) => {
+        stdout += data.toString();
+      });
+
+      proc.stderr.on('data', (data: Buffer) => {
+        stderr += data.toString();
+      });
+
+      proc.on('close', (code: number | null) => {
+        resolve({ stdout, stderr, exitCode: code ?? 1 });
+      });
+
+      proc.on('error', (err: Error) => {
+        resolve({ stdout, stderr: err.message, exitCode: 1 });
+      });
+    });
+  }
+
+  /**
+    * Check if the repository has uncommitted changes.
+    * Returns true if there are changes that need to be committed.
+    */
+  private async isRepoDirty(): Promise<boolean> {
+    const status = await this.execGit(['status', '--porcelain']);
+    const relevant = this.filterRelevantStatusLines(status.stdout);
+    return relevant.length > 0;
+  }
+
+  /**
+    * Get the list of changed files in the repository.
+    * Filters out .beads, .ralph-tui, and worktrees directories.
+    */
+  private async getChangedFiles(): Promise<string[]> {
+    const status = await this.execGit(['status', '--porcelain']);
+    return this.filterRelevantStatusLines(status.stdout);
+  }
+
+  /**
+    * Filter git status output to relevant files.
+    * Excludes .beads, .ralph-tui, and worktrees directories.
+    */
+  private filterRelevantStatusLines(statusOutput: string): string[] {
+    return statusOutput
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .filter((line) => {
+        const path = line.slice(3).trim();
+        return !(
+          path.startsWith('.beads/') ||
+          path.startsWith('.ralph-tui/') ||
+          path.startsWith('worktrees/')
+        );
+      });
+  }
+
+  /**
+    * Format the output tail for inclusion in recovery prompt.
+    * Extracts the last N lines, limited to max characters.
+    */
+  private formatOutputTail(output: string, maxLines = RECOVERY_TAIL_MAX_LINES, maxChars = RECOVERY_TAIL_MAX_CHARS): string {
+    const lines = output.split('\n');
+    const tailLines = lines.slice(-maxLines);
+    const tail = tailLines.join('\n');
+    if (tail.length <= maxChars) {
+      return tail;
+    }
+    return tail.slice(-maxChars);
+  }
+
+  /**
+    * Build a recovery prompt with context about uncommitted changes.
+    * Called when agent signals completion but repo is dirty.
+    *
+    * @param task - The task being recovered
+    * @param _basePrompt - The original prompt that was sent (reserved for future use)
+    * @param changedFiles - List of changed files
+    * @param stdoutTail - Last N lines of stdout for context
+    * @returns Recovery prompt string
+    */
+  private buildRecoveryPrompt(
+    task: TrackerTask,
+    _basePrompt: string,
+    changedFiles: string[],
+    stdoutTail: string
+  ): string {
+    const lines: string[] = [];
+
+    lines.push('## Recovery Required');
+    lines.push('');
+    lines.push(`Task: ${task.id} - ${task.title}`);
+    lines.push('');
+    lines.push('You signaled completion with `<promise>COMPLETE</promise>` but the repository has uncommitted changes:');
+    lines.push('');
+    if (changedFiles.length > 0) {
+      for (const file of changedFiles) {
+        lines.push(`- ${file}`);
+      }
+    } else {
+      lines.push('- (no changes detected)');
+    }
+    lines.push('');
+    lines.push('## Last Output');
+    lines.push(stdoutTail || '(no output)');
+    lines.push('');
+    lines.push('## Instructions');
+    lines.push('1. Review the changed files above');
+    lines.push('2. Commit your changes with an appropriate message');
+    lines.push('3. Use the commit format: `<task-id>: <short title>`');
+    lines.push('');
+    lines.push('## Before Completing');
+    lines.push('- Ensure your changes are committed');
+    lines.push('- Do NOT run tests or lint unless explicitly asked');
+    lines.push('');
+    lines.push('When finished and changes are committed, output: <promise>COMPLETE</promise>');
+
+    return lines.join('\n');
+  }
+
+  /**
+    * Run commit recovery for a task.
+    * Called when agent signals completion but repo is dirty or no commits were made.
+    *
+    * @param task - The task to recover
+    * @param iteration - Current iteration number
+    * @param stdout - The stdout from the original agent execution
+    * @returns Recovery result indicating success or failure
+    */
+  private async runCommitRecovery(
+    task: TrackerTask,
+    iteration: number,
+    stdout: string
+  ): Promise<{ success: boolean; recoveryCount: number; reason?: string }> {
+    const currentAttempts = this.commitRecoveryAttempts.get(task.id) ?? 0;
+
+    // Check if we've exceeded max recovery attempts
+    if (currentAttempts >= COMMIT_RECOVERY_MAX_RETRIES) {
+      // Max attempts exceeded - block the task
+      const reason = `Max commit recovery attempts (${COMMIT_RECOVERY_MAX_RETRIES}) exceeded. Repository still has uncommitted changes.`;
+      console.log(`[commit-recovery] ${reason}`);
+
+      // Emit task blocked event
+      this.emit({
+        type: 'task:blocked',
+        timestamp: new Date().toISOString(),
+        task,
+        reason,
+        recoveryAttemptCount: currentAttempts,
+      });
+
+      // Clear recovery tracking for this task
+      this.commitRecoveryAttempts.delete(task.id);
+
+      return { success: false, recoveryCount: currentAttempts, reason };
+    }
+
+    // Get changed files and stdout tail
+    const changedFiles = await this.getChangedFiles();
+    const stdoutTail = this.formatOutputTail(stdout);
+
+    // Increment recovery attempt count
+    this.commitRecoveryAttempts.set(task.id, currentAttempts + 1);
+    const attemptNumber = currentAttempts + 1;
+
+    console.log(
+      `[commit-recovery] Attempt ${attemptNumber}/${COMMIT_RECOVERY_MAX_RETRIES + 1} for task ${task.id} (${changedFiles.length} changed files)`
+    );
+
+    // Emit recovery event
+    const recoveryEvent: import('./types.js').IterationCommitRecoveryEvent = {
+      type: 'iteration:commit-recovery',
+      timestamp: new Date().toISOString(),
+      iteration,
+      task,
+      retryAttempt: attemptNumber,
+      maxRetries: COMMIT_RECOVERY_MAX_RETRIES,
+      reason: changedFiles.length > 0 ? 'uncommitted changes' : 'no commits',
+      changedFiles,
+      stdoutTail,
+    };
+    this.emit(recoveryEvent);
+
+    // Build recovery prompt
+    const basePrompt = await buildPrompt(task, this.config, this.tracker ?? undefined);
+    const recoveryPrompt = this.buildRecoveryPrompt(task, basePrompt, changedFiles, stdoutTail);
+
+    // Run agent with recovery prompt
+    const result = await this.executeAgentWithPrompt(recoveryPrompt, task);
+
+    // Log recovery attempt result
+    const recoveryPromiseComplete = PROMISE_COMPLETE_PATTERN.test(result.stdout);
+    if (recoveryPromiseComplete) {
+      console.log(`[commit-recovery] Agent signaled COMPLETE, checking repo status...`);
+    }
+
+    // Check if recovery was successful
+    const repoClean = !(await this.isRepoDirty());
+    if (repoClean) {
+      // Recovery successful - clear tracking and complete
+      console.log(`[commit-recovery] Recovery successful for task ${task.id}`);
+      this.commitRecoveryAttempts.delete(task.id);
+      return { success: true, recoveryCount: attemptNumber };
+    }
+
+    // Still dirty - check if we should retry
+    if (currentAttempts < COMMIT_RECOVERY_MAX_RETRIES) {
+      // Will retry on next call
+      return { success: false, recoveryCount: attemptNumber };
+    }
+
+    // Max attempts exceeded - block the task
+    const finalReason = `Max commit recovery attempts (${COMMIT_RECOVERY_MAX_RETRIES}) exceeded. Repository still has uncommitted changes.`;
+    console.log(`[commit-recovery] ${finalReason}`);
+
+    // Emit task blocked event
+    this.emit({
+      type: 'task:blocked',
+      timestamp: new Date().toISOString(),
+      task,
+      reason: finalReason,
+      recoveryAttemptCount: attemptNumber,
+    });
+
+    // Clear recovery tracking for this task
+    this.commitRecoveryAttempts.delete(task.id);
+
+    return { success: false, recoveryCount: attemptNumber, reason: finalReason };
+  }
+
+  /**
+    * Execute the agent with a given prompt.
+    * Helper method used by commit recovery.
+    */
+  private async executeAgentWithPrompt(prompt: string, _task: TrackerTask): Promise<import('../plugins/agents/types.js').AgentExecutionResult> {
+    const flags: string[] = [];
+    if (this.config.model) {
+      flags.push('--model', this.config.model);
+    }
+
+    const handle = this.agent!.execute(prompt, [], {
+      cwd: this.config.cwd,
+      flags,
+      sandbox: this.config.sandbox,
+    });
+
+    const result = await handle.promise;
+    return result;
+  }
+
+  /**
+    * Check if commit recovery is needed for a task.
+    * Called after agent signals completion.
+    *
+    * @param _task - The completed task (reserved for future use)
+    * @param stdout - Agent stdout
+    * @returns true if recovery should be attempted
+    */
+  private async needsCommitRecovery(_task: TrackerTask, stdout: string): Promise<boolean> {
+    // Only check for recovery if <promise>COMPLETE</promise> was detected
+    if (!PROMISE_COMPLETE_PATTERN.test(stdout)) {
+      return false;
+    }
+
+    // Check if repo is dirty
+    return this.isRepoDirty();
   }
 
   /**
