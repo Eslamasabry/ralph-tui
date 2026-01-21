@@ -405,3 +405,12 @@ export {
   type LockCheckResult,
   type LockAcquisitionResult,
 } from './lock.js';
+
+// Re-export reconciliation module
+export {
+  reconcileClosedTasks,
+  formatReconciliationReport,
+  logReconciliationResult,
+  type ReconciliationResult,
+  type ReconciliationAction,
+} from './reconciliation.js';

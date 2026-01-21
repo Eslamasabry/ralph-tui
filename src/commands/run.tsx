@@ -36,6 +36,8 @@ import {
   registerLockCleanupHandlers,
   checkLock,
   detectAndRecoverStaleSession,
+  reconcileClosedTasks,
+  logReconciliationResult,
   type PersistedSessionState,
 } from '../session/index.js';
 import type { EngineController } from '../engine/types.js';
@@ -1719,6 +1721,27 @@ export async function executeRunCommand(args: string[]): Promise<void> {
     // Detect and handle stale in_progress tasks from crashed sessions
     // This must happen before we fetch tasks, so they reflect any resets
     await detectAndHandleStaleTasks(config.cwd, tracker, options.headless ?? false);
+
+    // Reconcile closed tasks against main branch (for new sessions only)
+    // This checks if closed tasks have their commits on main and reopens them if not
+    if (!options.resume && (config.tracker.plugin === 'beads' || config.tracker.plugin === 'beads-bv')) {
+      console.log('Reconciling closed tasks against main branch...');
+      const reconResult = await reconcileClosedTasks(config.cwd, tracker, {
+        shouldReopen: true,
+        onAction: (action) => {
+          if (action.type === 'reopened') {
+            console.log(`  ⟳ Reopened: ${action.taskId}`);
+          } else if (action.type === 'verified') {
+            // Silently verify - too noisy to log every one
+          } else if (action.type === 'skipped') {
+            console.log(`  ⊘ Skipped: ${action.taskId} - ${action.reason}`);
+          } else if (action.type === 'error') {
+            console.log(`  ✗ Error: ${action.taskId} - ${action.error}`);
+          }
+        },
+      });
+      await logReconciliationResult(reconResult, { verbose: options.headless });
+    }
 
     tasks = await tracker.getTasks({ status: ['open', 'in_progress', 'completed'] });
   } catch (error) {

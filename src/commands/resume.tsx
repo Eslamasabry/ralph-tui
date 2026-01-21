@@ -22,6 +22,8 @@ import {
   cleanStaleLock,
   checkLock,
   detectAndRecoverStaleSession,
+  reconcileClosedTasks,
+  logReconciliationResult,
   type PersistedSessionState,
 } from '../session/index.js';
 import { buildConfig, validateConfig } from '../config/index.js';
@@ -384,8 +386,33 @@ export async function executeResumeCommand(args: string[]): Promise<void> {
   // Create and initialize engine
   const engine = new ParallelExecutionEngine(config, { maxWorkers: 5 });
 
+  let tracker;
   try {
     await engine.initialize();
+    // Get tracker instance for reconciliation
+    const trackerRegistry = getTrackerRegistry();
+    tracker = await trackerRegistry.getInstance(config.tracker);
+
+    // Reconcile closed tasks against main branch on resume
+    // This checks if closed tasks have their commits on main and reopens them if not
+    if (config.tracker.plugin === 'beads' || config.tracker.plugin === 'beads-bv') {
+      console.log('Reconciling closed tasks against main branch...');
+      const reconResult = await reconcileClosedTasks(cwd, tracker, {
+        shouldReopen: true,
+        onAction: (action) => {
+          if (action.type === 'reopened') {
+            console.log(`  ⟳ Reopened: ${action.taskId}`);
+          } else if (action.type === 'verified') {
+            // Silently verify - too noisy to log every one
+          } else if (action.type === 'skipped') {
+            console.log(`  ⊘ Skipped: ${action.taskId} - ${action.reason}`);
+          } else if (action.type === 'error') {
+            console.log(`  ✗ Error: ${action.taskId} - ${action.error}`);
+          }
+        },
+      });
+      await logReconciliationResult(reconResult, { verbose: headless });
+    }
   } catch (error) {
     console.error(
       'Failed to initialize engine:',
