@@ -6,7 +6,8 @@ import { appendFile, mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { IterationStatus } from '../engine/types.js';
 
-export const TRACKER_EVENTS_FILE = '.ralph-tui/tracker-events.jsonl';
+export const TRACKER_EVENTS_FILE = '.ralph-tui/logs/tracker-events.jsonl';
+const TRACKER_EVENTS_FALLBACK_FILE = 'logs/tracker-events.jsonl';
 
 export type TrackerLogEvent =
   | {
@@ -66,13 +67,16 @@ export type TrackerLogEvent =
     };
 
 export async function appendTrackerEvent(cwd: string, event: TrackerLogEvent): Promise<void> {
-  const filePath = join(cwd, TRACKER_EVENTS_FILE);
-  const dirPath = dirname(filePath);
+  const targets = [TRACKER_EVENTS_FILE, TRACKER_EVENTS_FALLBACK_FILE];
 
-  try {
-    await mkdir(dirPath, { recursive: true });
-    await appendFile(filePath, `${JSON.stringify(event)}\n`, 'utf-8');
-  } catch {
-    // Ignore logging errors to avoid interrupting execution
+  for (const target of targets) {
+    try {
+      const filePath = join(cwd, target);
+      const dirPath = dirname(filePath);
+      await mkdir(dirPath, { recursive: true });
+      await appendFile(filePath, `${JSON.stringify(event)}\n`, 'utf-8');
+    } catch {
+      // Ignore logging errors to avoid interrupting execution
+    }
   }
 }
