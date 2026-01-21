@@ -602,7 +602,7 @@ export function ActivityView({
 
   return (
     <box
-      title="Activity View [Press 'A' or Esc to close]"
+      title="Activity View [Press 'A' or Esc to toggle]"
       style={{
         position: 'absolute',
         top: 0,
@@ -632,7 +632,7 @@ export function ActivityView({
           <text fg={colors.fg.secondary}>Esc</text>
           <text fg={colors.fg.muted}> or </text>
           <text fg={colors.fg.secondary}>A</text>
-          <text fg={colors.fg.muted}> to close</text>
+          <text fg={colors.fg.muted}> to toggle</text>
         </box>
       </box>
 
