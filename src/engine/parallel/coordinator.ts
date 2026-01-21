@@ -643,7 +643,6 @@ export class ParallelCoordinator {
     const message = `${result.stdout}\n${result.stderr}`.toLowerCase();
     return message.includes('cherry-pick is now empty') || message.includes('previous cherry-pick is now empty');
   }
-
   private async resetStaleInProgressTasks(): Promise<number> {
     if (!this.tracker) return 0;
     const tasks = await this.tracker.getTasks({ status: 'in_progress' });
