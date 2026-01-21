@@ -416,7 +416,7 @@ export function ActivityView({
         }}
       >
         <box>
-          <text fg={colors.accent.primary}>═══ Activity Timeline ═══</text>
+          <text fg={colors.accent.primary}>═══ Activity View ═══</text>
         </box>
         <box>
           <text fg={colors.fg.muted}>Press </text>
@@ -602,7 +602,7 @@ export function ActivityView({
         {/* Footer hint */}
         <box style={{ marginTop: 1 }}>
           <text fg={colors.fg.dim}>
-            Press 'A' or Esc to close this view
+            Press 'A' or Esc to toggle this view
           </text>
         </box>
       </scrollbox>
