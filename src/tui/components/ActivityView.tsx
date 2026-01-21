@@ -5,22 +5,28 @@
  */
 
 import type { ReactNode } from 'react';
-import { useMemo } from 'react';
+import { useMemo, useCallback } from 'react';
+import { useKeyboard } from '@opentui/react';
 import { colors, formatElapsedTime } from '../theme.js';
 import type { IterationResult, IterationStatus, EngineSubagentStatus } from '../../engine/types.js';
 import type { SubagentTreeNode } from '../../engine/types.js';
 import type { SubagentTraceStats } from '../../logs/types.js';
+import type { ActivityEvent } from '../../logs/activity-events.js';
 
 /**
- * Event in the activity timeline
+ * Timeline event display type (internal representation for UI)
  */
-interface ActivityEvent {
+interface TimelineEventDisplay {
   /** Event timestamp */
   timestamp: string;
   /** Event type for display */
   type: 'started' | 'agent_running' | 'task_completed' | 'completed' | 'failed' | 'skipped' | 'interrupted';
   /** Human-readable description */
   description: string;
+  /** Severity level (from ActivityEvent) */
+  severity?: 'info' | 'warning' | 'error';
+  /** Category (from ActivityEvent) */
+  category?: string;
 }
 
 /**
@@ -55,6 +61,10 @@ export interface ActivityViewProps {
   subagentStats?: SubagentTraceStats;
   /** Iteration history (for showing past iterations' events) */
   iterations?: IterationResult[];
+  /** Activity events from ActivityEventBuffer for real-time timeline display */
+  activityEvents?: ActivityEvent[];
+  /** Timeline events in UI format (alternative to activityEvents) */
+  timelineEvents?: TimelineEventDisplay[];
 }
 
 /**
@@ -101,7 +111,7 @@ function formatTimestamp(isoString: string): string {
 /**
  * Get the color for an activity event type
  */
-function getEventColor(type: ActivityEvent['type']): string {
+function getEventColor(type: TimelineEventDisplay['type']): string {
   switch (type) {
     case 'started':
       return colors.accent.primary;
@@ -125,7 +135,7 @@ function getEventColor(type: ActivityEvent['type']): string {
 /**
  * Get the symbol for an activity event type
  */
-function getEventSymbol(type: ActivityEvent['type']): string {
+function getEventSymbol(type: TimelineEventDisplay['type']): string {
   switch (type) {
     case 'started':
       return '▶';
@@ -168,8 +178,8 @@ function buildCurrentActivityEvents(
   _durationMs: number | undefined,
   taskId: string | undefined,
   _taskTitle: string | undefined
-): ActivityEvent[] {
-  const events: ActivityEvent[] = [];
+): TimelineEventDisplay[] {
+  const events: TimelineEventDisplay[] = [];
 
   if (!startedAt) return events;
 
@@ -317,6 +327,28 @@ function SectionHeader({ title }: { title: string }): ReactNode {
 }
 
 /**
+ * Map activity event type to timeline event type for display
+ */
+function mapActivityEventType(eventType: string): TimelineEventDisplay['type'] {
+  switch (eventType) {
+    case 'started':
+      return 'started';
+    case 'completed':
+      return 'completed';
+    case 'failed':
+      return 'failed';
+    case 'interrupted':
+      return 'interrupted';
+    case 'skipped':
+      return 'skipped';
+    case 'output':
+      return 'agent_running';
+    default:
+      return 'agent_running';
+  }
+}
+
+/**
  * ActivityView component - full-screen overlay showing real-time timeline
  */
 export function ActivityView({
@@ -334,15 +366,47 @@ export function ActivityView({
   subagentTree,
   subagentStats,
   iterations = [],
+  activityEvents = [],
+  timelineEvents = [],
 }: ActivityViewProps): ReactNode {
-  // Suppress unused callback warning
-  void onClose;
   if (!visible) return null;
 
-  // Build current activity events
+  // Keyboard handler for closing the view
+  useKeyboard(
+    useCallback((key: { name: string }) => {
+      if (key.name === 'escape' || key.name === 'A') {
+        onClose();
+      }
+    }, [onClose])
+  );
+
+  // Build current activity events (fallback if no real events provided)
   const currentEvents = useMemo(
-    () => buildCurrentActivityEvents(currentStatus, currentStartedAt, currentDurationMs ?? 0, currentTaskId, currentTaskTitle),
-    [currentStatus, currentStartedAt, currentDurationMs, currentTaskId, currentTaskTitle]
+    () => {
+      // If activityEvents are provided, convert them to display format
+      if (activityEvents.length > 0) {
+        return activityEvents.map((event) => ({
+          timestamp: event.timestamp,
+          type: mapActivityEventType(event.eventType),
+          description: event.description,
+          severity: event.severity,
+          category: event.category,
+        }));
+      }
+      // If timelineEvents are provided, convert them to display format
+      if (timelineEvents.length > 0) {
+        return timelineEvents.map((event) => ({
+          timestamp: event.timestamp,
+          type: event.type,
+          description: event.description,
+          severity: event.severity,
+          category: event.category,
+        }));
+      }
+      // Otherwise build synthetic events from current iteration state
+      return buildCurrentActivityEvents(currentStatus, currentStartedAt, currentDurationMs ?? 0, currentTaskId, currentTaskTitle);
+    },
+    [currentStatus, currentStartedAt, currentDurationMs, currentTaskId, currentTaskTitle, activityEvents, timelineEvents]
   );
 
   // Calculate max depth for subagent tree expansion
