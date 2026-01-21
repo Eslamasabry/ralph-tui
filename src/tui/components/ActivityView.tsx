@@ -30,6 +30,19 @@ interface TimelineEventDisplay {
 }
 
 /**
+ * Metrics computed from activity events
+ */
+export interface ActivityMetrics {
+  totalEvents: number;
+  errorCount: number;
+  warningCount: number;
+  infoCount: number;
+  totalSubagents: number;
+  completedIterations: number;
+  failedIterations: number;
+}
+
+/**
  * Props for the ActivityView component
  */
 export interface ActivityViewProps {
@@ -65,6 +78,8 @@ export interface ActivityViewProps {
   activityEvents?: ActivityEvent[];
   /** Timeline events in UI format (alternative to activityEvents) */
   timelineEvents?: TimelineEventDisplay[];
+  /** Pre-computed activity metrics (optional, will be computed from props if not provided) */
+  activityMetrics?: ActivityMetrics;
 }
 
 /**
@@ -265,6 +280,127 @@ function getSubagentStatusColor(status: EngineSubagentStatus): string {
 }
 
 /**
+ * Count total subagents in tree (including root nodes)
+ */
+function countSubagentChildren(node: SubagentTreeNode): number {
+  return node.children.reduce((sum, child) => sum + 1 + countSubagentChildren(child), 0);
+}
+
+/**
+ * Compute activity metrics from events and state
+ */
+function computeActivityMetrics(
+  activityEvents: ActivityEvent[],
+  subagentTree: SubagentTreeNode[],
+  iterations: IterationResult[]
+): ActivityMetrics {
+  const errorCount = activityEvents.filter((e) => e.severity === 'error').length;
+  const warningCount = activityEvents.filter((e) => e.severity === 'warning').length;
+  const infoCount = activityEvents.filter((e) => e.severity === 'info').length;
+
+  const totalSubagents = subagentTree.reduce(
+    (sum, node) => sum + 1 + countSubagentChildren(node),
+    0
+  );
+
+  const completedIterations = iterations.filter((i) => i.status === 'completed').length;
+  const failedIterations = iterations.filter((i) => i.status === 'failed').length;
+
+  return {
+    totalEvents: activityEvents.length,
+    errorCount,
+    warningCount,
+    infoCount,
+    totalSubagents,
+    completedIterations,
+    failedIterations,
+  };
+}
+
+/**
+ * Compact stat item for metrics display
+ */
+function MetricItem({
+  label,
+  value,
+  color,
+}: {
+  label: string;
+  value: number;
+  color: string;
+}): ReactNode {
+  return (
+    <text>
+      <span fg={colors.fg.muted}>{label}:</span> <span fg={color}>{value}</span>
+    </text>
+  );
+}
+
+/**
+ * Activity metrics header section showing summary statistics
+ */
+function ActivityMetricsHeader({
+  metrics,
+}: {
+  metrics: ActivityMetrics;
+}): ReactNode {
+  const hasErrors = metrics.errorCount > 0;
+  const hasSubagents = metrics.totalSubagents > 0;
+
+  return (
+    <box
+      style={{
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: 1,
+        backgroundColor: colors.bg.secondary,
+        border: true,
+        borderColor: hasErrors ? colors.status.error : colors.border.normal,
+        marginBottom: 1,
+      }}
+    >
+      {/* Left side: Event counts */}
+      <box style={{ flexDirection: 'row', gap: 3 }}>
+        <MetricItem label="Events" value={metrics.totalEvents} color={colors.fg.primary} />
+        {metrics.errorCount > 0 && (
+          <MetricItem label="Errors" value={metrics.errorCount} color={colors.status.error} />
+        )}
+        {metrics.warningCount > 0 && (
+          <MetricItem label="Warnings" value={metrics.warningCount} color={colors.status.warning} />
+        )}
+        <MetricItem label="Info" value={metrics.infoCount} color={colors.fg.secondary} />
+      </box>
+
+      {/* Right side: Progress and subagents */}
+      <box style={{ flexDirection: 'row', gap: 3 }}>
+        {metrics.completedIterations > 0 && (
+          <MetricItem
+            label="Done"
+            value={metrics.completedIterations}
+            color={colors.status.success}
+          />
+        )}
+        {metrics.failedIterations > 0 && (
+          <MetricItem
+            label="Failed"
+            value={metrics.failedIterations}
+            color={colors.status.error}
+          />
+        )}
+        {hasSubagents && (
+          <MetricItem
+            label="Subagents"
+            value={metrics.totalSubagents}
+            color={colors.accent.primary}
+          />
+        )}
+      </box>
+    </box>
+  );
+}
+
+/**
  * Props for subagent tree row component
  */
 interface SubagentRowProps {
@@ -368,6 +504,7 @@ export function ActivityView({
   iterations = [],
   activityEvents = [],
   timelineEvents = [],
+  activityMetrics: providedMetrics,
 }: ActivityViewProps): ReactNode {
   if (!visible) return null;
 
@@ -442,8 +579,16 @@ export function ActivityView({
 
   // Count total subagents in tree
   function countSubagentChildren(node: SubagentTreeNode): number {
-    return node.children.reduce((sum, child) => sum + 1 + countSubagentChildren(child), 0);
+    return node.children.reduce((sum, _child) => sum + 1 + countSubagentChildren(node), 0);
   }
+
+  // Compute activity metrics (use provided or compute from props)
+  const metrics = useMemo(() => {
+    if (providedMetrics) {
+      return providedMetrics;
+    }
+    return computeActivityMetrics(activityEvents, subagentTree, iterations);
+  }, [providedMetrics, activityEvents, subagentTree, iterations]);
 
   // Determine iteration progress display
   const iterationProgress = maxIterations > 0
@@ -498,6 +643,9 @@ export function ActivityView({
           borderColor: colors.border.muted,
         }}
       />
+
+      {/* Activity metrics header */}
+      <ActivityMetricsHeader metrics={metrics} />
 
       {/* Main content - scrollable */}
       <scrollbox style={{ flexGrow: 1, padding: 1 }}>
