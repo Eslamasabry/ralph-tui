@@ -879,7 +879,7 @@ export function IterationDetailView({
 
         {/* Hint about returning */}
         <box style={{ marginTop: 1 }}>
-          <text fg={colors.fg.dim}>Press Esc to return to iteration list, or 't' for task list</text>
+          <text fg={colors.fg.dim}>Press Esc to return to iteration list, or 't' to jump to task list</text>
         </box>
       </scrollbox>
     </box>

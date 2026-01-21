@@ -1676,6 +1676,20 @@ export function RunApp({
               onSubagentPanelVisibilityChange?.(newVisible);
               return newVisible;
             });
+          } else if (viewMode === 'iteration-detail' && detailIteration) {
+            // From iteration detail view, jump to task list and focus the corresponding task
+            const taskId = detailIteration.task?.id;
+            if (taskId) {
+              // Find the task in the displayed tasks
+              const taskIndex = runningTasks.findIndex((task) => task.id === taskId);
+              if (taskIndex !== -1) {
+                setSelectedIndex(taskIndex);
+              }
+            }
+            // Switch to tasks view
+            setViewMode('tasks');
+            // Clear detail iteration state
+            setDetailIteration(null);
           } else {
             // Cycle through subagent detail levels: off → minimal → moderate → full → off
             setSubagentDetailLevel((prev) => {
