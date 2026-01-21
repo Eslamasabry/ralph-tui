@@ -96,4 +96,6 @@ export type ParallelEvent =
   | { type: 'parallel:merge-failed'; timestamp: string; workerId: string; task: TrackerTask; commit: string; commitMetadata: CommitMetadata; reason: string; conflictFiles?: string[] }
   | { type: 'parallel:main-sync-skipped'; timestamp: string; reason: string }
   | { type: 'parallel:main-sync-succeeded'; timestamp: string; commit: string }
-  | { type: 'parallel:main-sync-failed'; timestamp: string; task: TrackerTask; reason: string };
+  | { type: 'parallel:main-sync-failed'; timestamp: string; task: TrackerTask; reason: string }
+  | { type: 'parallel:main-sync-retrying'; timestamp: string; retryAttempt: number; maxRetries: number; reason: string }
+  | { type: 'parallel:main-sync-alert'; timestamp: string; retryAttempt: number; maxRetries: number; reason: string };
