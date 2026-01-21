@@ -127,6 +127,12 @@ export class ParallelCoordinator {
       if (!task) {
         const busyWorkers = this.workers.some((worker) => worker.isBusy());
         if (!busyWorkers) {
+          const resetCount = await this.resetStaleInProgressTasks();
+          if (resetCount > 0) {
+            await this.delay(100);
+            continue;
+          }
+
           const hasPending = await this.hasPendingWork();
           if (!hasPending) {
             break;
@@ -259,6 +265,32 @@ export class ParallelCoordinator {
     if (!this.tracker) return false;
     const tasks = await this.tracker.getTasks({ status: ['open', 'in_progress'] });
     return tasks.length > 0;
+  }
+
+  private async resetStaleInProgressTasks(): Promise<number> {
+    if (!this.tracker) return 0;
+    const tasks = await this.tracker.getTasks({ status: 'in_progress' });
+    if (tasks.length === 0) return 0;
+
+    let resetCount = 0;
+    for (const task of tasks) {
+      try {
+        if (this.tracker.releaseTask) {
+          await this.tracker.releaseTask(task.id, 'stale');
+        } else {
+          await this.tracker.updateTaskStatus(task.id, 'open');
+        }
+        resetCount += 1;
+      } catch {
+        // ignore individual failures
+      }
+    }
+
+    if (resetCount > 0) {
+      console.warn(`Reset ${resetCount} stale in_progress task(s) to open.`);
+    }
+
+    return resetCount;
   }
 
   private enqueueMerge(entry: { task: TrackerTask; workerId: string; commit: string }): void {
