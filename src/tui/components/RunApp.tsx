@@ -121,6 +121,8 @@ export interface RunAppProps {
   onSubagentPanelVisibilityChange?: (visible: boolean) => void;
   /** Current model being used (provider/model format, e.g., "anthropic/claude-3-5-sonnet") */
   currentModel?: string;
+  /** Running ralph-tui version string */
+  appVersion?: string;
   /** Sandbox configuration for display in header */
   sandboxConfig?: SandboxConfig;
   /** Resolved sandbox mode (when mode is 'auto', this shows what it resolved to) */
@@ -348,6 +350,7 @@ export function RunApp({
   initialSubagentPanelVisible = false,
   onSubagentPanelVisibilityChange,
   currentModel,
+  appVersion,
   sandboxConfig,
   resolvedSandboxMode,
   instanceTabs,
@@ -2454,6 +2457,7 @@ export function RunApp({
               mergesResolved={mergeStats.resolved}
               mergesFailed={mergeStats.failed}
               mainSyncPending={mergeStats.syncPending}
+              appVersion={appVersion}
             />
 
               {/* Task Cards Row - horizontal cards for tasks */}

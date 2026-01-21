@@ -34,6 +34,8 @@ export interface DashboardBannerProps {
   mergesFailed: number;
   /** Number of main sync pending events */
   mainSyncPending: number;
+  /** Running ralph-tui version string (e.g., "v1.2.3") */
+  appVersion?: string;
 }
 
 /**
@@ -74,6 +76,7 @@ export function DashboardBanner({
   mergesResolved,
   mergesFailed,
   mainSyncPending,
+  appVersion,
 }: DashboardBannerProps): ReactNode {
   const hasActive = activeTasks > 0;
   const hasQueued = queuedTasks > 0;
@@ -109,6 +112,12 @@ export function DashboardBanner({
       >
         <text fg={colors.fg.primary}>
           <strong>Parallel Command Center</strong>
+          {appVersion && appVersion !== 'unknown' && (
+            <text>
+              <span fg={colors.fg.muted}> </span>
+              <span fg={colors.fg.muted}>{appVersion}</span>
+            </text>
+          )}
         </text>
         <text>
           <span fg={statusColor}>{statusIndicator}</span>

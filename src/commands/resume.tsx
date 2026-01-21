@@ -33,6 +33,7 @@ import { registerBuiltinTrackers } from '../plugins/trackers/builtin/index.js';
 import { getAgentRegistry } from '../plugins/agents/registry.js';
 import { getTrackerRegistry } from '../plugins/trackers/registry.js';
 import { RunApp } from '../tui/components/RunApp.js';
+import { getAppVersion } from '../utils/version.js';
 
 /**
  * Parse CLI arguments for the resume command
@@ -149,6 +150,8 @@ async function runWithTui(
     });
   };
 
+  const appVersion = await getAppVersion();
+
   root.render(
     <RunApp
       engine={engine}
@@ -164,6 +167,7 @@ async function runWithTui(
       initialSubagentPanelVisible={initialState.subagentPanelVisible ?? false}
       onSubagentPanelVisibilityChange={handleSubagentPanelVisibilityChange}
       currentModel={currentModel}
+      appVersion={appVersion}
     />
   );
 

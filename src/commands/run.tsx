@@ -57,6 +57,7 @@ import { sendCompletionNotification, sendMaxIterationsNotification, sendErrorNot
 import type { NotificationSoundMode } from '../config/types.js';
 import { detectSandboxMode } from '../sandbox/index.js';
 import type { SandboxMode } from '../sandbox/index.js';
+import { getAppVersion } from '../utils/version.js';
 import {
   createRemoteServer,
   getOrCreateServerToken,
@@ -694,6 +695,8 @@ interface RunAppWrapperProps {
   onUpdatePersistedState?: (updater: (state: PersistedSessionState) => PersistedSessionState) => void;
   /** Current model being used (provider/model format, e.g., "anthropic/claude-3-5-sonnet") */
   currentModel?: string;
+  /** Running ralph-tui version string */
+  appVersion?: string;
   /** Sandbox configuration for display in header */
   sandboxConfig?: SandboxConfig;
   /** Resolved sandbox mode (when mode is 'auto', this shows what it resolved to) */
@@ -721,6 +724,7 @@ function RunAppWrapper({
   initialSubagentPanelVisible = false,
   onUpdatePersistedState,
   currentModel,
+  appVersion,
   sandboxConfig,
   resolvedSandboxMode,
   initialShowEpicLoader = false,
@@ -887,6 +891,7 @@ function RunAppWrapper({
       initialSubagentPanelVisible={initialSubagentPanelVisible}
       onSubagentPanelVisibilityChange={handleSubagentPanelVisibilityChange}
       currentModel={currentModel}
+      appVersion={appVersion}
       sandboxConfig={sandboxConfig}
       resolvedSandboxMode={resolvedSandboxMode}
       instanceTabs={instanceTabs}
@@ -945,6 +950,8 @@ async function runWithTui(
   });
 
   const root = createRoot(renderer);
+
+  const appVersion = await getAppVersion();
 
   // Subscribe to engine events to save state and track active tasks
   engine.on((event) => {
@@ -1124,6 +1131,7 @@ async function runWithTui(
       initialSubagentPanelVisible={persistedState.subagentPanelVisible ?? false}
       onUpdatePersistedState={handleUpdatePersistedState}
       currentModel={config.model}
+      appVersion={appVersion}
       sandboxConfig={config.sandbox}
       resolvedSandboxMode={resolvedSandboxMode}
       initialShowEpicLoader={config.tracker.plugin === 'json' && !config.prdPath}

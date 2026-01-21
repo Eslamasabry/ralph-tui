@@ -9,3 +9,4 @@ export * from './logger.js';
 export * from './process.js';
 export * from './retry.js';
 export * from './validation.js';
+export * from './version.js';
