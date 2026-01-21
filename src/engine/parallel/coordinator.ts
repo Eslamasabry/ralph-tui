@@ -5,7 +5,7 @@
 import type { RalphConfig } from '../../config/types.js';
 import { spawn } from 'node:child_process';
 import type { TrackerPlugin, TrackerTask } from '../../plugins/trackers/types.js';
-import type { AgentPlugin } from '../../plugins/agents/types.js';
+import type { AgentPlugin, AgentExecutionResult } from '../../plugins/agents/types.js';
 import { getAgentRegistry } from '../../plugins/agents/registry.js';
 import { getTrackerRegistry } from '../../plugins/trackers/registry.js';
 import { buildParallelPrompt } from './prompt.js';
@@ -30,6 +30,9 @@ export class ParallelCoordinator {
   private pendingMergeCounts = new Map<string, number>();
   private workerBaseCommits = new Map<string, string>();
   private blockedTaskIds = new Set<string>();
+  private pendingMainSyncTasks = new Map<string, { task: TrackerTask; workerId: string }>();
+  private commitRecoveryAttempts = new Map<string, number>();
+  private lastMainSyncAttemptAt = 0;
   private mergeWorktreePath: string | null = null;
   private mergeBranch = 'parallel/integration';
   private baseBranch = 'main';
@@ -143,9 +146,15 @@ export class ParallelCoordinator {
       if (!task) {
         const busyWorkers = this.workers.some((worker) => worker.isBusy());
         if (!busyWorkers) {
+          await this.trySyncPendingMainTasks();
           const resetCount = await this.resetStaleInProgressTasks();
           if (resetCount > 0) {
             await this.delay(100);
+            continue;
+          }
+
+          if (this.pendingMainSyncTasks.size > 0) {
+            await this.delay(250);
             continue;
           }
 
@@ -238,7 +247,7 @@ export class ParallelCoordinator {
     });
 
     const taskResult: ParallelTaskResult = { task, result, completed };
-    await this.handleTaskResult(taskResult, worker.workerId);
+    await this.handleTaskResult(taskResult, worker);
 
     this.emit({
       type: 'parallel:task-finished',
@@ -256,13 +265,59 @@ export class ParallelCoordinator {
     });
   }
 
-  private async handleTaskResult(taskResult: ParallelTaskResult, workerId: string): Promise<void> {
+  private async handleTaskResult(taskResult: ParallelTaskResult, worker: ParallelWorker): Promise<void> {
     if (!this.tracker) return;
+    const workerId = worker.workerId;
 
     if (taskResult.completed) {
       const commits = await this.collectCommits(taskResult.task, workerId);
       if (commits.length === 0) {
+        const statusLines = await this.getRepoStatusLines(worker.worktreePath);
+        if (statusLines.length > 0) {
+          const recovered = await this.attemptCommitRecovery(worker, taskResult.task, statusLines, taskResult.result);
+          if (!recovered) {
+            const fallbackCommits = await this.collectCommits(taskResult.task, workerId);
+            if (fallbackCommits.length === 0) {
+              await this.handleMergeFailure(
+                { task: taskResult.task, workerId, commit: 'none' },
+                'Uncommitted changes after completion; commit recovery failed'
+              );
+              return;
+            }
+
+            this.pendingMergeCounts.set(taskResult.task.id, fallbackCommits.length);
+            for (const commit of fallbackCommits) {
+              void this.enqueueMerge({ task: taskResult.task, workerId, commit });
+            }
+            this.commitRecoveryAttempts.delete(taskResult.task.id);
+            return;
+          }
+
+          const retryCommits = await this.collectCommits(taskResult.task, workerId);
+          if (retryCommits.length === 0) {
+            const retryStatus = await this.getRepoStatusLines(worker.worktreePath);
+            if (retryStatus.length > 0) {
+              await this.handleMergeFailure(
+                { task: taskResult.task, workerId, commit: 'none' },
+                'Uncommitted changes after completion; no commit produced'
+              );
+              return;
+            }
+            await this.markMergeSuccess({ task: taskResult.task, workerId, commit: 'none' }, false, []);
+            this.commitRecoveryAttempts.delete(taskResult.task.id);
+            return;
+          }
+
+          this.pendingMergeCounts.set(taskResult.task.id, retryCommits.length);
+          for (const commit of retryCommits) {
+            void this.enqueueMerge({ task: taskResult.task, workerId, commit });
+          }
+          this.commitRecoveryAttempts.delete(taskResult.task.id);
+          return;
+        }
+
         await this.markMergeSuccess({ task: taskResult.task, workerId, commit: 'none' }, false, []);
+        this.commitRecoveryAttempts.delete(taskResult.task.id);
         return;
       }
 
@@ -286,7 +341,7 @@ export class ParallelCoordinator {
   private async hasPendingWork(): Promise<boolean> {
     if (!this.tracker) return false;
     const tasks = await this.tracker.getTasks({ status: ['open', 'in_progress'] });
-    return tasks.length > 0;
+    return tasks.length > 0 || this.pendingMainSyncTasks.size > 0;
   }
 
   private async handleMergeFailure(
@@ -340,15 +395,32 @@ export class ParallelCoordinator {
     const remaining = (this.pendingMergeCounts.get(entry.task.id) ?? 1) - 1;
     if (remaining <= 0) {
       this.pendingMergeCounts.delete(entry.task.id);
-      await this.tracker?.completeTask(entry.task.id, 'Completed by parallel worker');
     } else {
       this.pendingMergeCounts.set(entry.task.id, remaining);
     }
 
-    await this.syncMainBranch();
+    if (entry.commit === 'none') {
+      if (remaining <= 0) {
+        await this.tracker?.completeTask(entry.task.id, 'Completed by parallel worker');
+      }
+      return;
+    }
+
+    const syncResult = await this.syncMainBranch();
+
+    if (remaining <= 0) {
+      if (syncResult.success) {
+        await this.tracker?.completeTask(entry.task.id, 'Completed by parallel worker');
+      } else {
+        this.pendingMainSyncTasks.set(entry.task.id, { task: entry.task, workerId: entry.workerId });
+        this.blockedTaskIds.add(entry.task.id);
+        await this.tracker?.updateTaskStatus(entry.task.id, 'blocked');
+        await this.tracker?.releaseTask?.(entry.task.id, entry.workerId);
+      }
+    }
   }
 
-  private async syncMainBranch(): Promise<void> {
+  private async syncMainBranch(): Promise<{ success: boolean; reason?: string; commit?: string }> {
     const currentBranch = await this.getCurrentBranch();
     if (currentBranch !== this.baseBranch) {
       this.emit({
@@ -356,7 +428,7 @@ export class ParallelCoordinator {
         timestamp: new Date().toISOString(),
         reason: `Current branch is ${currentBranch} (expected ${this.baseBranch}).`,
       });
-      return;
+      return { success: false, reason: `Current branch is ${currentBranch} (expected ${this.baseBranch}).` };
     }
 
     const clean = await this.isRepoClean(this.config.cwd);
@@ -366,7 +438,7 @@ export class ParallelCoordinator {
         timestamp: new Date().toISOString(),
         reason: 'Main working tree has uncommitted changes.',
       });
-      return;
+      return { success: false, reason: 'Main working tree has uncommitted changes.' };
     }
 
     const result = await this.execGitIn(this.config.cwd, ['merge', '--ff-only', this.mergeBranch]);
@@ -376,7 +448,7 @@ export class ParallelCoordinator {
         timestamp: new Date().toISOString(),
         reason: result.stderr.trim() || 'merge --ff-only failed',
       });
-      return;
+      return { success: false, reason: result.stderr.trim() || 'merge --ff-only failed' };
     }
     const head = await this.execGitIn(this.config.cwd, ['rev-parse', 'HEAD']);
     if (head.exitCode === 0) {
@@ -385,7 +457,39 @@ export class ParallelCoordinator {
         timestamp: new Date().toISOString(),
         commit: head.stdout.trim(),
       });
+      await this.completePendingMainSyncTasks();
+      return { success: true, commit: head.stdout.trim() };
     }
+
+    return { success: false, reason: 'Unable to resolve main HEAD after sync.' };
+  }
+
+  private async trySyncPendingMainTasks(): Promise<void> {
+    if (this.pendingMainSyncTasks.size === 0) {
+      return;
+    }
+
+    const now = Date.now();
+    if (now - this.lastMainSyncAttemptAt < 2000) {
+      return;
+    }
+
+    this.lastMainSyncAttemptAt = now;
+    await this.syncMainBranch();
+  }
+
+  private async completePendingMainSyncTasks(): Promise<void> {
+    if (!this.tracker || this.pendingMainSyncTasks.size === 0) {
+      return;
+    }
+
+    for (const [taskId, entry] of this.pendingMainSyncTasks) {
+      await this.tracker.completeTask(taskId, 'Completed after main sync');
+      await this.tracker.releaseTask?.(taskId, entry.workerId);
+      this.blockedTaskIds.delete(taskId);
+    }
+
+    this.pendingMainSyncTasks.clear();
   }
 
   private async getCommitFiles(commit: string, repoPath: string): Promise<string[]> {
@@ -763,6 +867,106 @@ export class ParallelCoordinator {
     ].join('\n');
   }
 
+  private formatOutputTail(output: string, maxLines = 20, maxChars = 2000): string {
+    if (!output.trim()) {
+      return '(no output)';
+    }
+
+    const lines = output.trimEnd().split('\n');
+    const tailLines = lines.slice(-maxLines);
+    let tail = tailLines.join('\n');
+    if (tail.length > maxChars) {
+      tail = tail.slice(-maxChars);
+    }
+    return tail;
+  }
+
+  private async buildRecoveryPrompt(
+    task: TrackerTask,
+    statusLines: string[],
+    lastResult: AgentExecutionResult,
+    worktreePath: string
+  ): Promise<string> {
+    const basePrompt = await buildParallelPrompt(task, this.config, this.tracker ?? undefined, worktreePath);
+    const files = statusLines.map((line) => `- ${line}`);
+    const stdoutTail = this.formatOutputTail(lastResult.stdout);
+
+    return [
+      basePrompt,
+      '',
+      '## Recovery Context',
+      '- Previous iteration reported <promise>COMPLETE</promise> but there are uncommitted changes and no commits.',
+      '',
+      'Changed files (git status --porcelain):',
+      files.length > 0 ? files.join('\n') : '- (none)',
+      '',
+      'Last iteration stdout (tail):',
+      '```',
+      stdoutTail,
+      '```',
+      '',
+      '## Recovery Instructions',
+      '- Continue the task. Verify all requirements are complete (not just files already touched).',
+      '- If anything is missing, finish it before committing.',
+      `- Commit message: "${this.buildCommitMessage(task)}"`,
+      '- If no changes are needed, revert to a clean working tree (no commit).',
+      '- Do NOT merge, rebase, or push.',
+      '- Do NOT switch branches (no `git checkout main`).',
+      '- Do NOT run tests or lint unless explicitly asked.',
+      '',
+      'When done, output: <promise>COMPLETE</promise>',
+    ].join('\n');
+  }
+
+  private async attemptCommitRecovery(
+    worker: ParallelWorker,
+    task: TrackerTask,
+    statusLines: string[],
+    lastResult: AgentExecutionResult
+  ): Promise<boolean> {
+    const attempts = this.commitRecoveryAttempts.get(task.id) ?? 0;
+    if (attempts >= 1) {
+      return false;
+    }
+
+    this.commitRecoveryAttempts.set(task.id, attempts + 1);
+
+    const prompt = await this.buildRecoveryPrompt(task, statusLines, lastResult, worker.worktreePath);
+    const { completed } = await worker.executeTask(task, prompt, {
+      onStdout: (data) => {
+        this.emit({
+          type: 'parallel:task-output',
+          timestamp: new Date().toISOString(),
+          workerId: worker.workerId,
+          taskId: task.id,
+          data,
+          stream: 'stdout',
+        });
+      },
+      onStderr: (data) => {
+        this.emit({
+          type: 'parallel:task-output',
+          timestamp: new Date().toISOString(),
+          workerId: worker.workerId,
+          taskId: task.id,
+          data,
+          stream: 'stderr',
+        });
+      },
+      onStdoutSegments: (segments) => {
+        this.emit({
+          type: 'parallel:task-segments',
+          timestamp: new Date().toISOString(),
+          workerId: worker.workerId,
+          taskId: task.id,
+          segments,
+        });
+      },
+    });
+
+    return completed;
+  }
+
   private buildCommitMessage(task: TrackerTask): string {
     const title = task.title.replace(/\s+/g, ' ').trim();
     const truncated = title.length > 60 ? `${title.slice(0, 57)}...` : title;
@@ -770,8 +974,13 @@ export class ParallelCoordinator {
   }
 
   private async isRepoClean(repoPath: string): Promise<boolean> {
+    const statusLines = await this.getRepoStatusLines(repoPath);
+    return statusLines.length === 0;
+  }
+
+  private async getRepoStatusLines(repoPath: string): Promise<string[]> {
     const status = await this.execGitIn(repoPath, ['status', '--porcelain']);
-    return this.filterStatusLines(status.stdout).length === 0;
+    return this.filterStatusLines(status.stdout);
   }
 
   private filterStatusLines(statusOutput: string): string[] {
