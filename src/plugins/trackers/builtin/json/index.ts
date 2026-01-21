@@ -53,6 +53,16 @@ interface PrdUserStory {
 
   /** Optional notes for when the story was completed (alias for notes) */
   completionNotes?: string;
+
+  /** Pending-main metadata - task has commits waiting to merge to main branch */
+  pendingMain?: {
+    /** Number of commits pending merge */
+    pendingCommits: number;
+    /** When the task entered pending-main state */
+    since: string;
+    /** Commits that are pending merge (SHA hashes) */
+    commits?: string[];
+  };
 }
 
 /**
@@ -288,6 +298,7 @@ function storyToTask(story: PrdUserStory, parentName?: string): TrackerTask {
       acceptanceCriteria: story.acceptanceCriteria,
       notes: notes,
       completionNotes: notes, // Keep for backward compat
+      pendingMain: story.pendingMain,
     },
   };
 }
@@ -512,7 +523,8 @@ export class JsonTrackerPlugin extends BaseTrackerPlugin {
 
   /**
    * Get the next task to work on.
-   * Selects the highest priority task where passes: false.
+   * Selects the highest priority task where passes: false and not pending-main.
+   * Tasks with pendingMain metadata are excluded from selection (they're waiting for merge to main).
    */
   override async getNextTask(
     filter?: TaskFilter
@@ -528,10 +540,17 @@ export class JsonTrackerPlugin extends BaseTrackerPlugin {
       return undefined;
     }
 
-    // Sort by priority (lower number = higher priority)
-    tasks.sort((a, b) => a.priority - b.priority);
+    // Filter out tasks that are pending-main (waiting for merge to main)
+    const actionableTasks = tasks.filter((task) => !task.metadata?.pendingMain);
 
-    return tasks[0];
+    if (actionableTasks.length === 0) {
+      return undefined;
+    }
+
+    // Sort by priority (lower number = higher priority)
+    actionableTasks.sort((a, b) => a.priority - b.priority);
+
+    return actionableTasks[0];
   }
 
   async completeTask(
@@ -611,6 +630,105 @@ export class JsonTrackerPlugin extends BaseTrackerPlugin {
       return storyToTask(story, prd.name);
     } catch (err) {
       console.error(`Failed to update task ${id} status:`, err);
+      return undefined;
+    }
+  }
+
+  /**
+   * Mark a task as pending-main (commits waiting to merge to main branch).
+   * This marks the task as blocked and stores metadata about pending commits.
+   * The task will not be re-queued while in pending-main state.
+   *
+   * @param id - The task ID to mark as pending-main
+   * @param pendingCommits - Number of commits pending merge
+   * @param commits - Optional array of commit SHAs pending merge
+   * @returns The updated task, or undefined if not found
+   */
+  async markTaskPendingMain(
+    id: string,
+    pendingCommits: number,
+    commits?: string[]
+  ): Promise<TrackerTask | undefined> {
+    try {
+      const prd = await this.readPrd();
+      const storyIndex = prd.userStories.findIndex((s) => s.id === id);
+
+      if (storyIndex === -1) {
+        return undefined;
+      }
+
+      const story = prd.userStories[storyIndex];
+      if (!story) {
+        return undefined;
+      }
+
+      // Set pending-main metadata
+      story.pendingMain = {
+        pendingCommits,
+        since: new Date().toISOString(),
+        commits,
+      };
+
+      // Update notes to indicate pending-main status
+      const existingNotes = story.notes || '';
+      const pendingNote = `[pending-main] ${pendingCommits} commit(s) pending merge to main branch`;
+      story.notes = existingNotes ? `${existingNotes}\n${pendingNote}` : pendingNote;
+
+      // Mark as blocked (not passes: true, but also not open for re-queuing)
+      // We keep passes: false but the pendingMain metadata indicates special status
+      story.passes = false;
+
+      // Write back to file
+      await this.writePrd(prd);
+
+      return storyToTask(story, prd.name);
+    } catch (err) {
+      console.error(`Failed to mark task ${id} as pending-main:`, err);
+      return undefined;
+    }
+  }
+
+  /**
+   * Clear the pending-main status from a task (after successful merge to main).
+   * This is called when all pending commits have been merged.
+   *
+   * @param id - The task ID to clear pending-main status
+   * @param reason - Optional reason for clearing (e.g., "Merged to main")
+   * @returns The updated task, or undefined if not found
+   */
+  async clearPendingMain(
+    id: string,
+    reason?: string
+  ): Promise<TrackerTask | undefined> {
+    try {
+      const prd = await this.readPrd();
+      const storyIndex = prd.userStories.findIndex((s) => s.id === id);
+
+      if (storyIndex === -1) {
+        return undefined;
+      }
+
+      const story = prd.userStories[storyIndex];
+      if (!story) {
+        return undefined;
+      }
+
+      // Clear pending-main metadata
+      delete story.pendingMain;
+
+      // Update notes to indicate merge complete
+      const existingNotes = story.notes || '';
+      const mergeNote = reason || '[pending-main] Commits merged to main';
+      story.notes = existingNotes
+        ? `${existingNotes}\n${mergeNote}`
+        : mergeNote;
+
+      // Write back to file
+      await this.writePrd(prd);
+
+      return storyToTask(story, prd.name);
+    } catch (err) {
+      console.error(`Failed to clear pending-main for task ${id}:`, err);
       return undefined;
     }
   }

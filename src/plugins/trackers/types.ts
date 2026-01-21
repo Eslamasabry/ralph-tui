@@ -20,6 +20,19 @@ export type TrackerTaskStatus =
   | 'cancelled';
 
 /**
+ * Metadata about a task waiting to merge to main branch.
+ * Used by parallel execution to track tasks with pending commits.
+ */
+export interface PendingMainMetadata {
+  /** Number of commits pending merge to main */
+  pendingCommits: number;
+  /** When the task entered pending-main state (ISO 8601) */
+  since: string;
+  /** Commits that are pending merge (SHA hashes) */
+  commits?: string[];
+}
+
+/**
  * Unified task representation across all tracker plugins.
  * All tracker plugins must convert their native task format to this type.
  */

@@ -591,6 +591,80 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
     return this.getTask(id);
   }
 
+  /**
+   * Mark a task as pending-main (commits waiting to merge to main branch).
+   * For beads, this marks the task as blocked and adds a note.
+   * The task will not be returned by getNextTask while in pending-main state.
+   *
+   * @param id - The task ID to mark as pending-main
+   * @param pendingCommits - Number of commits pending merge
+   * @param commits - Optional array of commit SHAs pending merge
+   * @returns The updated task, or undefined if not found
+   */
+  async markTaskPendingMain(
+    id: string,
+    pendingCommits: number,
+    commits?: string[]
+  ): Promise<TrackerTask | undefined> {
+    // Mark as blocked so getNextTask won't return it
+    const updated = await this.updateTaskStatus(id, 'blocked');
+    if (!updated) {
+      return undefined;
+    }
+
+    // Add note about pending-main status
+    const note = `[pending-main] ${pendingCommits} commit(s) pending merge to main branch${commits ? `: ${commits.join(', ')}` : ''}`;
+
+    const { exitCode, stderr } = await execBd(
+      ['update', id, '--note', note],
+      this.workingDir
+    );
+
+    if (exitCode !== 0) {
+      console.error(`bd update ${id} --note failed:`, stderr);
+      // Still return the task even if note update failed
+      return updated;
+    }
+
+    // Fetch and return the updated task with note
+    return this.getTask(id);
+  }
+
+  /**
+   * Clear the pending-main status from a task (after successful merge to main).
+   * This is called when all pending commits have been merged.
+   *
+   * @param id - The task ID to clear pending-main status
+   * @param reason - Optional reason for clearing (e.g., "Merged to main")
+   * @returns The updated task, or undefined if not found
+   */
+  async clearPendingMain(
+    id: string,
+    reason?: string
+  ): Promise<TrackerTask | undefined> {
+    // Get current note and append merge complete message
+    const task = await this.getTask(id);
+    if (!task) {
+      return undefined;
+    }
+
+    const mergeNote = reason || '[pending-main] Commits merged to main';
+    const existingNote = task.metadata?.notes as string | undefined;
+    const newNote = existingNote ? `${existingNote}\n${mergeNote}` : mergeNote;
+
+    const { exitCode, stderr } = await execBd(
+      ['update', id, '--note', newNote],
+      this.workingDir
+    );
+
+    if (exitCode !== 0) {
+      console.error(`bd update ${id} --note failed:`, stderr);
+    }
+
+    // Reset status to open (not blocked anymore)
+    return this.updateTaskStatus(id, 'open');
+  }
+
   override async claimTask(id: string, workerId: string): Promise<boolean> {
     let locked = await this.createTaskLock(id, workerId);
     if (!locked) {
@@ -721,86 +795,97 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
     );
   }
 
-  /**
-   * Get the next task to work on using bd ready.
-   * Overrides base implementation to leverage bd's server-side dependency filtering,
-   * since bd list --json doesn't include dependency data needed for client-side filtering.
-   * See: https://github.com/subsy/ralph-tui/issues/97
-   */
-  override async getNextTask(filter?: TaskFilter): Promise<TrackerTask | undefined> {
-    // Build bd ready command args
-    const args = ['ready', '--json'];
+   /**
+    * Get the next task to work on using bd ready.
+    * Overrides base implementation to leverage bd's server-side dependency filtering,
+    * since bd list --json doesn't include dependency data needed for client-side filtering.
+    * Also filters out tasks with pending-main status (marked as blocked with pending-main note).
+    * See: https://github.com/subsy/ralph-tui/issues/97
+    */
+   override async getNextTask(filter?: TaskFilter): Promise<TrackerTask | undefined> {
+     // Build bd ready command args
+     const args = ['ready', '--json'];
 
-    // Apply limit - we only need the first task, but get a few for in_progress preference
-    args.push('--limit', '10');
+     // Apply limit - we only need the first task, but get a few for in_progress preference
+     args.push('--limit', '10');
 
-    // Filter by parent (epic)
-    if (filter?.parentId) {
-      args.push('--parent', filter.parentId);
-    } else if (this.epicId) {
-      args.push('--parent', this.epicId);
-    }
+     // Filter by parent (epic)
+     if (filter?.parentId) {
+       args.push('--parent', filter.parentId);
+     } else if (this.epicId) {
+       args.push('--parent', this.epicId);
+     }
 
-    // Filter by labels
-    const labelsToFilter =
-      filter?.labels && filter.labels.length > 0 ? filter.labels : this.labels;
-    if (labelsToFilter.length > 0) {
-      args.push('--label', labelsToFilter.join(','));
-    }
+     // Filter by labels
+     const labelsToFilter =
+       filter?.labels && filter.labels.length > 0 ? filter.labels : this.labels;
+     if (labelsToFilter.length > 0) {
+       args.push('--label', labelsToFilter.join(','));
+     }
 
-    // Filter by priority
-    if (filter?.priority !== undefined) {
-      const priorities = Array.isArray(filter.priority)
-        ? filter.priority
-        : [filter.priority];
-      // bd ready only supports single priority, use highest (lowest number)
-      const highestPriority = Math.min(...priorities);
-      args.push('--priority', String(highestPriority));
-    }
+     // Filter by priority
+     if (filter?.priority !== undefined) {
+       const priorities = Array.isArray(filter.priority)
+         ? filter.priority
+         : [filter.priority];
+       // bd ready only supports single priority, use highest (lowest number)
+       const highestPriority = Math.min(...priorities);
+       args.push('--priority', String(highestPriority));
+     }
 
-    // Filter by assignee
-    if (filter?.assignee) {
-      args.push('--assignee', filter.assignee);
-    }
+     // Filter by assignee
+     if (filter?.assignee) {
+       args.push('--assignee', filter.assignee);
+     }
 
-    const { stdout, exitCode, stderr } = await execBd(args, this.workingDir);
+     const { stdout, exitCode, stderr } = await execBd(args, this.workingDir);
 
-    if (exitCode !== 0) {
-      console.error('bd ready failed:', stderr);
-      return undefined;
-    }
+     if (exitCode !== 0) {
+       console.error('bd ready failed:', stderr);
+       return undefined;
+     }
 
-    // Parse JSON output
-    let beads: BeadJson[];
-    try {
-      beads = JSON.parse(stdout) as BeadJson[];
-    } catch (err) {
-      console.error('Failed to parse bd ready output:', err);
-      return undefined;
-    }
+     // Parse JSON output
+     let beads: BeadJson[];
+     try {
+       beads = JSON.parse(stdout) as BeadJson[];
+     } catch (err) {
+       console.error('Failed to parse bd ready output:', err);
+       return undefined;
+     }
 
-    if (beads.length === 0) {
-      return undefined;
-    }
+     if (beads.length === 0) {
+       return undefined;
+     }
 
-    // Convert to TrackerTask
-    let tasks = beads.map(beadToTask);
+     // Convert to TrackerTask
+     let tasks = beads.map(beadToTask);
 
-    // Filter out excluded task IDs (used by engine for skipped/failed tasks)
-    if (filter?.excludeIds && filter.excludeIds.length > 0) {
-      const excludeSet = new Set(filter.excludeIds);
-      tasks = tasks.filter((t) => !excludeSet.has(t.id));
-    }
+     // Filter out excluded task IDs (used by engine for skipped/failed tasks)
+     if (filter?.excludeIds && filter.excludeIds.length > 0) {
+       const excludeSet = new Set(filter.excludeIds);
+       tasks = tasks.filter((t) => !excludeSet.has(t.id));
+     }
 
-    const statusFilter = filter?.status
-      ? Array.isArray(filter.status)
-        ? filter.status
-        : [filter.status]
-      : undefined;
+     const statusFilter = filter?.status
+       ? Array.isArray(filter.status)
+         ? filter.status
+         : [filter.status]
+       : undefined;
 
-    if (statusFilter) {
-      tasks = tasks.filter((t) => statusFilter.includes(t.status));
-    }
+     if (statusFilter) {
+       tasks = tasks.filter((t) => statusFilter.includes(t.status));
+     }
+
+     // Additional safety filter: exclude tasks with pending-main notes
+     // This handles cases where a task might not be properly marked as blocked
+     tasks = tasks.filter((t) => {
+       const notes = t.metadata?.notes as string | undefined;
+       if (notes && notes.includes('[pending-main]')) {
+         return false;
+       }
+       return true;
+     });
 
     if (tasks.length === 0) {
       const shouldFallback = !statusFilter || statusFilter.includes('open');
