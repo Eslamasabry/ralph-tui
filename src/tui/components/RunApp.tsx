@@ -417,9 +417,11 @@ export function RunApp({
   const [pendingMainTasksList, setPendingMainTasksList] = useState<Array<{ taskId: string; taskTitle: string; commitCount: number }>>([]);
   // Main sync failure reason for run summary
   const [mainSyncFailureReason, setMainSyncFailureReason] = useState<string | undefined>(undefined);
-  // Run summary overlay visibility
-  const [showRunSummary, setShowRunSummary] = useState(false);
-  // Streaming parser for live output - extracts readable content and prevents memory bloat
+	// Run summary overlay visibility
+	const [showRunSummary, setShowRunSummary] = useState(false);
+	// Cleanup action results for run summary (US-005)
+	const [cleanupActionResults, setCleanupActionResults] = useState<Record<string, CleanupActionUiResult>>({});
+	// Streaming parser for live output - extracts readable content and prevents memory bloat
   // Use agentPlugin prop (from resolved config with CLI override) with fallback to storedConfig
   const resolvedAgentName = agentPlugin || storedConfig?.defaultAgent || storedConfig?.agent || 'claude';
   const outputParserRef = useRef(
@@ -1662,6 +1664,65 @@ export function RunApp({
     const newIdx = Math.max(0, Math.min(flatList.length - 1, currentIdx + direction));
     setSelectedSubagentId(flatList[newIdx]!);
   }, [subagentTree, remoteSubagentTree, isViewingRemote, selectedSubagentId, displayCurrentTaskId]);
+
+
+  // Handle restore snapshot action - resets codebase and reopens failed/blocked tasks
+  const handleRestoreSnapshot = useCallback(async () => {
+    const tag = snapshotTag;
+    if (!tag) {
+      setInfoFeedback('No snapshot available to restore');
+      return;
+    }
+
+    try {
+      // Step 1: Reset the codebase to the snapshot
+      setInfoFeedback(`Restoring to snapshot: ${tag}...`);
+
+      // Use git reset --hard to restore the codebase
+      const { execSync } = await import('node:child_process');
+      try {
+        execSync(`git reset --hard ${tag}`, {
+          cwd,
+          encoding: 'utf-8',
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
+      } catch (gitError) {
+        const errorMessage = gitError instanceof Error ? gitError.message : String(gitError);
+        setInfoFeedback(`Git reset failed: ${errorMessage}`);
+        return;
+      }
+
+      // Step 2: Reopen failed/blocked tasks in the tracker
+      const tracker = engine.getTracker();
+      if (tracker) {
+        // Get all tasks that are not in 'open' status (failed, blocked, in_progress, completed)
+        const allTasks = await tracker.getTasks({ status: ['in_progress', 'completed', 'blocked'] });
+
+        let reopenedCount = 0;
+        for (const task of allTasks) {
+          try {
+            await tracker.updateTaskStatus(task.id, 'open');
+            reopenedCount++;
+          } catch {
+            // Continue on individual failures
+          }
+        }
+
+        // Refresh task list
+        await engine.refreshTasks();
+
+        setInfoFeedback(`Restored to ${tag}. Reopened ${reopenedCount} task(s).`);
+      } else {
+        setInfoFeedback(`Restored to ${tag}. Tracker not available for task reset.`);
+      }
+
+      // Close the run summary overlay after restore
+      setShowRunSummary(false);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      setInfoFeedback(`Restore failed: ${errorMessage}`);
+    }
+  }, [snapshotTag, engine, cwd]);
 
   // Handle keyboard navigation
   const handleKeyboard = useCallback(
@@ -3276,7 +3337,7 @@ export function RunApp({
         onClose={() => setShowRemoteManagement(false)}
       />
 
-      {/* Run Summary Overlay (US-001, US-002) */}
+      {/* Run Summary Overlay (US-001, US-002, US-005) */}
       <RunSummaryOverlay
         visible={showRunSummary}
         status={status}
@@ -3293,6 +3354,9 @@ export function RunApp({
         }}
         failures={runFailures}
         pendingMainTasksList={pendingMainTasksList}
+        cleanupConfig={storedConfig?.cleanup}
+        cleanupActionResults={cleanupActionResults}
+        onCleanupAction={handleCleanupAction}
         onClose={() => setShowRunSummary(false)}
       />
     </box>
