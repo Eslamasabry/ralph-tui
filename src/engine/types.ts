@@ -215,7 +215,11 @@ export type EngineEventType =
   | 'agent:recovery-attempted'
   | 'all:complete'
   | 'tasks:refreshed'
-  | 'tracker:realtime';
+  | 'tracker:realtime'
+  /** Main sync events - emitted when syncing completed work to main branch */
+  | 'main-sync-skipped'
+  | 'main-sync-succeeded'
+  | 'main-sync-failed';
 
 /**
  * Tracker realtime status
@@ -585,6 +589,35 @@ export interface TrackerRealtimeEvent extends EngineEventBase {
 }
 
 /**
+ * Main sync skipped event - emitted when main sync was skipped (dirty repo, wrong branch, etc.)
+ */
+export interface MainSyncSkippedEvent extends EngineEventBase {
+  type: 'main-sync-skipped';
+  /** Reason for skipping the sync */
+  reason: string;
+}
+
+/**
+ * Main sync succeeded event - emitted when main sync completed successfully
+ */
+export interface MainSyncSucceededEvent extends EngineEventBase {
+  type: 'main-sync-succeeded';
+  /** The commit hash after sync */
+  commit: string;
+}
+
+/**
+ * Main sync failed event - emitted when main sync failed
+ */
+export interface MainSyncFailedEvent extends EngineEventBase {
+  type: 'main-sync-failed';
+  /** Task that was blocked due to sync failure */
+  task: TrackerTask;
+  /** Reason for the sync failure */
+  reason: string;
+}
+
+/**
  * Union of all engine events
  */
 export type EngineEvent =
@@ -612,7 +645,10 @@ export type EngineEvent =
   | AgentRecoveryAttemptedEvent
   | AllCompleteEvent
   | TasksRefreshedEvent
-  | TrackerRealtimeEvent;
+  | TrackerRealtimeEvent
+  | MainSyncSkippedEvent
+  | MainSyncSucceededEvent
+  | MainSyncFailedEvent;
 
 /**
  * Event listener function type

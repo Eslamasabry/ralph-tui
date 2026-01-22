@@ -54,6 +54,7 @@ import {
 import type { AgentSwitchEntry } from '../logs/index.js';
 import { renderPrompt } from '../templates/index.js';
 import { BeadsRealtimeWatcher } from './beads-realtime.js';
+import { MainSyncWorktree } from '../git/index.js';
 import { join } from 'node:path';
 
 /**
@@ -183,6 +184,12 @@ export class ExecutionEngine {
   private trackerRealtimeWatcher: BeadsRealtimeWatcher | null = null;
   /** Track commit recovery attempts per task (separate from generic retries) */
   private commitRecoveryAttempts: Map<string, number> = new Map();
+  /** Main sync worktree for fast-forward syncs to main branch */
+  private mainSyncWorktree: MainSyncWorktree | null = null;
+  /** Track tasks pending main sync (blocked until main sync succeeds) */
+  private pendingMainSyncTasks: Map<string, { task: TrackerTask; workerId: string }> = new Map();
+  /** Timestamp of last main sync attempt (for rate limiting retries) */
+  private lastMainSyncAttemptAt = 0;
 
   constructor(config: RalphConfig) {
     this.config = config;
@@ -270,6 +277,11 @@ export class ExecutionEngine {
     this.state.totalTasks = tasks.length;
 
     this.startTrackerRealtimeWatcher();
+
+    // Initialize main sync worktree for fast-forward syncs
+    this.mainSyncWorktree = new MainSyncWorktree({
+      repoRoot: this.config.cwd,
+    });
   }
 
   private startTrackerRealtimeWatcher(): void {
@@ -554,6 +566,10 @@ export class ExecutionEngine {
         });
       }
 
+      // Try to sync pending main sync tasks before getting next task
+      // This allows blocked tasks to complete once main is synced
+      await this.trySyncPendingMainTasks();
+
       // Attempt primary agent recovery at the start of each iteration
       // This allows the engine to switch back to the preferred agent when rate limits lift
       if (this.shouldRecoverPrimaryAgent()) {
@@ -597,6 +613,12 @@ export class ExecutionEngine {
       // Get next task (excluding skipped tasks)
       const task = await this.getNextAvailableTask();
       if (!task) {
+        // If there are pending main sync tasks, wait and retry
+        if (this.pendingMainSyncTasks.size > 0) {
+          await this.delay(250);
+          continue;
+        }
+
         this.emit({
           type: 'engine:stopped',
           timestamp: new Date().toISOString(),
@@ -1147,19 +1169,42 @@ export class ExecutionEngine {
         (promiseComplete || agentResult.status === 'completed') &&
         (!recoveryNeeded || (recoveryResult?.success ?? false));
 
-      // Update tracker if task completed
+      // Update tracker if task completed (gated on main sync success)
       if (taskCompleted) {
-        await this.tracker!.completeTask(task.id, 'Completed by agent');
-        this.emit({
-          type: 'task:completed',
-          timestamp: new Date().toISOString(),
-          task,
-          iteration,
-        });
+        // Try to sync with main branch before completing
+        const syncResult = await this.syncMainBranch();
 
-        // Clear rate-limited agents tracking on task completion
-        // This allows agents to be retried for the next task
-        this.clearRateLimitedAgents();
+        if (syncResult.success) {
+          // Main sync succeeded - complete the task
+          await this.tracker!.completeTask(task.id, 'Completed by agent');
+          this.emit({
+            type: 'task:completed',
+            timestamp: new Date().toISOString(),
+            task,
+            iteration,
+          });
+
+          // Clear rate-limited agents tracking on task completion
+          // This allows agents to be retried for the next task
+          this.clearRateLimitedAgents();
+        } else {
+          // Main sync failed or was skipped - block the task pending main sync
+          console.log(`[main-sync] Task ${task.id} blocked: ${syncResult.reason}`);
+
+          // Add to pending main sync tasks
+          this.pendingMainSyncTasks.set(task.id, { task, workerId: 'main' });
+
+          // Mark task as blocked in tracker
+          await this.tracker!.updateTaskStatus(task.id, 'blocked');
+
+          // Emit task blocked event
+          this.emit({
+            type: 'task:blocked',
+            timestamp: new Date().toISOString(),
+            task,
+            reason: `Main sync required: ${syncResult.reason}`,
+          });
+        }
       }
 
       // Determine iteration status
@@ -2318,6 +2363,118 @@ export class ExecutionEngine {
 
     // Check if repo is dirty
     return this.isRepoDirty();
+  }
+
+  /**
+   * Sync the main branch using fast-forward only merge from the worktree.
+   * Returns { success: true, commit } if sync succeeded.
+   * Returns { success: false, reason } if sync was skipped or failed.
+   */
+  private async syncMainBranch(): Promise<{ success: boolean; reason?: string; commit?: string }> {
+    if (!this.mainSyncWorktree) {
+      return { success: false, reason: 'Main sync worktree not initialized' };
+    }
+
+    try {
+      const syncResult = await this.mainSyncWorktree.sync();
+
+      if (!syncResult.success) {
+        // Sync failed or was skipped
+        const reason = syncResult.error ?? 'Unknown sync failure';
+
+        // Emit appropriate event based on the reason
+        if (syncResult.error?.includes('Failed to fetch')) {
+          this.emit({
+            type: 'main-sync-failed',
+            timestamp: new Date().toISOString(),
+            task: this.state.currentTask!,
+            reason: `Fetch failed: ${syncResult.error}`,
+          });
+        } else if (syncResult.error?.includes('Fast-forward merge failed')) {
+          this.emit({
+            type: 'main-sync-failed',
+            timestamp: new Date().toISOString(),
+            task: this.state.currentTask!,
+            reason: `Merge failed: ${syncResult.error}`,
+          });
+        } else {
+          this.emit({
+            type: 'main-sync-skipped',
+            timestamp: new Date().toISOString(),
+            reason,
+          });
+        }
+
+        return { success: false, reason };
+      }
+
+      // Sync succeeded
+      if (syncResult.updated) {
+        this.emit({
+          type: 'main-sync-succeeded',
+          timestamp: new Date().toISOString(),
+          commit: syncResult.currentCommit,
+        });
+      } else {
+        // No updates but still successful (already at main)
+        this.emit({
+          type: 'main-sync-succeeded',
+          timestamp: new Date().toISOString(),
+          commit: syncResult.currentCommit,
+        });
+      }
+
+      return { success: true, commit: syncResult.currentCommit };
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'Unknown error';
+      this.emit({
+        type: 'main-sync-failed',
+        timestamp: new Date().toISOString(),
+        task: this.state.currentTask!,
+        reason,
+      });
+      return { success: false, reason };
+    }
+  }
+
+  /**
+   * Try to sync pending main sync tasks.
+   * Called periodically when there are pending tasks.
+   */
+  private async trySyncPendingMainTasks(): Promise<void> {
+    if (this.pendingMainSyncTasks.size === 0) {
+      return;
+    }
+
+    const now = Date.now();
+    // Rate limit sync attempts to once per 2 seconds
+    if (now - this.lastMainSyncAttemptAt < 2000) {
+      return;
+    }
+
+    this.lastMainSyncAttemptAt = now;
+    const result = await this.syncMainBranch();
+
+    if (result.success) {
+      await this.completePendingMainSyncTasks();
+    }
+  }
+
+  /**
+   * Complete all tasks that were pending main sync.
+   * Called after a successful main sync.
+   */
+  private async completePendingMainSyncTasks(): Promise<void> {
+    if (!this.tracker || this.pendingMainSyncTasks.size === 0) {
+      return;
+    }
+
+    for (const [taskId, entry] of this.pendingMainSyncTasks) {
+      await this.tracker.completeTask(taskId, 'Completed after main sync');
+      await this.tracker.releaseTask?.(taskId, entry.workerId);
+    }
+
+    this.pendingMainSyncTasks.clear();
   }
 
   /**
