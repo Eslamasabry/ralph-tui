@@ -219,7 +219,9 @@ export type EngineEventType =
   /** Main sync events - emitted when syncing completed work to main branch */
   | 'main-sync-skipped'
   | 'main-sync-succeeded'
-  | 'main-sync-failed';
+  | 'main-sync-failed'
+  | 'main-sync-retrying'
+  | 'main-sync-alert';
 
 /**
  * Tracker realtime status
@@ -618,6 +620,36 @@ export interface MainSyncFailedEvent extends EngineEventBase {
 }
 
 /**
+ * Main sync retrying event - emitted when retrying main sync with backoff
+ */
+export interface MainSyncRetryingEvent extends EngineEventBase {
+  type: 'main-sync-retrying';
+  /** Current retry attempt number (1-based) */
+  retryAttempt: number;
+  /** Maximum retries allowed */
+  maxRetries: number;
+  /** Reason for the sync failure being retried */
+  reason: string;
+  /** Delay before next retry in milliseconds */
+  delayMs: number;
+}
+
+/**
+ * Main sync alert event - emitted when max retries is reached
+ */
+export interface MainSyncAlertEvent extends EngineEventBase {
+  type: 'main-sync-alert';
+  /** Final retry attempt number */
+  retryAttempt: number;
+  /** Maximum retries that was configured */
+  maxRetries: number;
+  /** Reason for the sync failure */
+  reason: string;
+  /** Number of tasks affected */
+  affectedTaskCount: number;
+}
+
+/**
  * Union of all engine events
  */
 export type EngineEvent =
@@ -648,7 +680,9 @@ export type EngineEvent =
   | TrackerRealtimeEvent
   | MainSyncSkippedEvent
   | MainSyncSucceededEvent
-  | MainSyncFailedEvent;
+  | MainSyncFailedEvent
+  | MainSyncRetryingEvent
+  | MainSyncAlertEvent;
 
 /**
  * Event listener function type
