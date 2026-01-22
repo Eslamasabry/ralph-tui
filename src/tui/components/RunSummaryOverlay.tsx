@@ -4,10 +4,11 @@
  */
 
 import type { ReactNode } from 'react';
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useKeyboard } from '@opentui/react';
 import { colors, statusIndicators, formatElapsedTime } from '../theme.js';
 import type { RalphStatus } from '../theme.js';
+import type { CleanupConfig } from '../../config/types.js';
 
 /**
  * Failure information for the summary display
@@ -60,6 +61,15 @@ export interface MainSyncStatus {
 }
 
 /**
+ * Cleanup action for the summary display
+ */
+interface CleanupAction {
+  key: string;
+  label: string;
+  configKey: keyof CleanupConfig;
+}
+
+/**
  * Props for the RunSummaryOverlay component
  */
 export interface RunSummaryOverlayProps {
@@ -102,6 +112,9 @@ export interface RunSummaryOverlayProps {
   /** List of pending-main tasks */
   pendingMainTasksList: PendingMainInfo[];
 
+  /** Cleanup configuration (for determining which actions are available) */
+  cleanupConfig?: CleanupConfig;
+
   /** Callback when user closes the summary */
   onClose: () => void;
 }
@@ -138,10 +151,37 @@ export function RunSummaryOverlay({
   snapshotTag,
   failures,
   pendingMainTasksList,
+  cleanupConfig,
   onClose,
 }: RunSummaryOverlayProps): ReactNode {
   const [selectedAction, setSelectedAction] = useState(0);
   const statusDisplay = getStatusDisplay(status);
+
+  // Calculate actions based on cleanup config
+  const actions = useMemo(() => {
+    const allActions: Array<CleanupAction & { alwaysVisible?: boolean }> = [
+      { key: '1', label: 'Sync Main', configKey: 'syncMain' },
+      { key: '2', label: 'Prune Worktrees', configKey: 'pruneWorktrees' },
+      { key: '3', label: 'Delete Branches', configKey: 'deleteBranches' },
+      { key: '4', label: 'Push', configKey: 'push' },
+      { key: '5', label: 'Restore Snapshot', configKey: 'cleanupLogs', alwaysVisible: true },
+    ];
+
+    return allActions.filter((action) => {
+      // Always show actions marked as alwaysVisible
+      if (action.alwaysVisible) {
+        return action.label === 'Restore Snapshot' ? !!snapshotTag : true;
+      }
+      // Filter based on cleanup config
+      const config = cleanupConfig?.[action.configKey];
+      // Check if it's an object with enabled property (CleanupActionConfig)
+      if (config && typeof config === 'object' && 'enabled' in config) {
+        return (config as { enabled?: boolean }).enabled !== false;
+      }
+      // Default to enabled if not specified
+      return true;
+    });
+  }, [cleanupConfig, snapshotTag]);
 
   // Handle keyboard navigation
   const handleKeyboard = useCallback(
@@ -160,7 +200,7 @@ export function RunSummaryOverlay({
 
         case 'right':
         case 'l':
-          setSelectedAction((prev) => Math.min(5, prev + 1));
+          setSelectedAction((prev) => Math.min(actions.length - 1, prev + 1));
           break;
 
         case 'return':
@@ -169,17 +209,17 @@ export function RunSummaryOverlay({
           break;
       }
     },
-    [visible, onClose]
+    [visible, onClose, actions.length]
   );
 
   useKeyboard(handleKeyboard);
 
-  // Reset selection when overlay becomes visible
+  // Reset selection when overlay becomes visible and when actions change
   useEffect(() => {
     if (visible) {
       setSelectedAction(0);
     }
-  }, [visible]);
+  }, [visible, actions.length]);
 
   if (!visible) {
     return null;
@@ -196,19 +236,9 @@ export function RunSummaryOverlay({
   const snapshotHeight = snapshotTag ? 1 : 0;
   const failuresHeight = hasFailures ? Math.min(failures.length + 2, 6) : 0;
   const pendingHeight = hasPendingMain ? Math.min(pendingMainTasksList.length + 2, 4) : 0;
-  const actionsHeight = 2;
+  const actionsHeight = actions.length > 0 ? 2 : 0;
   const footerHeight = 1;
   const totalHeight = headerHeight + statsHeight + syncStatusHeight + snapshotHeight + failuresHeight + pendingHeight + actionsHeight + footerHeight;
-
-  // Actions for the summary
-  const actions = [
-    { key: '1', label: 'Do All Cleanup' },
-    { key: '2', label: 'Sync Main' },
-    { key: '3', label: 'Prune Worktrees' },
-    { key: '4', label: 'Delete Branches' },
-    { key: '5', label: 'Push' },
-    { key: '6', label: 'Restore Snapshot' },
-  ];
 
   return (
     <box
@@ -346,28 +376,30 @@ export function RunSummaryOverlay({
         )}
 
         {/* Actions */}
-        <box
-          style={{
-            flexDirection: 'row',
-            justifyContent: 'flex-start',
-            alignItems: 'center',
-            gap: 1,
-            paddingLeft: 1,
-            paddingRight: 1,
-            flexWrap: 'wrap',
-          }}
-        >
-          <text fg={colors.fg.muted}>Actions:</text>
-          {actions.map((action, index) => (
-            <text
-              key={action.key}
-              fg={selectedAction === index ? colors.bg.primary : colors.fg.secondary}
-              bg={selectedAction === index ? colors.accent.primary : undefined}
-            >
-              [{index + 1}]{action.label}
-            </text>
-          ))}
-        </box>
+        {actions.length > 0 && (
+          <box
+            style={{
+              flexDirection: 'row',
+              justifyContent: 'flex-start',
+              alignItems: 'center',
+              gap: 1,
+              paddingLeft: 1,
+              paddingRight: 1,
+              flexWrap: 'wrap',
+            }}
+          >
+            <text fg={colors.fg.muted}>Actions:</text>
+            {actions.map((action, index) => (
+              <text
+                key={action.key}
+                fg={selectedAction === index ? colors.bg.primary : colors.fg.secondary}
+                bg={selectedAction === index ? colors.accent.primary : undefined}
+              >
+                [{index + 1}]{action.label}
+              </text>
+            ))}
+          </box>
+        )}
 
         {/* Footer */}
         <box

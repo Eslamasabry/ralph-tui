@@ -56,6 +56,34 @@ export const SandboxConfigSchema = z.object({
 export const NotificationSoundModeSchema = z.enum(['off', 'system', 'ralph']);
 
 /**
+ * Cleanup mode schema - controls when automatic cleanup runs
+ */
+export const CleanupModeSchema = z.enum(['off', 'auto', 'manual']);
+
+export const CleanupActionSchema = z.object({
+  /** Whether this cleanup action is enabled */
+  enabled: z.boolean().optional(),
+});
+
+/**
+ * Cleanup configuration schema - controls post-run cleanup actions
+ */
+export const CleanupConfigSchema = z.object({
+  /** Overall cleanup mode: off, auto (runs on completion), manual (user must trigger) */
+  mode: CleanupModeSchema.optional(),
+  /** Sync with main branch after run completes */
+  syncMain: CleanupActionSchema.optional(),
+  /** Prune stale worktrees after run completes */
+  pruneWorktrees: CleanupActionSchema.optional(),
+  /** Delete merged branches after run completes */
+  deleteBranches: CleanupActionSchema.optional(),
+  /** Push changes to remote after run completes */
+  push: CleanupActionSchema.optional(),
+  /** Clean up iteration logs (respects logs.keep setting) */
+  cleanupLogs: CleanupActionSchema.optional(),
+});
+
+/**
  * Notifications configuration schema
  */
 export const NotificationsConfigSchema = z.object({
@@ -170,6 +198,9 @@ export const StoredConfigSchema = z
 
     // Notifications configuration
     notifications: NotificationsConfigSchema.optional(),
+
+    // Cleanup configuration
+    cleanup: CleanupConfigSchema.optional(),
   })
   .strict();
 

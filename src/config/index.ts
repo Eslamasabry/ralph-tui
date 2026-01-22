@@ -19,6 +19,7 @@ import {
   DEFAULT_CONFIG,
   DEFAULT_ERROR_HANDLING,
   DEFAULT_SANDBOX_CONFIG,
+  DEFAULT_CLEANUP_CONFIG,
 } from './types.js';
 import type { ErrorHandlingConfig } from '../engine/types.js';
 import type { AgentPluginConfig } from '../plugins/agents/types.js';
@@ -193,6 +194,9 @@ function mergeConfigs(global: StoredConfig, project: StoredConfig): StoredConfig
   }
   if (project.notifications !== undefined) {
     merged.notifications = { ...merged.notifications, ...project.notifications };
+  }
+  if (project.cleanup !== undefined) {
+    merged.cleanup = { ...merged.cleanup, ...project.cleanup };
   }
 
   return merged;
@@ -577,6 +581,10 @@ export async function buildConfig(
     sandbox,
     // CLI --prompt takes precedence over config file prompt_template
     promptTemplate: options.promptPath ?? storedConfig.prompt_template,
+    cleanup: {
+      ...DEFAULT_CLEANUP_CONFIG,
+      ...(storedConfig.cleanup ?? {}),
+    },
   };
 }
 
@@ -677,7 +685,7 @@ export async function validateConfig(
 }
 
 // Re-export types
-export type { StoredConfig, RalphConfig, RuntimeOptions, ConfigValidationResult, SubagentDetailLevel, NotificationSoundMode } from './types.js';
+export type { StoredConfig, RalphConfig, RuntimeOptions, ConfigValidationResult, SubagentDetailLevel, NotificationSoundMode, CleanupMode, CleanupConfig, CleanupActionConfig } from './types.js';
 export { DEFAULT_CONFIG, DEFAULT_SANDBOX_CONFIG };
 
 // Export schema utilities
@@ -690,6 +698,8 @@ export {
   ErrorHandlingConfigSchema,
   SubagentDetailLevelSchema,
   NotificationSoundModeSchema,
+  CleanupModeSchema,
+  CleanupConfigSchema,
 } from './schema.js';
 export type {
   ConfigParseResult,

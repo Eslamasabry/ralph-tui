@@ -6,7 +6,7 @@
 
 import type { ReactNode } from 'react';
 import { colors, statusIndicators, layout, type RalphStatus } from '../theme.js';
-import type { SandboxConfig, SandboxMode } from '../../config/types.js';
+import type { SandboxConfig, SandboxMode, CleanupConfig } from '../../config/types.js';
 
 /**
  * Props for the ProgressDashboard component
@@ -52,6 +52,8 @@ export interface ProgressDashboardProps {
   gitInfo?: GitInfo;
   /** Number of tasks pending main sync (delivery guarantee blocked) */
   pendingMainCount?: number;
+  /** Cleanup configuration (if cleanup is enabled) */
+  cleanupConfig?: CleanupConfig;
 }
 
 /**
@@ -84,6 +86,40 @@ function getSandboxDisplay(
     : mode;
   const networkSuffix = sandboxConfig.network === false ? ' (no-net)' : '';
   return { enabled: true, icon: '🔒', text: `${modeDisplay}${networkSuffix}` };
+}
+
+/**
+ * Get cleanup display info from config
+ * Shows cleanup mode and whether individual actions are enabled
+ */
+function getCleanupDisplay(
+  cleanupConfig?: CleanupConfig
+): { enabled: boolean; icon: string; text: string } {
+  const mode = cleanupConfig?.mode ?? 'manual';
+
+  if (mode === 'off') {
+    return { enabled: false, icon: '🧹', text: 'off' };
+  }
+
+  // Count enabled actions
+  const actions = cleanupConfig ?? {};
+  let enabledCount = 0;
+  let totalCount = 0;
+
+  const actionKeys: (keyof CleanupConfig)[] = ['syncMain', 'pruneWorktrees', 'deleteBranches', 'push', 'cleanupLogs'];
+  for (const key of actionKeys) {
+    if (key === 'mode') continue;
+    totalCount++;
+    if (actions[key]?.enabled !== false) {
+      enabledCount++;
+    }
+  }
+
+  return {
+    enabled: true,
+    icon: '🧹',
+    text: `${mode} (${enabledCount}/${totalCount})`,
+  };
 }
 
 /**
@@ -137,9 +173,11 @@ export function ProgressDashboard({
   autoCommit,
   gitInfo,
   pendingMainCount,
+  cleanupConfig,
 }: ProgressDashboardProps): ReactNode {
   const statusDisplay = getStatusDisplay(status, currentTaskId);
   const sandboxDisplay = getSandboxDisplay(sandboxConfig, resolvedSandboxMode);
+  const cleanupDisplay = getCleanupDisplay(cleanupConfig);
 
   // Format git info for display
   const gitDisplay = gitInfo?.branch
@@ -253,7 +291,17 @@ export function ProgressDashboard({
           </text>
         </box>
 
-        {/* Row 5: Pending main sync count (delivery guarantees) */}
+        {/* Row 5: Cleanup mode */}
+        <box style={{ flexDirection: 'row' }}>
+          <text fg={cleanupDisplay.enabled ? colors.status.info : colors.fg.muted}>
+            {cleanupDisplay.icon}
+          </text>
+          <text fg={cleanupDisplay.enabled ? colors.status.info : colors.fg.muted}>
+            {' '}Cleanup: {cleanupDisplay.text}
+          </text>
+        </box>
+
+        {/* Row 6: Pending main sync count (delivery guarantees) */}
         {pendingMainCount !== undefined && pendingMainCount > 0 && (
           <box style={{ flexDirection: 'row' }}>
             <text fg={colors.status.warning}>⚠</text>
