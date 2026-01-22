@@ -173,6 +173,13 @@ export class ParallelCoordinator {
         continue;
       }
 
+      if (!(await this.isTaskReady(task))) {
+        await this.tracker.updateTaskStatus(task.id, 'open');
+        await this.tracker.releaseTask?.(task.id, idleWorker.workerId);
+        await this.delay(50);
+        continue;
+      }
+
       this.emit({ type: 'parallel:task-claimed', timestamp: new Date().toISOString(), workerId: idleWorker.workerId, task });
       void this.runTaskOnWorker(idleWorker, task);
     }
@@ -336,6 +343,29 @@ export class ParallelCoordinator {
     if (!this.tracker) return undefined;
     const excludeIds = Array.from(this.blockedTaskIds);
     return this.tracker.getNextTask({ status: 'open', ready: true, excludeIds });
+  }
+
+  private async isTaskReady(task: TrackerTask): Promise<boolean> {
+    if (!this.tracker) {
+      return false;
+    }
+
+    if (!task.dependsOn || task.dependsOn.length === 0) {
+      return true;
+    }
+
+    const allTasks = await this.tracker.getTasks({ parentId: task.parentId });
+    const deps = new Set(task.dependsOn);
+    for (const candidate of allTasks) {
+      if (!deps.has(candidate.id)) {
+        continue;
+      }
+      if (candidate.status !== 'completed' && candidate.status !== 'cancelled') {
+        return false;
+      }
+    }
+
+    return true;
   }
 
   private async hasPendingWork(): Promise<boolean> {

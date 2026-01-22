@@ -473,12 +473,6 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
     // Convert to TrackerTask
     let tasks = beads.map(beadToTask);
 
-    // Apply additional filtering that bd doesn't support directly
-    // Note: Remove parentId from filter since bd already handled it via --parent flag
-    // (bd list --json doesn't include parent field in output, so filterTasks would incorrectly remove tasks)
-    const filterWithoutParent = filter ? { ...filter, parentId: undefined } : undefined;
-    tasks = this.filterTasks(tasks, filterWithoutParent);
-
     // Hydrate dependencies if bd list didn't include them
     const needsDeps = tasks.filter((task) => {
       if (task.dependsOn && task.dependsOn.length > 0) {
@@ -505,13 +499,17 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
           }
         }
       }
-      const hydratedTasks = Array.from(taskMap.values());
-      void this.logNewTasks(hydratedTasks);
-      return hydratedTasks;
+      tasks = Array.from(taskMap.values());
     }
 
-    void this.logNewTasks(tasks);
-    return tasks;
+    // Apply additional filtering that bd doesn't support directly
+    // Note: Remove parentId from filter since bd already handled it via --parent flag
+    // (bd list --json doesn't include parent field in output, so filterTasks would incorrectly remove tasks)
+    const filterWithoutParent = filter ? { ...filter, parentId: undefined } : undefined;
+    const filteredTasks = this.filterTasks(tasks, filterWithoutParent);
+
+    void this.logNewTasks(filteredTasks);
+    return filteredTasks;
   }
 
   override async getTask(id: string): Promise<TrackerTask | undefined> {
