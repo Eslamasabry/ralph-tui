@@ -1188,23 +1188,31 @@ export class ExecutionEngine {
           // This allows agents to be retried for the next task
           this.clearRateLimitedAgents();
         } else {
-          // Main sync failed or was skipped - block the task pending main sync
-          console.log(`[main-sync] Task ${task.id} blocked: ${syncResult.reason}`);
+           // Main sync failed or was skipped - block the task pending main sync
+           console.log(`[main-sync] Task ${task.id} blocked: ${syncResult.reason}`);
 
-          // Add to pending main sync tasks
-          this.pendingMainSyncTasks.set(task.id, { task, workerId: 'main' });
+           // Get pending commits to mark in tracker
+           const pendingInfo = await this.getPendingMainCommits();
 
-          // Mark task as blocked in tracker
-          await this.tracker!.updateTaskStatus(task.id, 'blocked');
+           // Add to pending main sync tasks
+           this.pendingMainSyncTasks.set(task.id, { task, workerId: 'main' });
 
-          // Emit task blocked event
-          this.emit({
-            type: 'task:blocked',
-            timestamp: new Date().toISOString(),
-            task,
-            reason: `Main sync required: ${syncResult.reason}`,
-          });
-        }
+           // Mark task as blocked in tracker
+           await this.tracker!.updateTaskStatus(task.id, 'blocked');
+
+           // Mark as pending-main in tracker (if supported)
+           if ('markTaskPendingMain' in this.tracker && typeof this.tracker.markTaskPendingMain === 'function') {
+             await this.tracker.markTaskPendingMain(task.id, pendingInfo.count, pendingInfo.commits);
+           }
+
+           // Emit task blocked event
+           this.emit({
+             type: 'task:blocked',
+             timestamp: new Date().toISOString(),
+             task,
+             reason: `Main sync required: ${syncResult.reason}`,
+           });
+         }
       }
 
       // Determine iteration status
@@ -2489,8 +2497,30 @@ export class ExecutionEngine {
   }
 
   /**
+   * Get commits that are ahead of main branch (pending to merge).
+   * Used for pending-main tracking when main sync fails.
+   *
+   * @returns Object with count and array of commit SHAs
+   */
+  private async getPendingMainCommits(): Promise<{ count: number; commits: string[] }> {
+    try {
+      // Get the list of commits between main and current HEAD
+      const result = await this.execGit(['rev-list', '--reverse', 'main..HEAD']);
+      if (result.exitCode !== 0 || !result.stdout.trim()) {
+        return { count: 0, commits: [] };
+      }
+
+      const commits = result.stdout.split('\n').map((line) => line.trim()).filter(Boolean);
+      return { count: commits.length, commits };
+    } catch {
+      return { count: 0, commits: [] };
+    }
+  }
+
+  /**
    * Complete all tasks that were pending main sync.
    * Called after a successful main sync.
+   * Uses clearPendingMain to properly clear the pending-main status in the tracker.
    */
   private async completePendingMainSyncTasks(): Promise<void> {
     if (!this.tracker || this.pendingMainSyncTasks.size === 0) {
@@ -2498,6 +2528,11 @@ export class ExecutionEngine {
     }
 
     for (const [taskId, entry] of this.pendingMainSyncTasks) {
+      // Clear the pending-main status in the tracker (if supported)
+      if ('clearPendingMain' in this.tracker && typeof this.tracker.clearPendingMain === 'function') {
+        await this.tracker.clearPendingMain(taskId, 'Commits merged to main');
+      }
+      // Complete the task
       await this.tracker.completeTask(taskId, 'Completed after main sync');
       await this.tracker.releaseTask?.(taskId, entry.workerId);
     }
