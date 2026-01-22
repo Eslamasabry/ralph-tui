@@ -2166,55 +2166,83 @@ export class ExecutionEngine {
   }
 
   /**
-    * Build a recovery prompt with context about uncommitted changes.
+    * Build a recovery prompt with the standard task prompt plus recovery context.
     * Called when agent signals completion but repo is dirty.
     *
     * @param task - The task being recovered
-    * @param _basePrompt - The original prompt that was sent (reserved for future use)
+    * @param basePrompt - The original prompt that was sent (used to extract worktree-specific sections)
     * @param changedFiles - List of changed files
     * @param stdoutTail - Last N lines of stdout for context
-    * @returns Recovery prompt string
+    * @returns Recovery prompt string with full task context + recovery sections
     */
-  private buildRecoveryPrompt(
+  private async buildRecoveryPrompt(
     task: TrackerTask,
-    _basePrompt: string,
+    basePrompt: string,
     changedFiles: string[],
     stdoutTail: string
-  ): string {
-    const lines: string[] = [];
+  ): Promise<string> {
+    // Get the full task prompt with all context (progress, PRD, patterns)
+    const taskPrompt = await buildPrompt(task, this.config, this.tracker ?? undefined);
 
-    lines.push('## Recovery Required');
-    lines.push('');
-    lines.push(`Task: ${task.id} - ${task.title}`);
-    lines.push('');
-    lines.push('You signaled completion with `<promise>COMPLETE</promise>` but the repository has uncommitted changes:');
-    lines.push('');
+    // Extract worktree-specific instructions from basePrompt if present
+    // These need to be adapted for recovery context
+    const worktreeSection = this.extractWorktreeSection(basePrompt);
+    const adaptedWorktreeSection = worktreeSection
+      ?.replace('After finishing, ensure your changes are committed in THIS worktree.', '')
+      .replace('The coordinator will cherry-pick your commit into main.', '')
+      .trim();
+
+    // Build recovery sections
+    const recoveryLines: string[] = [];
+
+    recoveryLines.push('');
+    recoveryLines.push('## Recovery Context');
+    recoveryLines.push('- Previous iteration reported <promise>COMPLETE</promise> but there are uncommitted changes.');
+    recoveryLines.push('');
+    recoveryLines.push('Changed files (git status --porcelain):');
     if (changedFiles.length > 0) {
       for (const file of changedFiles) {
-        lines.push(`- ${file}`);
+        recoveryLines.push(`- ${file}`);
       }
     } else {
-      lines.push('- (no changes detected)');
+      recoveryLines.push('- (none)');
     }
-    lines.push('');
-    lines.push('## Last Output');
-    lines.push(stdoutTail || '(no output)');
-    lines.push('');
-    lines.push('## Instructions');
-    lines.push('1. Review the changed files above');
-    lines.push('2. Commit your changes with an appropriate message');
-    lines.push('3. Use the commit format: `<task-id>: <short title>`');
-    lines.push('4. Do NOT run `git add .` or `git add -A`. Stage only relevant task files');
-    lines.push('5. Do NOT stage or commit `.ralph-tui/progress.md` (local-only context file)');
-    lines.push('');
-    lines.push('## Before Completing');
-    lines.push('- Ensure your changes are committed');
-    lines.push('- Do NOT run tests or lint unless explicitly asked');
-    lines.push('- Do NOT merge, rebase, or push unless explicitly asked');
-    lines.push('');
-    lines.push('When finished and changes are committed, output: <promise>COMPLETE</promise>');
+    recoveryLines.push('');
+    recoveryLines.push('Last iteration stdout (tail):');
+    recoveryLines.push('```');
+    recoveryLines.push(stdoutTail || '(no output)');
+    recoveryLines.push('```');
+    recoveryLines.push('');
 
-    return lines.join('\n');
+    recoveryLines.push('## Recovery Instructions');
+    recoveryLines.push('- Review the changed files above');
+    recoveryLines.push('- If anything is missing, finish it before committing');
+    recoveryLines.push('- If no changes are needed, revert to a clean working tree (no commit)');
+    recoveryLines.push('- Commit message format: "<task-id>: <short title>"');
+    recoveryLines.push('- Do NOT run `git add .` or `git add -A`. Stage only relevant task files');
+    recoveryLines.push('- Do NOT stage or commit `.ralph-tui/progress.md` (local-only context file)');
+    recoveryLines.push('- Do NOT merge, rebase, or push unless explicitly asked');
+    recoveryLines.push('');
+
+    // Add worktree-specific guidance if applicable
+    if (adaptedWorktreeSection) {
+      recoveryLines.push('## Worktree Context');
+      recoveryLines.push(adaptedWorktreeSection);
+      recoveryLines.push('');
+    }
+
+    recoveryLines.push('When done and changes are committed, output: <promise>COMPLETE</promise>');
+
+    return taskPrompt + recoveryLines.join('\n');
+  }
+
+  /**
+    * Extract the worktree-specific instructions section from a prompt.
+    * Looks for the "## Worktree + Merge Phase" section.
+    */
+  private extractWorktreeSection(prompt: string): string | undefined {
+    const worktreeMatch = prompt.match(/## Worktree \+ Merge Phase[\s\S]*?(?=##|$)/);
+    return worktreeMatch ? worktreeMatch[0] : undefined;
   }
 
   /**
@@ -2282,7 +2310,7 @@ export class ExecutionEngine {
 
     // Build recovery prompt
     const basePrompt = await buildPrompt(task, this.config, this.tracker ?? undefined);
-    const recoveryPrompt = this.buildRecoveryPrompt(task, basePrompt, changedFiles, stdoutTail);
+    const recoveryPrompt = await this.buildRecoveryPrompt(task, basePrompt, changedFiles, stdoutTail);
 
     // Run agent with recovery prompt
     const result = await this.executeAgentWithPrompt(recoveryPrompt, task);
