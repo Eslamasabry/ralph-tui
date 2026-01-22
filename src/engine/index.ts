@@ -1201,7 +1201,7 @@ export class ExecutionEngine {
            await this.tracker!.updateTaskStatus(task.id, 'blocked');
 
            // Mark as pending-main in tracker (if supported)
-           if ('markTaskPendingMain' in this.tracker && typeof this.tracker.markTaskPendingMain === 'function') {
+           if (this.tracker && 'markTaskPendingMain' in this.tracker && typeof this.tracker.markTaskPendingMain === 'function') {
              await this.tracker.markTaskPendingMain(task.id, pendingInfo.count, pendingInfo.commits);
            }
 

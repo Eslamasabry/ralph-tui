@@ -446,6 +446,11 @@ export class ParallelCoordinator {
         this.blockedTaskIds.add(entry.task.id);
         await this.tracker?.updateTaskStatus(entry.task.id, 'blocked');
         await this.tracker?.releaseTask?.(entry.task.id, entry.workerId);
+        // Mark as pending-main in tracker (if supported)
+        if (this.tracker && 'markTaskPendingMain' in this.tracker && typeof this.tracker.markTaskPendingMain === 'function') {
+          const pendingCount = this.pendingMergeCounts.get(entry.task.id) ?? 1;
+          await this.tracker.markTaskPendingMain(entry.task.id, pendingCount, [entry.commit]);
+        }
       }
     }
   }
@@ -514,6 +519,10 @@ export class ParallelCoordinator {
     }
 
     for (const [taskId, entry] of this.pendingMainSyncTasks) {
+      // Clear the pending-main status in the tracker (if supported)
+      if ('clearPendingMain' in this.tracker && typeof this.tracker.clearPendingMain === 'function') {
+        await this.tracker.clearPendingMain(taskId, 'Commits merged to main');
+      }
       await this.tracker.completeTask(taskId, 'Completed after main sync');
       await this.tracker.releaseTask?.(taskId, entry.workerId);
       this.blockedTaskIds.delete(taskId);
