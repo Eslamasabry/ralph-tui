@@ -392,7 +392,12 @@ export function RunApp({
   const [currentOutput, setCurrentOutput] = useState('');
   const [currentSegments, setCurrentSegments] = useState<FormattedSegment[]>([]);
   const [currentCliOutput, setCurrentCliOutput] = useState('');
-  const [parallelOutputs, setParallelOutputs] = useState<Map<string, string>>(() => new Map());
+  const parallelOutputsRef = useRef<Map<string, string>>(new Map());
+  const [parallelOutputsVersion, setParallelOutputsVersion] = useState(0);
+  const parallelOutputs = useMemo(
+    () => new Map(parallelOutputsRef.current),
+    [parallelOutputsVersion]
+  );
   const [parallelTimings, setParallelTimings] = useState<Map<string, IterationTimingInfo>>(() => new Map());
   const [parallelIterations, setParallelIterations] = useState<Map<string, number>>(() => new Map());
   const [mergeStats, setMergeStats] = useState({
@@ -497,8 +502,24 @@ export function RunApp({
   // When true, auto-show will not override user's explicit hide action
   const [userManuallyHidPanel, setUserManuallyHidPanel] = useState(false);
   // Activity events for timeline display
-  const [activityEvents, setActivityEvents] = useState<ActivityEvent[]>([]);
+  const activityEventsRef = useRef<ActivityEvent[]>([]);
   const activityEventCounter = useRef(0);
+  const activityFlushTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const [activityEventsVersion, setActivityEventsVersion] = useState(0);
+  const activityEvents = useMemo(
+    () => [...activityEventsRef.current],
+    [activityEventsVersion]
+  );
+
+  const scheduleActivityFlush = useCallback(() => {
+    if (activityFlushTimerRef.current) {
+      return;
+    }
+    activityFlushTimerRef.current = setTimeout(() => {
+      setActivityEventsVersion((prev) => prev + 1);
+      activityFlushTimerRef.current = null;
+    }, 200);
+  }, []);
 
   const appendActivityEvent = useCallback((event: Omit<ActivityEvent, 'id'>) => {
     activityEventCounter.current += 1;
@@ -506,7 +527,68 @@ export function RunApp({
       ...event,
       id: `evt_${Date.now()}_${activityEventCounter.current}`,
     };
-    setActivityEvents((prev) => [...prev.slice(-999), fullEvent]);
+    activityEventsRef.current.push(fullEvent);
+    if (activityEventsRef.current.length > 1000) {
+      activityEventsRef.current.splice(0, activityEventsRef.current.length - 1000);
+    }
+    scheduleActivityFlush();
+  }, [scheduleActivityFlush]);
+
+  const outputFlushTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingCliOutputRef = useRef('');
+  const pendingOutputRefreshRef = useRef(false);
+  const pendingParallelOutputsRef = useRef(false);
+
+  const scheduleOutputFlush = useCallback(() => {
+    if (outputFlushTimerRef.current) {
+      return;
+    }
+    outputFlushTimerRef.current = setTimeout(() => {
+      if (pendingCliOutputRef.current) {
+        setCurrentCliOutput((prev) => prev + pendingCliOutputRef.current);
+        pendingCliOutputRef.current = '';
+      }
+      if (pendingOutputRefreshRef.current) {
+        setCurrentOutput(outputParserRef.current.getOutput());
+        setCurrentSegments(outputParserRef.current.getSegments());
+        pendingOutputRefreshRef.current = false;
+      }
+      if (pendingParallelOutputsRef.current) {
+        setParallelOutputsVersion((prev) => prev + 1);
+        pendingParallelOutputsRef.current = false;
+      }
+      outputFlushTimerRef.current = null;
+    }, 100);
+  }, []);
+
+  const subagentTreeFlushRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingSubagentTreeRef = useRef<SubagentTreeNode[] | null>(null);
+
+  const scheduleSubagentTreeFlush = useCallback(() => {
+    if (subagentTreeFlushRef.current) {
+      return;
+    }
+    subagentTreeFlushRef.current = setTimeout(() => {
+      if (pendingSubagentTreeRef.current) {
+        setSubagentTree(pendingSubagentTreeRef.current);
+        pendingSubagentTreeRef.current = null;
+      }
+      subagentTreeFlushRef.current = null;
+    }, 150);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (outputFlushTimerRef.current) {
+        clearTimeout(outputFlushTimerRef.current);
+      }
+      if (activityFlushTimerRef.current) {
+        clearTimeout(activityFlushTimerRef.current);
+      }
+      if (subagentTreeFlushRef.current) {
+        clearTimeout(subagentTreeFlushRef.current);
+      }
+    };
   }, []);
 
   // Selected node in subagent tree for keyboard navigation
@@ -1062,30 +1144,28 @@ export function RunApp({
           if (event.stream === 'stdout' || event.stream === 'stderr') {
             const taskId = event.taskId;
             if (taskId) {
-              setParallelOutputs((prev) => {
-                const next = new Map(prev);
-                const existing = next.get(taskId) ?? '';
-                const prefix = event.stream === 'stderr' ? '[stderr] ' : '';
-                next.set(taskId, existing + prefix + event.data);
-                return next;
-              });
+              const existing = parallelOutputsRef.current.get(taskId) ?? '';
+              const prefix = event.stream === 'stderr' ? '[stderr] ' : '';
+              parallelOutputsRef.current.set(taskId, existing + prefix + event.data);
+              pendingParallelOutputsRef.current = true;
+              scheduleOutputFlush();
             } else {
               const prefix = event.stream === 'stderr' ? '[stderr] ' : '';
-              setCurrentCliOutput((prev) => prev + prefix + event.data);
+              pendingCliOutputRef.current += `${prefix}${event.data}`;
               if (event.stream === 'stdout') {
                 // Use streaming parser to extract readable content (filters out verbose JSONL)
                 outputParserRef.current.push(event.data);
-                setCurrentOutput(outputParserRef.current.getOutput());
-                // Also update segments for TUI-native color rendering
-                setCurrentSegments(outputParserRef.current.getSegments());
+                pendingOutputRefreshRef.current = true;
               }
+              scheduleOutputFlush();
             }
           }
           // Always refresh subagent tree from engine (subagent events are processed in engine).
           // This decouples data collection from display preferences - the subagentDetailLevel
           // only affects how much detail to show inline, not whether to track subagents.
           if (engine.getSubagentTree) {
-            setSubagentTree(engine.getSubagentTree() as SubagentTreeNode[]);
+            pendingSubagentTreeRef.current = engine.getSubagentTree() as SubagentTreeNode[];
+            scheduleSubagentTreeFlush();
           }
           break;
 
@@ -1215,7 +1295,7 @@ export function RunApp({
     });
 
     return unsubscribe;
-  }, [engine, appendActivityEvent]);
+  }, [engine, appendActivityEvent, scheduleOutputFlush, scheduleSubagentTreeFlush]);
 
   useEffect(() => {
     if (!engine.onParallel) {
