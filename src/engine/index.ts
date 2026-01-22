@@ -192,6 +192,8 @@ export class ExecutionEngine {
   private lastMainSyncAttemptAt = 0;
   /** Current retry attempt number for pending main sync (resets on success) */
   private pendingMainSyncRetryCount = 0;
+  /** Wait counter for pending main sync in run loop (resets on task found) */
+  private pendingMainSyncWaitCount = 0;
   /** Maximum retries for pending main sync before alerting */
   private readonly maxMainSyncRetries = 10;
 
@@ -617,10 +619,19 @@ export class ExecutionEngine {
       // Get next task (excluding skipped tasks)
       const task = await this.getNextAvailableTask();
       if (!task) {
-        // If there are pending main sync tasks, wait and retry
+        // If there are pending main sync tasks, wait and retry (with a limit)
         if (this.pendingMainSyncTasks.size > 0) {
-          await this.delay(250);
-          continue;
+          // Track wait attempts to prevent infinite loop
+          this.pendingMainSyncWaitCount++;
+          const maxWaitAttempts = 20; // 20 * 250ms = 5 seconds max wait
+
+          if (this.pendingMainSyncWaitCount < maxWaitAttempts) {
+            await this.delay(250);
+            continue;
+          }
+          // Max wait reached, stop engine
+          console.log(`[engine] Max wait for pending main sync reached (${maxWaitAttempts} attempts)`);
+          this.pendingMainSyncWaitCount = 0;
         }
 
         this.emit({
@@ -632,6 +643,9 @@ export class ExecutionEngine {
         });
         break;
       }
+
+      // Reset wait count when we successfully get a task
+      this.pendingMainSyncWaitCount = 0;
 
       // Run iteration with error handling
       const result = await this.runIterationWithErrorHandling(task);
@@ -827,7 +841,8 @@ export class ExecutionEngine {
       stderr,
       stdout,
       exitCode,
-      agentId: this.config.agent.plugin,
+      // Use active agent (handles fallback) instead of always using primary from config
+      agentId: this.state.activeAgent?.plugin ?? this.agent?.meta.id ?? this.config.agent.plugin,
     });
   }
 
@@ -1194,31 +1209,31 @@ export class ExecutionEngine {
           // This allows agents to be retried for the next task
           this.clearRateLimitedAgents();
         } else {
-           // Main sync failed or was skipped - block the task pending main sync
-           console.log(`[main-sync] Task ${task.id} blocked: ${syncResult.reason}`);
+          // Main sync failed or was skipped - block the task pending main sync
+          console.log(`[main-sync] Task ${task.id} blocked: ${syncResult.reason}`);
 
-           // Get pending commits to mark in tracker
-           const pendingInfo = await this.getPendingMainCommits();
+          // Get pending commits to mark in tracker
+          const pendingInfo = await this.getPendingMainCommits();
 
-           // Add to pending main sync tasks
-           this.pendingMainSyncTasks.set(task.id, { task, workerId: 'main' });
+          // Add to pending main sync tasks
+          this.pendingMainSyncTasks.set(task.id, { task, workerId: 'main' });
 
-           // Mark task as blocked in tracker
-           await this.tracker!.updateTaskStatus(task.id, 'blocked');
+          // Mark task as blocked in tracker
+          await this.tracker!.updateTaskStatus(task.id, 'blocked');
 
-           // Mark as pending-main in tracker (if supported)
-           if (this.tracker && 'markTaskPendingMain' in this.tracker && typeof this.tracker.markTaskPendingMain === 'function') {
-             await this.tracker.markTaskPendingMain(task.id, pendingInfo.count, pendingInfo.commits);
-           }
+          // Mark as pending-main in tracker (if supported)
+          if (this.tracker && 'markTaskPendingMain' in this.tracker && typeof this.tracker.markTaskPendingMain === 'function') {
+            await this.tracker.markTaskPendingMain(task.id, pendingInfo.count, pendingInfo.commits);
+          }
 
-           // Emit task blocked event
-           this.emit({
-             type: 'task:blocked',
-             timestamp: new Date().toISOString(),
-             task,
-             reason: `Main sync required: ${syncResult.reason}`,
-           });
-         }
+          // Emit task blocked event
+          this.emit({
+            type: 'task:blocked',
+            timestamp: new Date().toISOString(),
+            task,
+            reason: `Main sync required: ${syncResult.reason}`,
+          });
+        }
       }
 
       // Determine iteration status
@@ -2085,10 +2100,10 @@ export class ExecutionEngine {
     return `${statusWord} with ${this.currentIterationAgentSwitches.length} agent switch(es)`;
   }
 
-/**
-    * Clear rate-limited agents tracking.
-    * Called when a task completes successfully to allow agents to be used again.
-    */
+  /**
+      * Clear rate-limited agents tracking.
+      * Called when a task completes successfully to allow agents to be used again.
+      */
   private clearRateLimitedAgents(): void {
     this.rateLimitedAgents.clear();
   }

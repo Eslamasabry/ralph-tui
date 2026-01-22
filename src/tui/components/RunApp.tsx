@@ -679,8 +679,8 @@ export function RunApp({
         setRemoteOutput(state.currentOutput || '');
         if (state.currentTask) {
           setRemoteCurrentTaskId(state.currentTask.id);
-        setRemoteCurrentTaskTitle(state.currentTask.title);
-      }
+          setRemoteCurrentTaskTitle(state.currentTask.title);
+        }
         // Capture remote agent and rate limit state
         if (state.activeAgent) {
           setRemoteActiveAgent(state.activeAgent);
@@ -881,7 +881,11 @@ export function RunApp({
     return [...filtered].sort((a, b) => {
       const priorityA = statusPriority[a.status] ?? 10;
       const priorityB = statusPriority[b.status] ?? 10;
-      return priorityA - priorityB;
+      if (priorityA !== priorityB) {
+        return priorityA - priorityB;
+      }
+      // Stable tiebreaker: sort by task ID to maintain consistent ordering
+      return a.id.localeCompare(b.id);
     });
   }, [tasks, remoteTasks, isViewingRemote, showClosedTasks]);
 
@@ -890,23 +894,33 @@ export function RunApp({
   // Sort order: active tasks first (sorted by workerId), then queued, blocked, done
   const allTasksForCards = useMemo(() => {
     // Enrich all tasks with their assigned workerId for stable slot display
-    const enriched = displayedTasks.map((task) => ({
-      ...task,
-      workerId: workerTaskMap.get(task.id),
-    }));
-    
+    // Only treat tasks as 'active' when they are assigned to a worker
+    const enriched = displayedTasks.map((task) => {
+      const workerId = workerTaskMap.get(task.id);
+      const displayStatus: TaskStatus = workerId
+        ? 'active'
+        : task.status === 'active'
+          ? 'actionable'
+          : task.status;
+      return {
+        ...task,
+        status: displayStatus,
+        workerId,
+      };
+    });
+
     // Sort: active tasks with workerId first (by workerId), then rest by status priority
     return enriched.sort((a, b) => {
       // Active tasks with workerId go first, sorted by workerId
       const aIsActiveWithWorker = a.status === 'active' && a.workerId;
       const bIsActiveWithWorker = b.status === 'active' && b.workerId;
-      
+
       if (aIsActiveWithWorker && bIsActiveWithWorker) {
         return a.workerId!.localeCompare(b.workerId!);
       }
       if (aIsActiveWithWorker) return -1;
       if (bIsActiveWithWorker) return 1;
-      
+
       // Then sort by status priority (displayedTasks already has this order)
       const statusPriority: Record<string, number> = {
         active: 0,
@@ -919,7 +933,11 @@ export function RunApp({
       };
       const priorityA = statusPriority[a.status] ?? 10;
       const priorityB = statusPriority[b.status] ?? 10;
-      return priorityA - priorityB;
+      if (priorityA !== priorityB) {
+        return priorityA - priorityB;
+      }
+      // Stable tiebreaker: sort by task ID to maintain consistent ordering
+      return a.id.localeCompare(b.id);
     });
   }, [displayedTasks, workerTaskMap]);
 
@@ -1495,7 +1513,7 @@ export function RunApp({
         // Note: parallel:task-output is already converted to agent:output by ParallelEngine
         // with taskId set, so it's handled in the main engine event subscription.
         // No need to handle it here - that would cause duplication.
-        
+
         // Note: parallel:worker-idle doesn't have task info, so we don't clear here
         // The mapping will be cleared when parallel:task-finished fires
       }
@@ -1710,12 +1728,12 @@ export function RunApp({
             break;
           }
           // Default: navigate task/iteration lists
-            if (viewMode === 'tasks') {
-              setSelectedIndex((prev) => Math.max(0, prev - 1));
-            } else if (viewMode === 'iterations') {
-              setIterationSelectedIndex((prev) => Math.max(0, prev - 1));
-            }
-            break;
+          if (viewMode === 'tasks') {
+            setSelectedIndex((prev) => Math.max(0, prev - 1));
+          } else if (viewMode === 'iterations') {
+            setIterationSelectedIndex((prev) => Math.max(0, prev - 1));
+          }
+          break;
 
         case 'down':
         case 'j':
@@ -1725,13 +1743,13 @@ export function RunApp({
             break;
           }
           // Default: navigate task/iteration lists
-            if (viewMode === 'tasks') {
-              const maxIndex = Math.max(0, allTasksForCards.length - 1);
-              setSelectedIndex((prev) => Math.min(maxIndex, prev + 1));
-            } else if (viewMode === 'iterations') {
-              setIterationSelectedIndex((prev) => Math.min(iterationHistoryLength - 1, prev + 1));
-            }
-            break;
+          if (viewMode === 'tasks') {
+            const maxIndex = Math.max(0, allTasksForCards.length - 1);
+            setSelectedIndex((prev) => Math.min(maxIndex, prev + 1));
+          } else if (viewMode === 'iterations') {
+            setIterationSelectedIndex((prev) => Math.min(iterationHistoryLength - 1, prev + 1));
+          }
+          break;
 
         case 'p':
           // Toggle pause/resume
@@ -1772,7 +1790,7 @@ export function RunApp({
         // Note: 'c' / Ctrl+C is intentionally NOT handled here.
         // Ctrl+C and Ctrl+Shift+C send the same sequence (\x03) in most terminals,
         // so we can't distinguish between "stop" and "copy". Users should use 'q' to quit.
- 
+
         case 'd':
           // Toggle dashboard visibility
           setShowDashboard((prev) => !prev);
@@ -1801,8 +1819,9 @@ export function RunApp({
               // First start - use onStart callback
               setStatus('running');
               onStart();
-            } else if (status === 'stopped' || status === 'idle') {
+            } else if (status === 'stopped' || status === 'idle' || status === 'selecting') {
               // Continue after stop - use engine.continueExecution()
+              // Also handle 'selecting' in case engine is stuck waiting for tasks
               if (currentIteration >= maxIterations && engine.addIterations && engine.continueExecution) {
                 // At max iterations, add one more then continue
                 engine.addIterations(1);
@@ -1835,7 +1854,7 @@ export function RunApp({
           const isMinus = key.name === '-' || key.name === '_';
           const effectiveStatus = isViewingRemote ? displayStatus : status;
           if ((isPlus || isMinus) &&
-              (effectiveStatus === 'ready' || effectiveStatus === 'running' || effectiveStatus === 'executing' || effectiveStatus === 'paused' || effectiveStatus === 'stopped' || effectiveStatus === 'idle' || effectiveStatus === 'complete')) {
+            (effectiveStatus === 'ready' || effectiveStatus === 'running' || effectiveStatus === 'executing' || effectiveStatus === 'paused' || effectiveStatus === 'stopped' || effectiveStatus === 'idle' || effectiveStatus === 'complete')) {
             if (isViewingRemote && instanceManager) {
               // Route to remote instance
               if (isPlus) {
@@ -1862,7 +1881,7 @@ export function RunApp({
           // Switch to settings view (comma key, like many text editors)
           setViewMode('settings');
           break;
- 
+
         case 'c':
           // Shift+C: Show config viewer (read-only) for both local and remote
           if (key.sequence === 'C') {
@@ -2019,7 +2038,7 @@ export function RunApp({
             }
           }
           break;
- 
+
         case 'return':
         case 'enter':
           // Enter drills into iteration details (does NOT start execution - use 's' for that)
@@ -2711,10 +2730,10 @@ export function RunApp({
         remoteInfo={
           isViewingRemote && instanceTabs?.[selectedTabIndex]
             ? {
-                name: instanceTabs[selectedTabIndex].alias ?? instanceTabs[selectedTabIndex].label,
-                host: instanceTabs[selectedTabIndex].host ?? 'unknown',
-                port: instanceTabs[selectedTabIndex].port ?? 0,
-              }
+              name: instanceTabs[selectedTabIndex].alias ?? instanceTabs[selectedTabIndex].label,
+              host: instanceTabs[selectedTabIndex].host ?? 'unknown',
+              port: instanceTabs[selectedTabIndex].port ?? 0,
+            }
             : undefined
         }
       />
@@ -2734,10 +2753,10 @@ export function RunApp({
           remoteInfo={
             isViewingRemote && instanceTabs?.[selectedTabIndex]
               ? {
-                  name: instanceTabs[selectedTabIndex].alias ?? instanceTabs[selectedTabIndex].label,
-                  host: instanceTabs[selectedTabIndex].host ?? 'unknown',
-                  port: instanceTabs[selectedTabIndex].port ?? 0,
-                }
+                name: instanceTabs[selectedTabIndex].alias ?? instanceTabs[selectedTabIndex].label,
+                host: instanceTabs[selectedTabIndex].host ?? 'unknown',
+                port: instanceTabs[selectedTabIndex].port ?? 0,
+              }
               : undefined
           }
           autoCommit={isViewingRemote ? remoteAutoCommit : storedConfig?.autoCommit}
@@ -2749,7 +2768,7 @@ export function RunApp({
       {/* Main content area */}
       <box
         style={{
-          flexGrow:1,
+          flexGrow: 1,
           flexDirection: isCompact || viewMode === 'tasks' ? 'column' : 'row',
           height: contentHeight,
         }}
@@ -2890,21 +2909,21 @@ export function RunApp({
               }}
             >
               {/* Dashboard Banner - shows task counts */}
-            <DashboardBanner
-              totalTasks={taskCounts.total}
-              activeTasks={taskCounts.active}
-              queuedTasks={taskCounts.queued}
-              blockedTasks={taskCounts.blocked}
-              completedTasks={taskCounts.completed}
-              failedTasks={taskCounts.failed}
-              worktreeCount={mergeStats.worktrees}
-              mergesQueued={mergeStats.queued}
-              mergesSucceeded={mergeStats.merged}
-              mergesResolved={mergeStats.resolved}
-              mergesFailed={mergeStats.failed}
-              mainSyncPending={mergeStats.syncPending}
-              appVersion={appVersion}
-            />
+              <DashboardBanner
+                totalTasks={taskCounts.total}
+                activeTasks={taskCounts.active}
+                queuedTasks={taskCounts.queued}
+                blockedTasks={taskCounts.blocked}
+                completedTasks={taskCounts.completed}
+                failedTasks={taskCounts.failed}
+                worktreeCount={mergeStats.worktrees}
+                mergesQueued={mergeStats.queued}
+                mergesSucceeded={mergeStats.merged}
+                mergesResolved={mergeStats.resolved}
+                mergesFailed={mergeStats.failed}
+                mainSyncPending={mergeStats.syncPending}
+                appVersion={appVersion}
+              />
 
               {/* Task Cards Row - horizontal cards for all tasks */}
               <TaskCardsRow
@@ -3082,7 +3101,7 @@ export function RunApp({
 
       {/* Help Overlay */}
       <HelpOverlay visible={showHelp} />
- 
+
       {/* Remote Config View */}
       <RemoteConfigView
         visible={showRemoteConfig}
