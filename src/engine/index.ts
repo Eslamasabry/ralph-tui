@@ -190,6 +190,10 @@ export class ExecutionEngine {
   private pendingMainSyncTasks: Map<string, { task: TrackerTask; workerId: string }> = new Map();
   /** Timestamp of last main sync attempt (for rate limiting retries) */
   private lastMainSyncAttemptAt = 0;
+  /** Current retry attempt number for pending main sync (resets on success) */
+  private pendingMainSyncRetryCount = 0;
+  /** Maximum retries for pending main sync before alerting */
+  private readonly maxMainSyncRetries = 10;
 
   constructor(config: RalphConfig) {
     this.config = config;
@@ -2476,23 +2480,62 @@ export class ExecutionEngine {
   /**
    * Try to sync pending main sync tasks.
    * Called periodically when there are pending tasks.
+   * Implements exponential backoff retry with alert on max retries.
    */
   private async trySyncPendingMainTasks(): Promise<void> {
     if (this.pendingMainSyncTasks.size === 0) {
+      // Reset retry count when no pending tasks
+      this.pendingMainSyncRetryCount = 0;
       return;
     }
 
     const now = Date.now();
-    // Rate limit sync attempts to once per 2 seconds
-    if (now - this.lastMainSyncAttemptAt < 2000) {
+    // Calculate exponential backoff: start at 2s, double each retry, cap at 30s
+    const baseDelayMs = 2000;
+    const maxDelayMs = 30000;
+    const backoffMs = Math.min(baseDelayMs * Math.pow(2, this.pendingMainSyncRetryCount), maxDelayMs);
+
+    // Rate limit sync attempts based on backoff
+    if (now - this.lastMainSyncAttemptAt < backoffMs) {
       return;
     }
 
     this.lastMainSyncAttemptAt = now;
+
+    // Increment retry count (will be reset on success)
+    this.pendingMainSyncRetryCount++;
+
     const result = await this.syncMainBranch();
 
     if (result.success) {
+      // Reset retry count on success
+      this.pendingMainSyncRetryCount = 0;
       await this.completePendingMainSyncTasks();
+    } else if (this.pendingMainSyncRetryCount <= this.maxMainSyncRetries) {
+      // Emit retrying event with backoff info
+      const nextDelayMs = Math.min(
+        baseDelayMs * Math.pow(2, this.pendingMainSyncRetryCount),
+        maxDelayMs
+      );
+      this.emit({
+        type: 'main-sync-retrying',
+        timestamp: new Date().toISOString(),
+        retryAttempt: this.pendingMainSyncRetryCount,
+        maxRetries: this.maxMainSyncRetries,
+        reason: result.reason ?? 'Unknown sync failure',
+        delayMs: nextDelayMs,
+      });
+    } else {
+      // Max retries reached - emit alert
+      const affectedTasks = Array.from(this.pendingMainSyncTasks.values()).map((e) => e.task);
+      this.emit({
+        type: 'main-sync-alert',
+        timestamp: new Date().toISOString(),
+        retryAttempt: this.pendingMainSyncRetryCount,
+        maxRetries: this.maxMainSyncRetries,
+        reason: result.reason ?? 'Unknown sync failure',
+        affectedTaskCount: affectedTasks.length,
+      });
     }
   }
 

@@ -97,5 +97,5 @@ export type ParallelEvent =
   | { type: 'parallel:main-sync-skipped'; timestamp: string; reason: string }
   | { type: 'parallel:main-sync-succeeded'; timestamp: string; commit: string }
   | { type: 'parallel:main-sync-failed'; timestamp: string; task: TrackerTask; reason: string }
-  | { type: 'parallel:main-sync-retrying'; timestamp: string; retryAttempt: number; maxRetries: number; reason: string }
-  | { type: 'parallel:main-sync-alert'; timestamp: string; retryAttempt: number; maxRetries: number; reason: string };
+  | { type: 'parallel:main-sync-retrying'; timestamp: string; retryAttempt: number; maxRetries: number; reason: string; delayMs: number }
+  | { type: 'parallel:main-sync-alert'; timestamp: string; retryAttempt: number; maxRetries: number; reason: string; affectedTaskCount: number };
