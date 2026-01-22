@@ -400,6 +400,8 @@ export function RunApp({
     failed: 0,
     syncPending: 0,
   });
+  // Pending main sync count for delivery guarantee visibility
+  const [pendingMainCount, setPendingMainCount] = useState(0);
   // Streaming parser for live output - extracts readable content and prevents memory bloat
   // Use agentPlugin prop (from resolved config with CLI override) with fallback to storedConfig
   const resolvedAgentName = agentPlugin || storedConfig?.defaultAgent || storedConfig?.agent || 'claude';
@@ -1131,6 +1133,43 @@ export function RunApp({
         case 'tracker:realtime':
           setTrackerRealtimeStatus(event.status);
           break;
+
+        // Main sync events for delivery guarantees
+        case 'main-sync-failed':
+          // Task failed to sync to main - mark it as pending-main
+          setTasks((prev) =>
+            prev.map((t) =>
+              t.id === event.task.id ? { ...t, status: 'blocked' as const, pendingMainSync: true } : t
+            )
+          );
+          setPendingMainCount((prev) => prev + 1);
+          break;
+
+        case 'main-sync-succeeded':
+          // Main sync succeeded - clear pending-main for affected tasks
+          // Find tasks that were pending-main (they're blocked and have pendingMainSync flag)
+          setTasks((prev) =>
+            prev.map((t) =>
+              t.pendingMainSync ? { ...t, status: 'done' as const, pendingMainSync: false } : t
+            )
+          );
+          setPendingMainCount(0);
+          break;
+
+        case 'main-sync-skipped':
+          // Sync was skipped - increment pending-main count
+          setPendingMainCount((prev) => prev + 1);
+          break;
+
+        case 'main-sync-retrying':
+          // Retrying sync - update feedback but don't change count
+          setInfoFeedback(`Main sync retry ${event.retryAttempt}/${event.maxRetries}: ${event.reason}`);
+          break;
+
+        case 'main-sync-alert':
+          // Max retries reached - alert user
+          setInfoFeedback(`⚠ Main sync failed after ${event.maxRetries} retries: ${event.reason}`);
+          break;
       }
     });
 
@@ -1184,12 +1223,25 @@ export function RunApp({
             ...prev,
             syncPending: 1,
           }));
+          setPendingMainCount((prev) => prev + 1);
           break;
         case 'parallel:main-sync-succeeded':
           setMergeStats((prev) => ({
             ...prev,
             syncPending: 0,
           }));
+          setPendingMainCount(0);
+          break;
+        case 'parallel:main-sync-failed':
+          setPendingMainCount((prev) => prev + 1);
+          break;
+        case 'parallel:main-sync-retrying':
+          // Update info feedback for retry attempts
+          setInfoFeedback(`Main sync retry ${parallelEvent.retryAttempt}/${parallelEvent.maxRetries}: ${parallelEvent.reason}`);
+          break;
+        case 'parallel:main-sync-alert':
+          // Max retries reached
+          setInfoFeedback(`⚠ Main sync failed after ${parallelEvent.maxRetries} retries: ${parallelEvent.reason}`);
           break;
       }
     });
@@ -2479,6 +2531,7 @@ export function RunApp({
           }
           autoCommit={isViewingRemote ? remoteAutoCommit : storedConfig?.autoCommit}
           gitInfo={isViewingRemote ? remoteGitInfo : localGitInfo}
+          pendingMainCount={pendingMainCount}
         />
       )}
 

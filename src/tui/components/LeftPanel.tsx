@@ -23,6 +23,7 @@ function truncateText(text: string, maxWidth: number): string {
  * Shows: [indent][status indicator] [task ID] [task title (truncated)]
  * Closed tasks are displayed with greyed-out styling to distinguish historical work
  * Child tasks (those with a parentId) are indented to show hierarchy
+ * Pending-main tasks show a special indicator for delivery guarantee visibility
  */
 function TaskRow({
   task,
@@ -40,9 +41,14 @@ function TaskRow({
   const statusColor = getTaskStatusColor(task.status);
   const statusIndicator = getTaskStatusIndicator(task.status);
   const isClosed = task.status === 'closed';
+  const isPendingMain = task.pendingMainSync === true;
 
   // Indentation: 2 spaces per level
   const indent = '  '.repeat(indentLevel);
+
+  // For pending-main tasks, use a different indicator to show delivery is blocked
+  const displayIndicator = isPendingMain ? '⟳' : statusIndicator;
+  const displayColor = isPendingMain ? colors.status.warning : statusColor;
 
   // Format: "[indent]✓ task-id title"
   // Calculate available width: maxWidth - indent - indicator(1) - space(1) - id - space(1)
@@ -71,9 +77,13 @@ function TaskRow({
     >
       <text>
         <span fg={colors.fg.dim}>{indent}</span>
-        <span fg={statusColor}>{statusIndicator}</span>
+        <span fg={displayColor}>{displayIndicator}</span>
+        {isPendingMain && <span fg={colors.status.warning}>⟳</span>}
         <span fg={idColor}> {idDisplay}</span>
         <span fg={titleColor}> {truncatedTitle}</span>
+        {isPendingMain && (
+          <span fg={colors.status.warning}> [pending-main]</span>
+        )}
       </text>
     </box>
   );

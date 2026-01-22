@@ -71,6 +71,8 @@ export interface TaskItem {
   updatedAt?: string;
   /** Parent task/epic ID for hierarchical display */
   parentId?: string;
+  /** Whether this task is waiting for main branch sync (delivery guarantee blocked) */
+  pendingMainSync?: boolean;
   /** Tracker-specific metadata (varies by plugin) */
   metadata?: Record<string, unknown>;
 }

@@ -45,6 +45,9 @@ const MERGE_EVENTS = new Set<ParallelEvent['type']>([
   'parallel:merge-failed',
   'parallel:main-sync-skipped',
   'parallel:main-sync-succeeded',
+  'parallel:main-sync-failed',
+  'parallel:main-sync-retrying',
+  'parallel:main-sync-alert',
 ]);
 
 /**
@@ -92,6 +95,12 @@ function getEventTypeLabel(type: ParallelEvent['type']): string {
       return 'Sync skipped';
     case 'parallel:main-sync-succeeded':
       return 'Sync succeeded';
+    case 'parallel:main-sync-failed':
+      return 'Sync failed';
+    case 'parallel:main-sync-retrying':
+      return 'Sync retrying';
+    case 'parallel:main-sync-alert':
+      return 'Sync alert';
     case 'parallel:stopped':
       return 'Stopped';
     case 'parallel:started':
@@ -112,6 +121,12 @@ function getEventColor(type: ParallelEvent['type']): string {
     return colors.status.warning;
   }
   if (type.startsWith('parallel:main-sync')) {
+    if (type === 'parallel:main-sync-failed' || type === 'parallel:main-sync-alert') {
+      return colors.status.error;
+    }
+    if (type === 'parallel:main-sync-retrying') {
+      return colors.status.warning;
+    }
     return colors.status.info;
   }
   return colors.fg.muted;
@@ -140,6 +155,12 @@ function getEventSymbol(type: ParallelEvent['type']): string {
       return '⊘';
     case 'parallel:main-sync-succeeded':
       return '✓';
+    case 'parallel:main-sync-failed':
+      return '✗';
+    case 'parallel:main-sync-retrying':
+      return '⟳';
+    case 'parallel:main-sync-alert':
+      return '⚠';
     case 'parallel:stopped':
       return '■';
     case 'parallel:started':
@@ -170,6 +191,12 @@ function formatEventDescription(event: ParallelEvent): string {
       return event.reason;
     case 'parallel:main-sync-succeeded':
       return event.commit.slice(0, 7);
+    case 'parallel:main-sync-failed':
+      return `${event.task.id}: ${event.reason}`;
+    case 'parallel:main-sync-retrying':
+      return `Attempt ${event.retryAttempt}/${event.maxRetries} in ${event.delayMs}ms: ${event.reason}`;
+    case 'parallel:main-sync-alert':
+      return `${event.affectedTaskCount} task(s) affected after ${event.maxRetries} retries: ${event.reason}`;
     default:
       return '';
   }

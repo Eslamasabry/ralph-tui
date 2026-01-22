@@ -50,6 +50,8 @@ export interface ProgressDashboardProps {
   autoCommit?: boolean;
   /** Git repository information */
   gitInfo?: GitInfo;
+  /** Number of tasks pending main sync (delivery guarantee blocked) */
+  pendingMainCount?: number;
 }
 
 /**
@@ -134,6 +136,7 @@ export function ProgressDashboard({
   remoteInfo,
   autoCommit,
   gitInfo,
+  pendingMainCount,
 }: ProgressDashboardProps): ReactNode {
   const statusDisplay = getStatusDisplay(status, currentTaskId);
   const sandboxDisplay = getSandboxDisplay(sandboxConfig, resolvedSandboxMode);
@@ -249,6 +252,16 @@ export function ProgressDashboard({
             {autoCommit ? '✓ auto' : '✗ manual'}
           </text>
         </box>
+
+        {/* Row 5: Pending main sync count (delivery guarantees) */}
+        {pendingMainCount !== undefined && pendingMainCount > 0 && (
+          <box style={{ flexDirection: 'row' }}>
+            <text fg={colors.status.warning}>⚠</text>
+            <text fg={colors.fg.secondary}> Pending main: </text>
+            <text fg={colors.status.warning}>{pendingMainCount}</text>
+            <text fg={colors.fg.muted}> task(s)</text>
+          </box>
+        )}
       </box>
     </box>
   );
