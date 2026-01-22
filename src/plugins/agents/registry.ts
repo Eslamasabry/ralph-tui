@@ -83,8 +83,9 @@ export class AgentRegistry {
     if (AgentRegistry.instance) {
       // Dispose all loaded instances
       for (const instance of AgentRegistry.instance.loadedInstances.values()) {
-        instance.dispose().catch(() => {
-          // Ignore disposal errors during reset
+        instance.dispose().catch((err) => {
+          // Log disposal errors during reset for debugging
+          console.error('[AgentRegistry] Disposal error during reset:', err);
         });
       }
       AgentRegistry.instance.plugins.clear();
@@ -109,8 +110,9 @@ export class AgentRegistry {
     });
 
     // Dispose the temporary instance we created for metadata
-    instance.dispose().catch(() => {
-      // Ignore disposal errors
+    instance.dispose().catch((err) => {
+      // Log disposal errors for debugging
+      console.error('[AgentRegistry] Disposal error during builtin registration:', err);
     });
   }
 

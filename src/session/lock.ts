@@ -14,6 +14,7 @@ import {
   access,
   constants,
 } from 'node:fs/promises';
+import { unlinkSync } from 'node:fs';
 import { promptBoolean } from '../setup/prompts.js';
 import type { LockFile } from './types.js';
 
@@ -90,31 +91,27 @@ async function ensureSessionDir(cwd: string): Promise<void> {
 }
 
 /**
- * Check if a file exists
- */
-async function fileExists(path: string): Promise<boolean> {
-  try {
-    await access(path, constants.F_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Read the lock file if it exists
  */
 async function readLockFile(cwd: string): Promise<LockFile | null> {
   const lockPath = getLockPath(cwd);
-  if (!(await fileExists(lockPath))) {
-    return null;
-  }
 
   try {
     const content = await readFile(lockPath, 'utf-8');
     return JSON.parse(content) as LockFile;
-  } catch {
-    // Corrupt lock file, treat as no lock
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (nodeError.code === 'ENOENT') {
+      // File doesn't exist - this is expected, not an error
+      return null;
+    }
+
+    // Log corruption/permission errors for debugging
+    // Still return null to allow recovery, but make the issue visible
+    console.warn(
+      `[session/lock] Error reading lock file: ${nodeError.message || 'unknown error'}. ` +
+      `This may indicate a corrupt lock file at ${lockPath}.`
+    );
     return null;
   }
 }
@@ -163,6 +160,18 @@ async function deleteLockFile(cwd: string): Promise<void> {
   const lockPath = getLockPath(cwd);
   try {
     await unlink(lockPath);
+  } catch {
+    // Ignore if lock doesn't exist
+  }
+}
+
+/**
+ * Remove the lock file (synchronous version for exit handlers)
+ */
+function deleteLockFileSync(cwd: string): void {
+  const lockPath = getLockPath(cwd);
+  try {
+    unlinkSync(lockPath);
   } catch {
     // Ignore if lock doesn't exist
   }
@@ -235,7 +244,7 @@ export async function acquireLockWithPrompt(
   }
 
   // Lock exists and is held by a running process
-  if (lockStatus.isLocked && !force) {
+  if (lockStatus.isLocked && lockStatus.lock.pid !== process.pid && !force) {
     const pid = lockStatus.lock.pid;
     return {
       acquired: false,
@@ -309,20 +318,28 @@ export async function releaseLock(cwd: string): Promise<void> {
 export function registerLockCleanupHandlers(cwd: string): () => void {
   // Synchronous cleanup for exit event
   const handleExit = (): void => {
-    // Note: Can only do sync operations in 'exit' handler
-    // The async releaseLock() may not complete, so we rely on
-    // stale lock detection as a fallback
+    deleteLockFileSync(cwd);
   };
 
   // Async cleanup for signals
-  const handleTermination = async (): Promise<void> => {
-    await releaseLock(cwd);
+  const handleTermination = (): void => {
+    try {
+      deleteLockFileSync(cwd);
+    } catch (err) {
+      // Log but don't re-throw - we're shutting down anyway
+      console.error('[session/lock] Error releasing lock during termination:', err);
+    }
     // Don't call process.exit() here - let the calling code handle that
   };
 
   // Handle uncaught errors
-  const handleUncaughtError = async (): Promise<void> => {
-    await releaseLock(cwd);
+  const handleUncaughtError = (_error: Error | unknown): void => {
+    try {
+      deleteLockFileSync(cwd);
+    } catch (err) {
+      // Log but don't re-throw - we're in an error state anyway
+      console.error('[session/lock] Error releasing lock during error handling:', err);
+    }
     // Don't exit here - let Node's default behavior happen
   };
 

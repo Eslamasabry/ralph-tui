@@ -269,8 +269,11 @@ export class RemoteClient {
           try {
             const message = JSON.parse(event.data as string) as WSMessage;
             this.handleMessage(message, resolve, reject);
-          } catch {
-            // Ignore invalid messages
+          } catch (err) {
+            // Log parse errors for debugging - malformed messages shouldn't crash the client
+            console.warn(
+              `[RemoteClient] Failed to parse WebSocket message: ${err instanceof Error ? err.message : 'unknown error'}`
+            );
           }
         };
 
@@ -1007,8 +1010,11 @@ export class RemoteClient {
               this.eventHandler({ type: 'message', message });
             }
           }
-        } catch {
-          // Ignore invalid messages
+        } catch (err) {
+          // Log parse errors for debugging - malformed messages shouldn't crash reconnection
+          console.warn(
+            `[RemoteClient] Failed to parse WebSocket message during reconnect: ${err instanceof Error ? err.message : 'unknown error'}`
+          );
         }
       };
 

@@ -73,6 +73,8 @@ export interface TaskItem {
   parentId?: string;
   /** Whether this task is waiting for main branch sync (delivery guarantee blocked) */
   pendingMainSync?: boolean;
+  /** Worker ID assigned in parallel execution (e.g., "worker-1") for stable slot display */
+  workerId?: string;
   /** Tracker-specific metadata (varies by plugin) */
   metadata?: Record<string, unknown>;
 }

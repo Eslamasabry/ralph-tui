@@ -1007,7 +1007,10 @@ export class ParallelCoordinator {
     } catch (error) {
       return { success: false, reason: error instanceof Error ? error.message : 'Merge resolution failed', conflictFiles: [] };
     } finally {
-      await this.worktreeManager.removeWorktree(mergeWorkerId).catch(() => undefined);
+      await this.worktreeManager.removeWorktree(mergeWorkerId).catch((err) => {
+        // Log worktree cleanup errors - orphaned worktrees can accumulate
+        console.warn(`[ParallelCoordinator] Failed to remove merge worktree ${mergeWorkerId}: ${err instanceof Error ? err.message : 'unknown error'}`);
+      });
     }
   }
 

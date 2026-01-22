@@ -11,9 +11,15 @@ import { fileURLToPath } from 'node:url';
  * Works in both development (src/) and bundled (dist/) environments.
  */
 export function computePackageJsonPath(currentDir: string): string {
-  if (currentDir.endsWith('dist') || currentDir.includes('/dist/') || currentDir.includes('\\dist\\')) {
+  // Normalize path separators for consistent checking
+  const normalized = currentDir.replace(/\\/g, '/');
+  
+  // Check if the current directory is named 'dist' (typical for bundled output)
+  if (normalized.endsWith('/dist') || normalized === 'dist') {
     return join(currentDir, '..', 'package.json');
   }
+  
+  // Default to development structure (src/utils/ -> ../../package.json)
   return join(currentDir, '..', '..', 'package.json');
 }
 

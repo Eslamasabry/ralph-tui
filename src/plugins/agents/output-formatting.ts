@@ -68,9 +68,10 @@ export function formatCommand(command: string): string {
 
   // Extract actual command from env var setup
   // Pattern: ENV_VAR=value ... ; actual_command
-  if (cmd.includes(';')) {
-    const parts = cmd.split(';');
-    cmd = parts[parts.length - 1].trim();
+  // We look for a semicolon that follows an assignment pattern
+  const envAssignmentSemicolonPattern = /^\s*(\w+=[^\s;]*\s*)+(?:;\s*)+/;
+  if (envAssignmentSemicolonPattern.test(cmd)) {
+    cmd = cmd.replace(envAssignmentSemicolonPattern, '').trim();
   }
 
   // Also handle inline env vars before command (VAR=val VAR2=val2 command)
@@ -203,9 +204,9 @@ export function formatToolCall(toolName: string, input?: ToolInputFormatters): s
 function cleanCommand(command: string): string {
   let cmd = command.replace(/\n/g, ' ').trim();
 
-  if (cmd.includes(';')) {
-    const parts = cmd.split(';');
-    cmd = parts[parts.length - 1].trim();
+  const envAssignmentSemicolonPattern = /^\s*(\w+=[^\s;]*\s*)+(?:;\s*)+/;
+  if (envAssignmentSemicolonPattern.test(cmd)) {
+    cmd = cmd.replace(envAssignmentSemicolonPattern, '').trim();
   }
 
   const envVarPattern = /^(\s*\w+=[^\s]*\s+)+/;

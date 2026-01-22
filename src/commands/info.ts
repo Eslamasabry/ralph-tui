@@ -28,9 +28,16 @@ export function computePackageJsonPath(currentDir: string): string {
   // package.json is at the package root (one level up from dist/).
   // In development, this file is at src/commands/info.ts,
   // and package.json is at the project root (up 2 levels).
-  if (currentDir.endsWith('dist') || currentDir.includes('/dist/') || currentDir.includes('\\dist\\')) {
+  
+  // Normalize path separators for consistent checking
+  const normalized = currentDir.replace(/\\/g, '/');
+  
+  // Check if the current directory is named 'dist' (typical for bundled output)
+  if (normalized.endsWith('/dist') || normalized === 'dist') {
     return join(currentDir, '..', 'package.json');
   }
+  
+  // Default to development structure (src/commands/ -> ../../package.json)
   return join(currentDir, '..', '..', 'package.json');
 }
 

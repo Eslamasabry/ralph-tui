@@ -81,11 +81,19 @@ async function playFile(filePath: string): Promise<void> {
           stdio: 'ignore',
           detached: true,
         });
-        proc.on('error', () => {
+        proc.on('error', (err) => {
           // paplay not available, try aplay
+          if (process.env.RALPH_DEBUG) {
+            console.warn(`[sound] paplay failed (${err.message}), falling back to aplay`);
+          }
           const alsaProc = spawn('aplay', ['-q', filePath], {
             stdio: 'ignore',
             detached: true,
+          });
+          alsaProc.on('error', (alsaErr) => {
+            if (process.env.RALPH_DEBUG) {
+              console.warn(`[sound] aplay also failed: ${alsaErr.message}`);
+            }
           });
           alsaProc.unref();
         });
@@ -158,8 +166,11 @@ async function playSystemSound(): Promise<void> {
             detached: true,
           }
         );
-        proc.on('error', () => {
+        proc.on('error', (err) => {
           // Try alternative path
+          if (process.env.RALPH_DEBUG) {
+            console.warn(`[sound] System sound failed (${err.message}), trying alternative`);
+          }
           const altProc = spawn(
             'paplay',
             ['/usr/share/sounds/freedesktop/stereo/message.oga'],
@@ -168,6 +179,11 @@ async function playSystemSound(): Promise<void> {
               detached: true,
             }
           );
+          altProc.on('error', (altErr) => {
+            if (process.env.RALPH_DEBUG) {
+              console.warn(`[sound] Alternative sound also failed: ${altErr.message}`);
+            }
+          });
           altProc.unref();
         });
         break;
@@ -260,7 +276,12 @@ export async function checkSoundAvailable(): Promise<boolean> {
       case 'darwin': {
         const proc = spawn('which', ['afplay'], { stdio: 'ignore' });
         proc.on('close', (code) => resolve(code === 0));
-        proc.on('error', () => resolve(false));
+        proc.on('error', (err) => {
+          if (process.env.RALPH_DEBUG) {
+            console.warn(`[sound] afplay check failed: ${err.message}`);
+          }
+          resolve(false);
+        });
         break;
       }
 
@@ -275,14 +296,27 @@ export async function checkSoundAvailable(): Promise<boolean> {
             // paplay not found, try aplay
             const aplayProc = spawn('which', ['aplay'], { stdio: 'ignore' });
             aplayProc.on('close', (aplayCode) => resolve(aplayCode === 0));
-            aplayProc.on('error', () => resolve(false));
+            aplayProc.on('error', (aplayErr) => {
+              if (process.env.RALPH_DEBUG) {
+                console.warn(`[sound] aplay check failed: ${aplayErr.message}`);
+              }
+              resolve(false);
+            });
           }
         });
-        paplayProc.on('error', () => {
+        paplayProc.on('error', (paplayErr) => {
           // paplay check failed, try aplay
+          if (process.env.RALPH_DEBUG) {
+            console.warn(`[sound] paplay check failed (${paplayErr.message}), trying aplay`);
+          }
           const aplayProc = spawn('which', ['aplay'], { stdio: 'ignore' });
           aplayProc.on('close', (aplayCode) => resolve(aplayCode === 0));
-          aplayProc.on('error', () => resolve(false));
+          aplayProc.on('error', (aplayErr) => {
+            if (process.env.RALPH_DEBUG) {
+              console.warn(`[sound] aplay check also failed: ${aplayErr.message}`);
+            }
+            resolve(false);
+          });
         });
         break;
       }

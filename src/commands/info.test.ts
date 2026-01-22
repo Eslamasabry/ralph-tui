@@ -3,10 +3,42 @@
  * Tests the collection and formatting of system diagnostic information.
  */
 
-import { describe, expect, test, beforeEach, afterEach } from 'bun:test';
+import { describe, expect, test, beforeEach, afterEach, mock } from 'bun:test';
 import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+// Mock the registry modules before importing info.js
+mock.module('../plugins/agents/registry.js', () => ({
+  getAgentRegistry: () => ({
+    registerBuiltin: () => {},
+    hasPlugin: () => true,
+    getRegisteredPlugins: () => [
+      { id: 'claude', name: 'Claude Code', skillsPaths: { personal: '~/.claude/skills', repo: '.claude/skills' } }
+    ],
+    createInstance: (_id: string) => ({
+      detect: async () => ({ available: true }),
+      dispose: async () => {},
+    }),
+    getInstance: async (config: any) => ({
+      meta: { id: config.plugin, name: config.name || config.plugin },
+      detect: async () => ({ available: true, version: '1.2.3', executablePath: '/usr/local/bin/agent' }),
+      getSandboxRequirements: () => ({ authPaths: [], binaryPaths: [], runtimePaths: [], requiresNetwork: true }),
+    }),
+  }),
+}));
+
+mock.module('../plugins/trackers/registry.js', () => ({
+  getTrackerRegistry: () => ({
+    registerBuiltin: () => {},
+    hasPlugin: () => true,
+    getInstance: async (config: any) => ({
+      meta: { id: config.plugin, name: config.name || config.plugin },
+      sync: async () => ({ success: true }),
+      getTasks: async () => [],
+    }),
+  }),
+}));
 
 import {
   collectSystemInfo,

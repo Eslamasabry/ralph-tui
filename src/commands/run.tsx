@@ -465,8 +465,10 @@ async function detectAndHandleStaleTasks(
   // Check if the previous session's lock is stale (process no longer running)
   const lockStatus = await checkLock(cwd);
 
-  // If the lock is still held by a running process, don't touch the tasks
-  if (lockStatus.isLocked && !lockStatus.isStale) {
+  // If the lock is held by a different running process, don't touch the tasks.
+  // We allow it if the lock is held by US (current PID) because we just acquired it
+  // and are now cleaning up from the previous session we're taking over.
+  if (lockStatus.isLocked && !lockStatus.isStale && lockStatus.lock?.pid !== process.pid) {
     return result;
   }
 
@@ -747,14 +749,20 @@ function RunAppWrapper({
 
   // Initialize instance manager on mount
   useEffect(() => {
+    let toastTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
     instanceManager.onStateChange((tabs, selectedIndex) => {
       setInstanceTabs(tabs);
       setSelectedTabIndex(selectedIndex);
     });
     instanceManager.onToast((toast) => {
       setConnectionToast(toast as ConnectionToastMessage);
+      // Clear any existing timeout before setting a new one
+      if (toastTimeoutId) {
+        clearTimeout(toastTimeoutId);
+      }
       // Auto-clear toast after 3 seconds
-      setTimeout(() => setConnectionToast(null), 3000);
+      toastTimeoutId = setTimeout(() => setConnectionToast(null), 3000);
     });
     instanceManager.initialize().then(() => {
       setInstanceTabs(instanceManager.getTabs());
@@ -763,6 +771,9 @@ function RunAppWrapper({
 
     // Cleanup on unmount
     return () => {
+      if (toastTimeoutId) {
+        clearTimeout(toastTimeoutId);
+      }
       instanceManager.disconnectAll();
     };
   }, []);

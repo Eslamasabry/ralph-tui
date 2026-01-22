@@ -396,7 +396,12 @@ export class JsonTrackerPlugin extends BaseTrackerPlugin {
     if (!locked) {
       const existing = await this.getTask(id);
       if (existing && existing.status !== 'in_progress') {
-        await unlink(lockPath).catch(() => undefined);
+        await unlink(lockPath).catch((err) => {
+          // Log stale lock removal errors - these can cause task claiming issues
+          if (process.env.RALPH_DEBUG) {
+            console.warn(`[JsonTracker] Failed to remove stale lock for task ${id}: ${err instanceof Error ? err.message : 'unknown error'}`);
+          }
+        });
         locked = await tryCreateLock();
       }
     }

@@ -41,13 +41,23 @@ export function findCommandPath(
     });
 
     let stdout = '';
+    let resolved = false;
+
+    const safeResolve = (result: { found: boolean; path: string }) => {
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timeoutId);
+        resolve(result);
+      }
+    };
 
     proc.stdout?.on('data', (data: Buffer) => {
       stdout += data.toString();
     });
 
-    proc.on('error', () => {
-      resolve({ found: false, path: '' });
+    proc.on('error', (err) => {
+      debugLog(`[findCommand] Error spawning ${whichCmd}: ${err.message}`);
+      safeResolve({ found: false, path: '' });
     });
 
     proc.on('close', (code) => {
@@ -55,16 +65,17 @@ export function findCommandPath(
         // On Windows, 'where' may return multiple paths (one per line)
         // Take the first one
         const firstPath = stdout.trim().split(/\r?\n/)[0] ?? '';
-        resolve({ found: true, path: firstPath.trim() });
+        safeResolve({ found: true, path: firstPath.trim() });
       } else {
-        resolve({ found: false, path: '' });
+        safeResolve({ found: false, path: '' });
       }
     });
 
     // Timeout after 5 seconds
-    setTimeout(() => {
+    const timeoutId = setTimeout(() => {
+      debugLog(`[findCommand] Timeout finding ${command}`);
       proc.kill();
-      resolve({ found: false, path: '' });
+      safeResolve({ found: false, path: '' });
     }, 5000);
   });
 }

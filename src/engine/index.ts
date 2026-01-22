@@ -740,6 +740,8 @@ export class ExecutionEngine {
 
           // Recursively retry
           if (!this.shouldStop) {
+            // Decrement iteration count since runIteration increments it
+            this.state.currentIteration--;
             return this.runIterationWithErrorHandling(task);
           }
         } else {

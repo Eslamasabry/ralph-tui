@@ -32,7 +32,11 @@ export function commandExists(command: string): Promise<boolean> {
       finish(false);
     }, COMMAND_TIMEOUT_MS);
 
-    proc.on('error', () => {
+    proc.on('error', (err) => {
+      // Log error for debugging but don't fail loudly - command simply doesn't exist
+      if (process.env.RALPH_DEBUG) {
+        console.error(`[sandbox/detect] Error checking for ${command}: ${err.message}`);
+      }
       clearTimeout(timeoutId);
       finish(false);
     });

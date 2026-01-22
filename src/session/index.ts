@@ -163,7 +163,7 @@ export async function acquireLock(
 
   // Check for existing lock
   const existingLock = await readLockFile(cwd);
-  if (existingLock && isProcessRunning(existingLock.pid)) {
+  if (existingLock && existingLock.pid !== process.pid && isProcessRunning(existingLock.pid)) {
     return false;
   }
 

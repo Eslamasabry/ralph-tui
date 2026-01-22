@@ -501,6 +501,9 @@ export function RunApp({
   // Track if user manually hid the panel (to respect user intent for auto-show logic)
   // When true, auto-show will not override user's explicit hide action
   const [userManuallyHidPanel, setUserManuallyHidPanel] = useState(false);
+  // Worker-to-task mapping for stable slot display in parallel execution
+  // Maps taskId -> workerId (e.g., "ralph-tui-rs1.3" -> "worker-2")
+  const [workerTaskMap, setWorkerTaskMap] = useState<Map<string, string>>(() => new Map());
   // Activity events for timeline display
   const activityEventsRef = useRef<ActivityEvent[]>([]);
   const activityEventCounter = useRef(0);
@@ -882,19 +885,50 @@ export function RunApp({
     });
   }, [tasks, remoteTasks, isViewingRemote, showClosedTasks]);
 
-  // Running tasks displayed as cards (parallel dashboard)
-  const runningTasks = useMemo(() => {
-    return displayedTasks.filter(
-      (task) => task.status === 'active' || task.status === 'actionable' || task.status === 'pending'
-    );
-  }, [displayedTasks]);
+  // All tasks displayed as cards (parallel dashboard - shows ALL tasks, not just running)
+  // Includes workerId for stable slot assignment
+  // Sort order: active tasks first (sorted by workerId), then queued, blocked, done
+  const allTasksForCards = useMemo(() => {
+    // Enrich all tasks with their assigned workerId for stable slot display
+    const enriched = displayedTasks.map((task) => ({
+      ...task,
+      workerId: workerTaskMap.get(task.id),
+    }));
+    
+    // Sort: active tasks with workerId first (by workerId), then rest by status priority
+    return enriched.sort((a, b) => {
+      // Active tasks with workerId go first, sorted by workerId
+      const aIsActiveWithWorker = a.status === 'active' && a.workerId;
+      const bIsActiveWithWorker = b.status === 'active' && b.workerId;
+      
+      if (aIsActiveWithWorker && bIsActiveWithWorker) {
+        return a.workerId!.localeCompare(b.workerId!);
+      }
+      if (aIsActiveWithWorker) return -1;
+      if (bIsActiveWithWorker) return 1;
+      
+      // Then sort by status priority (displayedTasks already has this order)
+      const statusPriority: Record<string, number> = {
+        active: 0,
+        actionable: 1,
+        pending: 2,
+        blocked: 3,
+        error: 4,
+        done: 5,
+        closed: 6,
+      };
+      const priorityA = statusPriority[a.status] ?? 10;
+      const priorityB = statusPriority[b.status] ?? 10;
+      return priorityA - priorityB;
+    });
+  }, [displayedTasks, workerTaskMap]);
 
-  // Clamp selectedIndex when displayedTasks shrinks (e.g., when hiding closed tasks)
+  // Clamp selectedIndex when task list shrinks (e.g., when hiding closed tasks)
   useEffect(() => {
-    if (runningTasks.length > 0 && selectedIndex >= runningTasks.length) {
-      setSelectedIndex(runningTasks.length - 1);
+    if (allTasksForCards.length > 0 && selectedIndex >= allTasksForCards.length) {
+      setSelectedIndex(allTasksForCards.length - 1);
     }
-  }, [runningTasks.length, selectedIndex]);
+  }, [allTasksForCards.length, selectedIndex]);
 
   // Auto-show subagent panel when first subagent spawns (unless user manually hid it)
   // This makes subagent activity discoverable without requiring users to know about 'T' key
@@ -1399,6 +1433,49 @@ export function RunApp({
             description: `Main sync failed after ${parallelEvent.maxRetries} retries: ${parallelEvent.reason}`,
           });
           break;
+        // Track worker-task assignments for stable slot display
+        case 'parallel:task-claimed':
+          // Map task to worker when claimed (before execution starts)
+          setWorkerTaskMap((prev) => {
+            const next = new Map(prev);
+            next.set(parallelEvent.task.id, parallelEvent.workerId);
+            return next;
+          });
+          break;
+        case 'parallel:task-started':
+          // Map task to worker and set status to active when execution begins
+          setWorkerTaskMap((prev) => {
+            const next = new Map(prev);
+            next.set(parallelEvent.task.id, parallelEvent.workerId);
+            return next;
+          });
+          // Set task status to active so it appears in running tasks
+          setTasks((prev) =>
+            prev.map((t) =>
+              t.id === parallelEvent.task.id ? { ...t, status: 'active' as TaskStatus } : t
+            )
+          );
+          break;
+        case 'parallel:task-finished':
+          // Clear task-worker mapping when task finishes
+          setWorkerTaskMap((prev) => {
+            const next = new Map(prev);
+            next.delete(parallelEvent.task.id);
+            return next;
+          });
+          // Set task status based on completion
+          if (parallelEvent.completed) {
+            setTasks((prev) => {
+              const updated = prev.map((t) =>
+                t.id === parallelEvent.task.id ? { ...t, status: 'done' as TaskStatus } : t
+              );
+              // Recalculate blocked/actionable status for dependent tasks
+              return recalculateDependencyStatus(updated);
+            });
+          }
+          break;
+        // Note: parallel:worker-idle doesn't have task info, so we don't clear here
+        // The mapping will be cleared when parallel:task-finished fires
       }
     });
 
@@ -1627,7 +1704,7 @@ export function RunApp({
           }
           // Default: navigate task/iteration lists
             if (viewMode === 'tasks') {
-              const maxIndex = Math.max(0, runningTasks.length - 1);
+              const maxIndex = Math.max(0, allTasksForCards.length - 1);
               setSelectedIndex((prev) => Math.min(maxIndex, prev + 1));
             } else if (viewMode === 'iterations') {
               setIterationSelectedIndex((prev) => Math.min(iterationHistoryLength - 1, prev + 1));
@@ -1880,7 +1957,7 @@ export function RunApp({
             const taskId = detailIteration.task?.id;
             if (taskId) {
               // Find the task in the displayed tasks
-              const taskIndex = runningTasks.findIndex((task) => task.id === taskId);
+              const taskIndex = allTasksForCards.findIndex((task: TaskItem) => task.id === taskId);
               if (taskIndex !== -1) {
                 setSelectedIndex(taskIndex);
               }
@@ -2054,7 +2131,7 @@ export function RunApp({
   const totalTasks = tasks.length;
 
   // Get selected task from filtered list (used for display in tasks view)
-  const selectedTask = runningTasks[selectedIndex] ?? null;
+  const selectedTask = allTasksForCards[selectedIndex] ?? null;
 
   // Get selected iteration when in iterations view
   const selectedIteration = viewMode === 'iterations' && iterations.length > 0
@@ -2807,9 +2884,9 @@ export function RunApp({
               appVersion={appVersion}
             />
 
-              {/* Task Cards Row - horizontal cards for tasks */}
+              {/* Task Cards Row - horizontal cards for all tasks */}
               <TaskCardsRow
-                tasks={runningTasks}
+                tasks={allTasksForCards}
                 selectedIndex={selectedIndex}
                 timingByTaskId={parallelTimings}
                 isFocused={!subagentPanelVisible || focusedPane === 'output'}

@@ -70,7 +70,7 @@ export class BeadsRealtimeWatcher {
         void this.checkForChanges();
       }, this.liveIntervalMs);
       return true;
-    } catch (error) {
+    } catch {
       this.closeDb();
       this.lastDataVersion = null;
       return false;

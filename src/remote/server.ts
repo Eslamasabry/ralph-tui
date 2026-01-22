@@ -1211,14 +1211,17 @@ export class RemoteServer {
       // Run migration in background - don't await
       checkAndMigrate(cwd, { quiet: true }).then((result) => {
         if (result?.migrated) {
-          // Migration was performed
+          console.log('[RemoteServer] Config migration completed successfully');
         }
-      }).catch(() => {
+      }).catch((err) => {
         // Migration failed, but config was still written successfully
+        // Log for debugging - this shouldn't block config push
+        console.warn(`[RemoteServer] Config migration failed (config push still succeeded): ${err instanceof Error ? err.message : 'unknown error'}`);
       });
       migrationTriggered = true;
-    } catch {
-      // Migration module not available
+    } catch (err) {
+      // Migration module not available - log for debugging
+      console.warn(`[RemoteServer] Migration module not available: ${err instanceof Error ? err.message : 'unknown error'}`);
     }
 
     // Log the action
