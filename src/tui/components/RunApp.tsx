@@ -419,8 +419,6 @@ export function RunApp({
   const [mainSyncFailureReason, setMainSyncFailureReason] = useState<string | undefined>(undefined);
 	// Run summary overlay visibility
 	const [showRunSummary, setShowRunSummary] = useState(false);
-	// Cleanup action results for run summary (US-005)
-	const [cleanupActionResults, setCleanupActionResults] = useState<Record<string, CleanupActionUiResult>>({});
   // Use agentPlugin prop (from resolved config with CLI override) with fallback to storedConfig
   const resolvedAgentName = agentPlugin || storedConfig?.defaultAgent || storedConfig?.agent || 'claude';
   const outputParserRef = useRef(
@@ -1665,9 +1663,9 @@ export function RunApp({
   }, [subagentTree, remoteSubagentTree, isViewingRemote, selectedSubagentId, displayCurrentTaskId]);
 
 
-  // Handle restore snapshot action - resets codebase and reopens failed/blocked tasks
+   // Handle restore snapshot action - resets codebase and reopens failed/blocked tasks
   const handleRestoreSnapshot = useCallback(async () => {
-    const tag = snapshotTag;
+    const tag = engine.getSnapshotTag?.() ?? null;
     if (!tag) {
       setInfoFeedback('No snapshot available to restore');
       return;
@@ -1721,7 +1719,7 @@ export function RunApp({
       const errorMessage = error instanceof Error ? error.message : String(error);
       setInfoFeedback(`Restore failed: ${errorMessage}`);
     }
-  }, [snapshotTag, engine, cwd]);
+   }, [engine, cwd]);
 
   // Handle keyboard navigation
   const handleKeyboard = useCallback(
@@ -3353,8 +3351,10 @@ export function RunApp({
         }}
         failures={runFailures}
         pendingMainTasksList={pendingMainTasksList}
-        snapshotTag={snapshotTag ?? undefined}
+        snapshotTag={engine.getSnapshotTag?.() ?? undefined}
         onRestoreSnapshot={handleRestoreSnapshot}
+        onClose={() => setShowRunSummary(false)}
+      />
 
     </box>
   );

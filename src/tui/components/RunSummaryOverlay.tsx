@@ -138,6 +138,9 @@ export interface RunSummaryOverlayProps {
 	/** Callback when user triggers a cleanup action */
 	onCleanupAction?: (actionId: string) => void;
 
+	/** Callback when user selects the restore snapshot action */
+	onRestoreSnapshot?: () => Promise<void>;
+
 	/** Callback when user closes the summary */
 	onClose: () => void;
 }
@@ -177,9 +180,11 @@ export function RunSummaryOverlay({
 	cleanupConfig,
 	cleanupActionResults = {},
 	onCleanupAction,
+	onRestoreSnapshot,
 	onClose,
 }: RunSummaryOverlayProps): ReactNode {
 	const [selectedAction, setSelectedAction] = useState(0);
+	const [isRestoring, setIsRestoring] = useState(false);
 	const statusDisplay = getStatusDisplay(status);
 
 	// Calculate actions based on cleanup config
@@ -230,8 +235,16 @@ export function RunSummaryOverlay({
 
 				case 'return':
 				case 'enter':
-					// Trigger the selected cleanup action
-					if (actions[selectedAction] && onCleanupAction) {
+					// Trigger the selected cleanup action or restore snapshot
+					if (!actions[selectedAction]) break;
+					
+					// Handle restore snapshot action specially
+					if (actions[selectedAction].label === 'Restore Snapshot' && onRestoreSnapshot) {
+						setIsRestoring(true);
+						void onRestoreSnapshot().finally(() => {
+							setIsRestoring(false);
+						});
+					} else if (onCleanupAction) {
 						onCleanupAction(actions[selectedAction].actionId);
 					}
 					break;
@@ -414,14 +427,17 @@ export function RunSummaryOverlay({
 								const result = cleanupActionResults[action.actionId];
 								const status = result?.status ?? 'idle';
 								const isSelected = selectedAction === index;
+								// For restore action, check isRestoring state
+								const isRestoreAction = action.label === 'Restore Snapshot';
+								const showLoading = isRestoreAction && isSelected && isRestoring;
 
 								return (
 									<text
 										key={action.key}
-										fg={isSelected ? colors.bg.primary : getStatusColor(status)}
+										fg={isSelected ? colors.bg.primary : (isRestoreAction ? getStatusColor(status) : getStatusColor(status))}
 										bg={isSelected ? colors.accent.primary : undefined}
 									>
-										[{index + 1}]{getStatusIcon(status)} {action.label}
+										[{index + 1}]{showLoading ? ' ⟳' : getStatusIcon(status)} {showLoading ? `${action.label}...` : action.label}
 									</text>
 								);
 							})}
