@@ -7,6 +7,7 @@
 # Ralph runtime/generated files
 tasks/
 logs/
+.ralph-tui/
 
 # Build packaging output
 package/
