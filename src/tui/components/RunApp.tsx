@@ -1236,7 +1236,25 @@ export function RunApp({
 
         case 'tasks:refreshed':
           // Update task list with fresh data from tracker
-          setTasks(convertTasksWithDependencyStatus(event.tasks));
+          // BUT preserve 'active' status for tasks currently assigned to workers
+          setTasks((prev) => {
+            const freshTasks = convertTasksWithDependencyStatus(event.tasks);
+            // Get currently active task IDs from workerTaskMap
+            const activeTaskIds = new Set(workerTaskMap.keys());
+            // Merge: preserve 'active' status for worker-assigned tasks
+            return freshTasks.map((freshTask) => {
+              if (activeTaskIds.has(freshTask.id)) {
+                // Find the previous task to preserve workerId if set
+                const prevTask = prev.find((t) => t.id === freshTask.id);
+                return {
+                  ...freshTask,
+                  status: 'active' as TaskStatus,
+                  workerId: prevTask?.workerId,
+                };
+              }
+              return freshTask;
+            });
+          });
           break;
 
         case 'engine:iterations-added':
@@ -1474,13 +1492,24 @@ export function RunApp({
             });
           }
           break;
+        case 'parallel:task-output':
+          // Capture output for parallel tasks - append to the parallelOutputs map
+          {
+            const taskId = parallelEvent.taskId;
+            const existing = parallelOutputsRef.current.get(taskId) ?? '';
+            const prefix = parallelEvent.stream === 'stderr' ? '[stderr] ' : '';
+            parallelOutputsRef.current.set(taskId, existing + prefix + parallelEvent.data);
+            pendingParallelOutputsRef.current = true;
+            scheduleOutputFlush();
+          }
+          break;
         // Note: parallel:worker-idle doesn't have task info, so we don't clear here
         // The mapping will be cleared when parallel:task-finished fires
       }
     });
 
     return unsubscribe;
-  }, [engine, appendActivityEvent]);
+  }, [engine, appendActivityEvent, scheduleOutputFlush]);
 
   // Update elapsed time every second - only while executing
   // Timer accumulates total execution time across all iterations
