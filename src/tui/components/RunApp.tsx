@@ -460,6 +460,8 @@ export function RunApp({
   const epicLoaderMode: EpicLoaderMode = trackerType === 'json' ? 'file-prompt' : 'list';
   // Details panel view mode (details, output, or prompt) - default to details
   const [detailsViewMode, setDetailsViewMode] = useState<DetailsViewMode>('details');
+  const [promptPreview] = useState<string | undefined>(undefined);
+  const [templateSource] = useState<string | undefined>(undefined);
   // Subagent tracing detail level - initialized from config, can be cycled with 't' key
   // Default to 'moderate' to show inline subagent sections by default
   const [subagentDetailLevel, setSubagentDetailLevel] = useState<SubagentDetailLevel>(
@@ -493,8 +495,7 @@ export function RunApp({
   // Track if user manually hid the panel (to respect user intent for auto-show logic)
   // When true, auto-show will not override user's explicit hide action
   const [userManuallyHidPanel, setUserManuallyHidPanel] = useState(false);
-  // Parallel events list for activity log (now integrated into Activity view)
-  const [parallelEvents, setParallelEvents] = useState<ParallelEvent[]>([]);
+  // Parallel events list (activity view uses current iteration + status for now)
 
   // Selected node in subagent tree for keyboard navigation
   // - currentTaskId (or 'main' if no task): Task root node is selected
@@ -1174,8 +1175,6 @@ export function RunApp({
 
     const unsubscribe = engine.onParallel((event) => {
       const parallelEvent = event as ParallelEvent;
-      // Add event to the activity log
-      setParallelEvents((prev) => [...prev, parallelEvent]);
 
       switch (parallelEvent.type) {
         case 'parallel:started':
@@ -1397,6 +1396,14 @@ export function RunApp({
         return;
       }
 
+      // Logs view sub-tabs: 1 = output, 2 = CLI, 3 = prompt
+      if (viewMode === 'logs' && (key.name === '1' || key.name === '2' || key.name === '3')) {
+        if (key.name === '1') setDetailsViewMode('output');
+        if (key.name === '2') setDetailsViewMode('cli');
+        if (key.name === '3') setDetailsViewMode('prompt');
+        return;
+      }
+
       switch (key.name) {
         case 'q':
           // Show quit confirmation dialog
@@ -1417,43 +1424,15 @@ export function RunApp({
         case 'tab':
           // View mode navigation: Tab cycles through view tabs
           // View tabs: tasks | iterations | activity | logs | settings
-          // Panel navigation: Toggle between output and subagent tree (when in tasks/iterations views)
-          if (viewMode === 'tasks' || viewMode === 'iterations') {
-            const panes: FocusedPane[] = ['output'];
-            if (subagentPanelVisible) panes.push('subagentTree');
-            if (panes.length > 1) {
-              const currentIdx = panes.indexOf(focusedPane);
-              const nextIdx = (currentIdx + 1) % panes.length;
-              setFocusedPane(panes[nextIdx]!);
-            }
-          } else {
-            // Cycle through view tabs
-            const viewModes: ViewMode[] = ['tasks', 'iterations', 'activity', 'logs', 'settings'];
-            const currentIdx = viewModes.indexOf(viewMode);
-            if (currentIdx !== -1) {
-              const nextIdx = (currentIdx + 1) % viewModes.length;
-              setViewMode(viewModes[nextIdx]);
-            }
-          }
-          break;
-
-        case 'shift-tab':
-          // Shift+Tab cycles through view tabs in reverse direction
-          if (viewMode === 'tasks' || viewMode === 'iterations') {
-            const panes: FocusedPane[] = ['output'];
-            if (subagentPanelVisible) panes.push('subagentTree');
-            if (panes.length > 1) {
-              const currentIdx = panes.indexOf(focusedPane);
-              const prevIdx = (currentIdx - 1 + panes.length) % panes.length;
-              setFocusedPane(panes[prevIdx]!);
-            }
-          } else {
-            // Cycle through view tabs in reverse
-            const viewModes: ViewMode[] = ['tasks', 'iterations', 'activity', 'logs', 'settings'];
-            const currentIdx = viewModes.indexOf(viewMode);
-            if (currentIdx !== -1) {
+          const viewModes: ViewMode[] = ['tasks', 'iterations', 'activity', 'logs', 'settings'];
+          const currentIdx = viewModes.indexOf(viewMode);
+          if (currentIdx !== -1) {
+            if (key.shift) {
               const prevIdx = (currentIdx - 1 + viewModes.length) % viewModes.length;
               setViewMode(viewModes[prevIdx]);
+            } else {
+              const nextIdx = (currentIdx + 1) % viewModes.length;
+              setViewMode(viewModes[nextIdx]);
             }
           }
           break;
@@ -1762,6 +1741,19 @@ export function RunApp({
             });
           }
           break;
+
+        case 'f':
+          // Cycle focus between output and subagent tree (tasks/iterations only)
+          if (viewMode === 'tasks' || viewMode === 'iterations') {
+            const panes: FocusedPane[] = ['output'];
+            if (subagentPanelVisible) panes.push('subagentTree');
+            if (panes.length > 1) {
+              const currentIdx = panes.indexOf(focusedPane);
+              const nextIdx = (currentIdx + 1) % panes.length;
+              setFocusedPane(panes[nextIdx]!);
+            }
+          }
+          break;
  
         case 'return':
         case 'enter':
@@ -1777,7 +1769,6 @@ export function RunApp({
           }
           break;
 
-        // Tab navigation: number keys 1-9 to switch tabs
         case '1':
         case '2':
         case '3':
@@ -1787,6 +1778,7 @@ export function RunApp({
         case '7':
         case '8':
         case '9':
+          // Tab navigation: number keys 1-9 to switch tabs
           if (instanceTabs && onSelectTab) {
             const tabIndex = parseInt(key.name, 10) - 1;
             if (tabIndex < instanceTabs.length) {
@@ -2546,7 +2538,6 @@ export function RunApp({
                 style={{
                   padding: 1,
                   backgroundColor: colors.bg.secondary,
-                  borderBottom: true,
                   borderColor: colors.border.muted,
                 }}
               >
@@ -2607,7 +2598,7 @@ export function RunApp({
               </box>
             </box>
           </box>
-        ) : viewMode === 'settings' && storedConfig ? (
+        ) : viewMode === 'settings' && storedConfig && onSaveSettings ? (
           // Settings view - now part of main view (not overlay)
           <SettingsView
             visible={true}
@@ -2617,6 +2608,10 @@ export function RunApp({
             onSave={onSaveSettings}
             onClose={() => setViewMode('tasks')}
           />
+        ) : viewMode === 'settings' ? (
+          <box style={{ padding: 2 }}>
+            <text fg={colors.fg.muted}>Settings are unavailable in this mode.</text>
+          </box>
         ) : viewMode === 'tasks' ? (
           <>
             {/* Top half: Dashboard Banner + Task Cards Row */}
