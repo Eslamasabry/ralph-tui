@@ -26,6 +26,13 @@ export interface MainSyncWorktreeOptions {
   mainBranch?: string;
 }
 
+export type MainSyncErrorCode =
+  | 'FETCH_FAILED'
+  | 'REMOTE_RESOLVE_FAILED'
+  | 'FAST_FORWARD_FAILED'
+  | 'WORKTREE_ERROR'
+  | 'UNKNOWN';
+
 export interface SyncResult {
   success: boolean;
   /** Whether there were new commits to pull */
@@ -36,6 +43,8 @@ export interface SyncResult {
   currentCommit: string;
   /** Error message if sync failed */
   error?: string;
+  /** Structured error code if sync failed */
+  code?: MainSyncErrorCode;
 }
 
 export class MainSyncWorktree {
@@ -174,6 +183,7 @@ export class MainSyncWorktree {
         previousCommit,
         currentCommit: previousCommit,
         error: `Failed to fetch: ${fetchResult.stderr}`,
+        code: 'FETCH_FAILED',
       };
     }
 
@@ -191,6 +201,7 @@ export class MainSyncWorktree {
         previousCommit,
         currentCommit: previousCommit,
         error: `Failed to resolve remote commit: ${remoteCommitResult.stderr}`,
+        code: 'REMOTE_RESOLVE_FAILED',
       };
     }
 
@@ -243,6 +254,7 @@ export class MainSyncWorktree {
         previousCommit,
         currentCommit: previousCommit,
         error: `Fast-forward merge failed: ${mergeResult.stderr}`,
+        code: 'FAST_FORWARD_FAILED',
       };
     }
 

@@ -484,16 +484,6 @@ export interface TaskCompletedEvent extends EngineEventBase {
   iteration: number;
 }
 
-/**
- * Task blocked event (e.g., merge conflict)
- */
-export interface TaskBlockedEvent extends EngineEventBase {
-  type: 'task:blocked';
-  /** Blocked task */
-  task: TrackerTask;
-  /** Reason for blocking */
-  reason: string;
-}
 
 /**
  * Agent output event (streaming)
@@ -613,8 +603,8 @@ export interface MainSyncSucceededEvent extends EngineEventBase {
  */
 export interface MainSyncFailedEvent extends EngineEventBase {
   type: 'main-sync-failed';
-  /** Task that was blocked due to sync failure */
-  task: TrackerTask;
+  /** Task that was blocked due to sync failure (optional, may be null between iterations) */
+  task?: TrackerTask;
   /** Reason for the sync failure */
   reason: string;
 }
