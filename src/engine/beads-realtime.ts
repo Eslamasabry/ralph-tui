@@ -136,14 +136,20 @@ export class BeadsRealtimeWatcher {
     return row.data_version;
   }
 
+  private refreshQueued = false;
+  
   private async refreshTasks(): Promise<void> {
     if (this.refreshInFlight) {
+      this.refreshQueued = true;
       return;
     }
 
     this.refreshInFlight = true;
     try {
-      await this.onChange();
+      do {
+        this.refreshQueued = false;
+        await this.onChange();
+      } while (this.refreshQueued);
     } finally {
       this.refreshInFlight = false;
     }

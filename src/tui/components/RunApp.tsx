@@ -1291,21 +1291,32 @@ export function RunApp({
         // Main sync events for delivery guarantees
         case 'main-sync-failed':
           // Task failed to sync to main - mark it as pending-main
-          setTasks((prev) =>
-            prev.map((t) =>
-              t.id === event.task.id ? { ...t, status: 'blocked' as const, pendingMainSync: true } : t
-            )
-          );
-          setPendingMainCount((prev) => prev + 1);
-          appendActivityEvent({
-            category: 'system',
-            eventType: 'failed',
-            timestamp: event.timestamp,
-            severity: 'error',
-            description: `Main sync failed: ${event.reason}`,
-            taskId: event.task.id,
-            taskTitle: event.task.title,
-          });
+          if (event.task) {
+            setTasks((prev) =>
+              prev.map((t) =>
+                t.id === event.task!.id ? { ...t, status: 'blocked' as const, pendingMainSync: true } : t
+              )
+            );
+            setPendingMainCount((prev) => prev + 1);
+            appendActivityEvent({
+              category: 'system',
+              eventType: 'failed',
+              timestamp: event.timestamp,
+              severity: 'error',
+              description: `Main sync failed: ${event.reason}`,
+              taskId: event.task!.id,
+              taskTitle: event.task!.title,
+            });
+          } else {
+            // No specific task - just log the failure
+            appendActivityEvent({
+              category: 'system',
+              eventType: 'failed',
+              timestamp: event.timestamp,
+              severity: 'error',
+              description: `Main sync failed: ${event.reason}`,
+            });
+          }
           break;
 
         case 'main-sync-succeeded':

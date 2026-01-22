@@ -417,28 +417,46 @@ export class ExecutionEngine {
   /**
    * Refresh the task list from the tracker and emit a tasks:refreshed event.
    * Call this when the user wants to manually refresh the task list (e.g., 'r' key).
+   * Implements single-flight refresh with queuing to prevent race conditions.
    */
+  private refreshInFlight = false;
+  private refreshQueued = false;
+  
   async refreshTasks(): Promise<void> {
     if (!this.tracker) {
       return;
     }
 
-    // Fetch all tasks including completed for TUI display
-    const tasks = await this.tracker.getTasks({
-      status: ['open', 'in_progress', 'completed'],
-    });
+    if (this.refreshInFlight) {
+      this.refreshQueued = true;
+      return;
+    }
 
-    // Update total task count (open/in_progress only)
-    const activeTasks = tasks.filter(
-      (t) => t.status === 'open' || t.status === 'in_progress'
-    );
-    this.state.totalTasks = activeTasks.length;
+    this.refreshInFlight = true;
+    try {
+      do {
+        this.refreshQueued = false;
 
-    this.emit({
-      type: 'tasks:refreshed',
-      timestamp: new Date().toISOString(),
-      tasks,
-    });
+        // Fetch all tasks including completed for TUI display
+        const tasks = await this.tracker.getTasks({
+          status: ['open', 'in_progress', 'completed'],
+        });
+
+        // Update total task count (open/in_progress only)
+        const activeTasks = tasks.filter(
+          (t) => t.status === 'open' || t.status === 'in_progress'
+        );
+        this.state.totalTasks = activeTasks.length;
+
+        this.emit({
+          type: 'tasks:refreshed',
+          timestamp: new Date().toISOString(),
+          tasks,
+        });
+      } while (this.refreshQueued);
+    } finally {
+      this.refreshInFlight = false;
+    }
   }
 
   /**
