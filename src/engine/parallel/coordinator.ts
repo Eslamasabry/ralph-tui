@@ -60,6 +60,10 @@ export class ParallelCoordinator {
     };
   }
 
+  getPendingMainTaskIds(): string[] {
+    return Array.from(this.pendingMainSyncTasks.keys());
+  }
+
   private emit(event: ParallelEvent): void {
     for (const listener of this.listeners) {
       try {

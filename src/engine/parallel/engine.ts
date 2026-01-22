@@ -126,6 +126,10 @@ export class ParallelExecutionEngine implements EngineController {
     return this.tracker;
   }
 
+  getPendingMainTaskIds(): string[] {
+    return this.coordinator.getPendingMainTaskIds();
+  }
+
   async refreshTasks(): Promise<void> {
     if (!this.tracker) return;
     const tasks = await this.tracker.getTasks({ status: ['open', 'in_progress', 'completed'] });
