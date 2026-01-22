@@ -1492,24 +1492,17 @@ export function RunApp({
             });
           }
           break;
-        case 'parallel:task-output':
-          // Capture output for parallel tasks - append to the parallelOutputs map
-          {
-            const taskId = parallelEvent.taskId;
-            const existing = parallelOutputsRef.current.get(taskId) ?? '';
-            const prefix = parallelEvent.stream === 'stderr' ? '[stderr] ' : '';
-            parallelOutputsRef.current.set(taskId, existing + prefix + parallelEvent.data);
-            pendingParallelOutputsRef.current = true;
-            scheduleOutputFlush();
-          }
-          break;
+        // Note: parallel:task-output is already converted to agent:output by ParallelEngine
+        // with taskId set, so it's handled in the main engine event subscription.
+        // No need to handle it here - that would cause duplication.
+        
         // Note: parallel:worker-idle doesn't have task info, so we don't clear here
         // The mapping will be cleared when parallel:task-finished fires
       }
     });
 
     return unsubscribe;
-  }, [engine, appendActivityEvent, scheduleOutputFlush]);
+  }, [engine, appendActivityEvent]);
 
   // Update elapsed time every second - only while executing
   // Timer accumulates total execution time across all iterations
