@@ -12,6 +12,7 @@ import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { colors, layout } from '../theme.js';
 import type { RalphStatus, TaskStatus } from '../theme.js';
 import type { TaskItem, BlockerInfo, DetailsViewMode, IterationTimingInfo, SubagentTreeNode } from '../types.js';
+import type { ActivityEvent } from '../../logs/activity-events.js';
 import { Header } from './Header.js';
 import { Footer } from './Footer.js';
 import { RightPanel } from './RightPanel.js';
@@ -495,7 +496,18 @@ export function RunApp({
   // Track if user manually hid the panel (to respect user intent for auto-show logic)
   // When true, auto-show will not override user's explicit hide action
   const [userManuallyHidPanel, setUserManuallyHidPanel] = useState(false);
-  // Parallel events list (activity view uses current iteration + status for now)
+  // Activity events for timeline display
+  const [activityEvents, setActivityEvents] = useState<ActivityEvent[]>([]);
+  const activityEventCounter = useRef(0);
+
+  const appendActivityEvent = useCallback((event: Omit<ActivityEvent, 'id'>) => {
+    activityEventCounter.current += 1;
+    const fullEvent: ActivityEvent = {
+      ...event,
+      id: `evt_${Date.now()}_${activityEventCounter.current}`,
+    };
+    setActivityEvents((prev) => [...prev.slice(-999), fullEvent]);
+  }, []);
 
   // Selected node in subagent tree for keyboard navigation
   // - currentTaskId (or 'main' if no task): Task root node is selected
@@ -1135,6 +1147,15 @@ export function RunApp({
             )
           );
           setPendingMainCount((prev) => prev + 1);
+          appendActivityEvent({
+            category: 'system',
+            eventType: 'failed',
+            timestamp: event.timestamp,
+            severity: 'error',
+            description: `Main sync failed: ${event.reason}`,
+            taskId: event.task.id,
+            taskTitle: event.task.title,
+          });
           break;
 
         case 'main-sync-succeeded':
@@ -1146,27 +1167,55 @@ export function RunApp({
             )
           );
           setPendingMainCount(0);
+          appendActivityEvent({
+            category: 'system',
+            eventType: 'completed',
+            timestamp: event.timestamp,
+            severity: 'info',
+            description: 'Main sync succeeded',
+          });
           break;
 
         case 'main-sync-skipped':
           // Sync was skipped - increment pending-main count
           setPendingMainCount((prev) => prev + 1);
+          appendActivityEvent({
+            category: 'system',
+            eventType: 'failed',
+            timestamp: event.timestamp,
+            severity: 'warning',
+            description: `Main sync skipped: ${event.reason}`,
+          });
           break;
 
         case 'main-sync-retrying':
           // Retrying sync - update feedback but don't change count
           setInfoFeedback(`Main sync retry ${event.retryAttempt}/${event.maxRetries}: ${event.reason}`);
+          appendActivityEvent({
+            category: 'system',
+            eventType: 'failed',
+            timestamp: event.timestamp,
+            severity: 'warning',
+            description: `Main sync retry ${event.retryAttempt}/${event.maxRetries}: ${event.reason}`,
+          });
           break;
 
         case 'main-sync-alert':
           // Max retries reached - alert user
           setInfoFeedback(`⚠ Main sync failed after ${event.maxRetries} retries: ${event.reason}`);
+          appendActivityEvent({
+            category: 'system',
+            eventType: 'failed',
+            timestamp: event.timestamp,
+            severity: 'error',
+            description: `Main sync failed after ${event.maxRetries} retries: ${event.reason}`,
+          });
           break;
       }
     });
 
     return unsubscribe;
-  }, [engine]);
+  }, [engine, appendActivityEvent]);
 
   useEffect(() => {
     if (!engine.onParallel) {
@@ -1214,6 +1263,13 @@ export function RunApp({
             syncPending: 1,
           }));
           setPendingMainCount((prev) => prev + 1);
+          appendActivityEvent({
+            category: 'system',
+            eventType: 'failed',
+            timestamp: parallelEvent.timestamp,
+            severity: 'warning',
+            description: `Main sync skipped: ${parallelEvent.reason}`,
+          });
           break;
         case 'parallel:main-sync-succeeded':
           setMergeStats((prev) => ({
@@ -1221,23 +1277,53 @@ export function RunApp({
             syncPending: 0,
           }));
           setPendingMainCount(0);
+          appendActivityEvent({
+            category: 'system',
+            eventType: 'completed',
+            timestamp: parallelEvent.timestamp,
+            severity: 'info',
+            description: `Main sync succeeded: ${parallelEvent.commit.slice(0, 7)}`,
+          });
           break;
         case 'parallel:main-sync-failed':
           setPendingMainCount((prev) => prev + 1);
+          appendActivityEvent({
+            category: 'system',
+            eventType: 'failed',
+            timestamp: parallelEvent.timestamp,
+            severity: 'error',
+            description: `Main sync failed: ${parallelEvent.reason}`,
+            taskId: parallelEvent.task.id,
+            taskTitle: parallelEvent.task.title,
+          });
           break;
         case 'parallel:main-sync-retrying':
           // Update info feedback for retry attempts
           setInfoFeedback(`Main sync retry ${parallelEvent.retryAttempt}/${parallelEvent.maxRetries}: ${parallelEvent.reason}`);
+          appendActivityEvent({
+            category: 'system',
+            eventType: 'failed',
+            timestamp: parallelEvent.timestamp,
+            severity: 'warning',
+            description: `Main sync retry ${parallelEvent.retryAttempt}/${parallelEvent.maxRetries}: ${parallelEvent.reason}`,
+          });
           break;
         case 'parallel:main-sync-alert':
           // Max retries reached
           setInfoFeedback(`⚠ Main sync failed after ${parallelEvent.maxRetries} retries: ${parallelEvent.reason}`);
+          appendActivityEvent({
+            category: 'system',
+            eventType: 'failed',
+            timestamp: parallelEvent.timestamp,
+            severity: 'error',
+            description: `Main sync failed after ${parallelEvent.maxRetries} retries: ${parallelEvent.reason}`,
+          });
           break;
       }
     });
 
     return unsubscribe;
-  }, [engine]);
+  }, [engine, appendActivityEvent]);
 
   // Update elapsed time every second - only while executing
   // Timer accumulates total execution time across all iterations
@@ -2520,6 +2606,7 @@ export function RunApp({
             subagentTree={subagentTree}
             subagentStats={subagentStatsCache.get(currentIteration)}
             iterations={iterations}
+            activityEvents={activityEvents}
           />
         ) : viewMode === 'logs' ? (
           // Logs view - Output/CLI/Prompt sub-views

@@ -149,8 +149,6 @@ export class MainSyncWorktree {
    * Returns a SyncResult indicating success/failure and whether updated.
    */
   async sync(): Promise<SyncResult> {
-    const worktreePath = this.getWorktreePath();
-
     // Get commit before sync
     let previousCommit: string;
     try {
@@ -208,15 +206,34 @@ export class MainSyncWorktree {
       };
     }
 
+    return this.fastForwardTo(remoteCommit, previousCommit);
+  }
+
+  /**
+   * Fast-forward the main-sync worktree to a specific commit or ref.
+   * This does NOT fetch remote updates; caller is responsible for providing a valid ref.
+   */
+  async fastForwardTo(ref: string, knownPreviousCommit?: string): Promise<SyncResult> {
+    const worktreePath = this.getWorktreePath();
+
+    let previousCommit = knownPreviousCommit;
+    if (!previousCommit) {
+      try {
+        previousCommit = await this.getCurrentCommit();
+      } catch {
+        await this.create();
+        previousCommit = await this.getCurrentCommit();
+      }
+    }
+
     // Ensure worktree is clean before merge
     await this.ensureClean();
 
-    // Try fast-forward only merge in the worktree
     const mergeResult = await this.execGit([
       '-C', worktreePath,
       'merge',
       '--ff-only',
-      remoteCommit,
+      ref,
     ]);
 
     if (mergeResult.exitCode !== 0) {
@@ -229,12 +246,11 @@ export class MainSyncWorktree {
       };
     }
 
-    // Get the new commit
     const currentCommit = await this.getCurrentCommit();
 
     return {
       success: true,
-      updated: true,
+      updated: currentCommit !== previousCommit,
       previousCommit,
       currentCommit,
     };

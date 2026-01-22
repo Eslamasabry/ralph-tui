@@ -464,6 +464,12 @@ export class ParallelCoordinator {
         this.blockedTaskIds.add(entry.task.id);
         await this.tracker?.updateTaskStatus(entry.task.id, 'blocked');
         await this.tracker?.releaseTask?.(entry.task.id, entry.workerId);
+        this.emit({
+          type: 'parallel:main-sync-failed',
+          timestamp: new Date().toISOString(),
+          task: entry.task,
+          reason: syncResult.reason ?? 'Main sync failed',
+        });
         // Mark as pending-main in tracker (if supported)
         if (this.tracker && 'markTaskPendingMain' in this.tracker && typeof this.tracker.markTaskPendingMain === 'function') {
           const pendingCount = this.pendingMergeCounts.get(entry.task.id) ?? 1;
@@ -478,20 +484,22 @@ export class ParallelCoordinator {
       return { success: false, reason: 'Main sync worktree unavailable.' };
     }
 
-    const syncResult = await this.mainSyncWorktree.sync();
+    const integrationCommit = await this.resolveCommit(this.mergeBranch);
+    const syncResult = await this.mainSyncWorktree.fastForwardTo(integrationCommit);
     if (!syncResult.success) {
+      const reason = syncResult.error ?? 'Main sync failed';
       this.emit({
         type: 'parallel:main-sync-skipped',
         timestamp: new Date().toISOString(),
-        reason: syncResult.error ?? 'Main sync failed',
+        reason,
       });
-      return { success: false, reason: syncResult.error ?? 'Main sync failed' };
+      return { success: false, reason };
     }
 
-    // Now fast-forward repo root to the synced commit (do not rely on current branch/clean state)
-    const result = await this.execGitIn(this.config.cwd, ['merge', '--ff-only', syncResult.currentCommit]);
-    if (result.exitCode !== 0) {
-      const reason = result.stderr.trim() || 'merge --ff-only failed';
+    // Now update the repo root main ref to match integration
+    const rootResult = await this.fastForwardRootMain(integrationCommit);
+    if (!rootResult.success) {
+      const reason = rootResult.reason ?? 'Failed to update main ref';
       this.emit({
         type: 'parallel:main-sync-skipped',
         timestamp: new Date().toISOString(),
@@ -587,6 +595,69 @@ export class ParallelCoordinator {
     }
 
     this.pendingMainSyncTasks.clear();
+  }
+
+  private async fastForwardRootMain(commit: string): Promise<{ success: boolean; reason?: string }> {
+    const currentBranch = await this.getCurrentBranch();
+
+    // If main is not checked out here, update the ref directly
+    if (currentBranch !== this.baseBranch) {
+      const updateRef = await this.execGitIn(this.config.cwd, [
+        'update-ref',
+        `refs/heads/${this.baseBranch}`,
+        commit,
+      ]);
+      if (updateRef.exitCode !== 0) {
+        return { success: false, reason: updateRef.stderr.trim() || 'Failed to update main ref' };
+      }
+      return { success: true };
+    }
+
+    const clean = await this.isRepoClean(this.config.cwd);
+    if (clean) {
+      const result = await this.execGitIn(this.config.cwd, ['merge', '--ff-only', commit]);
+      if (result.exitCode !== 0) {
+        return { success: false, reason: result.stderr.trim() || 'merge --ff-only failed' };
+      }
+      return { success: true };
+    }
+
+    // Dirty main - attempt safe stash + fast-forward + apply
+    const stashName = `ralph-main-sync-${Date.now()}`;
+    const stashResult = await this.execGitIn(this.config.cwd, ['stash', 'push', '-u', '-m', stashName]);
+    if (stashResult.exitCode !== 0) {
+      return { success: false, reason: stashResult.stderr.trim() || 'Failed to stash working tree' };
+    }
+
+    const stashRefResult = await this.execGitIn(this.config.cwd, ['stash', 'list', '-n', '1', '--format=%gd']);
+    const stashRef = stashRefResult.exitCode === 0 ? stashRefResult.stdout.trim() : '';
+
+    const mergeResult = await this.execGitIn(this.config.cwd, ['merge', '--ff-only', commit]);
+    if (mergeResult.exitCode !== 0) {
+      if (stashRef) {
+        await this.execGitIn(this.config.cwd, ['stash', 'apply', stashRef]);
+      }
+      return { success: false, reason: mergeResult.stderr.trim() || 'merge --ff-only failed' };
+    }
+
+    if (stashRef) {
+      const applyResult = await this.execGitIn(this.config.cwd, ['stash', 'apply', stashRef]);
+      if (applyResult.exitCode === 0) {
+        await this.execGitIn(this.config.cwd, ['stash', 'drop', stashRef]);
+      } else {
+        const affectedTaskCount = this.pendingMainSyncTasks.size;
+        this.emit({
+          type: 'parallel:main-sync-alert',
+          timestamp: new Date().toISOString(),
+          retryAttempt: this.pendingMainSyncRetryCount,
+          maxRetries: this.maxMainSyncRetries,
+          reason: applyResult.stderr.trim() || 'Stash apply failed after main sync',
+          affectedTaskCount,
+        });
+      }
+    }
+
+    return { success: true };
   }
 
   private async getCommitFiles(commit: string, repoPath: string): Promise<string[]> {

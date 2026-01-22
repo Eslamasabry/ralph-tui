@@ -5,6 +5,8 @@
  */
 
 import { spawn } from 'node:child_process';
+import { appendFile, mkdir } from 'node:fs/promises';
+import { join, dirname } from 'node:path';
 import type { TrackerPlugin } from '../plugins/trackers/types.js';
 
 /**
@@ -368,4 +370,19 @@ export async function logReconciliationResult(
 
   // Log summary to stderr for headless mode (so it doesn't interfere with structured logs)
   console.error(`[reconciliation] Checked: ${result.totalChecked}, Verified: ${result.verifiedCount}, Reopened: ${result.reopenedCount}, Skipped: ${result.skippedCount}, Errors: ${result.errorCount}`);
+
+  const cwd = options.cwd ?? process.cwd();
+  const logTargets = [
+    join(cwd, '.ralph-tui', 'logs', 'reconciliation.log'),
+    join(cwd, 'logs', 'reconciliation.log'),
+  ];
+
+  for (const logPath of logTargets) {
+    try {
+      await mkdir(dirname(logPath), { recursive: true });
+      await appendFile(logPath, `${report}\n`);
+    } catch {
+      // Ignore logging failures
+    }
+  }
 }

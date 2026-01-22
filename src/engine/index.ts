@@ -2416,7 +2416,13 @@ export class ExecutionEngine {
     }
 
     try {
-      const syncResult = await this.mainSyncWorktree.sync();
+      const headResult = await this.execGit(['rev-parse', 'HEAD']);
+      if (headResult.exitCode !== 0) {
+        return { success: false, reason: headResult.stderr.trim() || 'Failed to resolve HEAD' };
+      }
+
+      const headCommit = headResult.stdout.trim();
+      const syncResult = await this.mainSyncWorktree.fastForwardTo(headCommit);
 
       if (!syncResult.success) {
         // Sync failed or was skipped
