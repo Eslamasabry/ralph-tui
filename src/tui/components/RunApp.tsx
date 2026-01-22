@@ -1812,17 +1812,16 @@ export function RunApp({
           }
           break;
 
-        // Remote management: 'a' to add new remote
+        // Remote management: 'a' to add new remote (Shift+A toggles Activity view)
         case 'a':
+          if (key.shift) {
+            setShowActivityView((prev) => !prev);
+            break;
+          }
           // Open add remote overlay
           setRemoteManagementMode('add');
           setEditingRemote(undefined);
           setShowRemoteManagement(true);
-          break;
-
-        // Activity view: 'A' (Shift+A) to toggle full-screen activity timeline
-        case 'A':
-          setShowActivityView((prev) => !prev);
           break;
 
         // Remote management: 'e' to edit current remote (only when viewing a remote tab)
