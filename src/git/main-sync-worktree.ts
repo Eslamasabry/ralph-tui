@@ -89,8 +89,14 @@ export class MainSyncWorktree {
   }
 
   /**
-   * Create the main-sync worktree if it doesn't exist.
-   * The worktree is always clean and tracks the main branch.
+   * Create or reuse the main-sync worktree.
+   * Idempotent: safe to call multiple times (startup + runtime).
+   *
+   * Behavior:
+   * - If worktree exists → reuse it (ensure clean)
+   * - If branch exists but no worktree → attach worktree to it
+   * - If neither exists → create fresh
+   * - If both exist but stale → reset to match main branch
    */
   async create(): Promise<string> {
     await this.ensureWorktreesDir();
@@ -99,37 +105,30 @@ export class MainSyncWorktree {
 
     // Check if worktree already exists
     if (await this.exists()) {
-      // Clean up any stale state
-      await this.cleanup();
+      // Reuse existing worktree - ensure it's clean and on correct branch
+      await this.ensureClean();
+      return worktreePath;
     }
 
-    // Create the worktree from main branch
+    // Worktree doesn't exist, create it using -B flag
+    // -B: create branch if needed, else reset it to start-point
     const args = [
       '-C', this.repoRoot,
       'worktree',
       'add',
-      '-b', this.worktreeName,
+      '-B', this.worktreeName,
       worktreePath,
       this.mainBranch,
     ];
 
-    let result = await this.execGit(args);
+    const result = await this.execGit(args);
 
     if (result.exitCode !== 0) {
-      // Try recovery for stale locked/missing worktrees
+      // Recovery: cleanup stale state and retry
       await this.cleanup();
-      const retryArgs = [
-        '-C', this.repoRoot,
-        'worktree',
-        'add',
-        '-f',
-        '-b', this.worktreeName,
-        worktreePath,
-        this.mainBranch,
-      ];
-      result = await this.execGit(retryArgs);
-      if (result.exitCode !== 0) {
-        throw new Error(`Failed to create main-sync worktree: ${result.stderr}`);
+      const retryResult = await this.execGit(args);
+      if (retryResult.exitCode !== 0) {
+        throw new Error(`Failed to create main-sync worktree: ${retryResult.stderr}`);
       }
     }
 
