@@ -38,6 +38,7 @@ import { RemoteManagementOverlay } from './RemoteManagementOverlay.js';
 import type { RemoteManagementMode, ExistingRemoteData } from './RemoteManagementOverlay.js';
 import { Toast, formatConnectionToast } from './Toast.js';
 import type { ConnectionToastMessage } from './Toast.js';
+import { RunSummaryOverlay } from './RunSummaryOverlay.js';
 import type { InstanceTab } from '../../remote/client.js';
 import { addRemote, removeRemote, getRemote } from '../../remote/config.js';
 import type {
@@ -410,6 +411,14 @@ export function RunApp({
   });
   // Pending main sync count for delivery guarantee visibility
   const [pendingMainCount, setPendingMainCount] = useState(0);
+  // List of failures for run summary (US-002)
+  const [runFailures, setRunFailures] = useState<Array<{ taskId: string; taskTitle: string; reason: string; phase: 'merge' | 'sync' | 'recovery' | 'execution'; iteration?: number }>>([]);
+  // List of pending-main tasks for run summary (US-002)
+  const [pendingMainTasksList, setPendingMainTasksList] = useState<Array<{ taskId: string; taskTitle: string; commitCount: number }>>([]);
+  // Main sync failure reason for run summary
+  const [mainSyncFailureReason, setMainSyncFailureReason] = useState<string | undefined>(undefined);
+  // Run summary overlay visibility
+  const [showRunSummary, setShowRunSummary] = useState(false);
   // Streaming parser for live output - extracts readable content and prevents memory bloat
   // Use agentPlugin prop (from resolved config with CLI override) with fallback to storedConfig
   const resolvedAgentName = agentPlugin || storedConfig?.defaultAgent || storedConfig?.agent || 'claude';
@@ -1023,6 +1032,10 @@ export function RunApp({
           } else {
             setStatus('stopped');
           }
+          // Show run summary on complete or error (US-001)
+          if (event.reason === 'error' || event.reason === 'completed') {
+            setShowRunSummary(true);
+          }
           break;
 
         case 'engine:paused':
@@ -1137,6 +1150,17 @@ export function RunApp({
               t.id === event.task.id ? { ...t, status: 'error' as TaskStatus } : t
             )
           );
+          // Track failure for run summary (US-002)
+          setRunFailures((prev) => [
+            ...prev,
+            {
+              taskId: event.task.id,
+              taskTitle: event.task.title,
+              reason: event.error,
+              phase: 'execution',
+              iteration: event.iteration,
+            },
+          ]);
           break;
 
         case 'task:selected':
@@ -1279,6 +1303,26 @@ export function RunApp({
             )
           );
           setPendingMainCount((prev) => prev + 1);
+          // Track failure for run summary (US-002)
+          setMainSyncFailureReason(event.reason);
+          setRunFailures((prev) => [
+            ...prev,
+            {
+              taskId: event.task.id,
+              taskTitle: event.task.title,
+              reason: event.reason,
+              phase: 'sync',
+            },
+          ]);
+          // Track pending-main task for summary (US-002)
+          setPendingMainTasksList((prev) => [
+            ...prev,
+            {
+              taskId: event.task.id,
+              taskTitle: event.task.title,
+              commitCount: 1, // Default to 1 if unknown
+            },
+          ]);
           appendActivityEvent({
             category: 'system',
             eventType: 'failed',
@@ -1311,6 +1355,17 @@ export function RunApp({
         case 'main-sync-skipped':
           // Sync was skipped - increment pending-main count
           setPendingMainCount((prev) => prev + 1);
+          // Track as a failure for run summary (US-002)
+          setMainSyncFailureReason(event.reason);
+          setRunFailures((prev) => [
+            ...prev,
+            {
+              taskId: 'N/A',
+              taskTitle: 'Main sync',
+              reason: event.reason,
+              phase: 'sync',
+            },
+          ]);
           appendActivityEvent({
             category: 'system',
             eventType: 'failed',
@@ -1388,6 +1443,16 @@ export function RunApp({
             queued: Math.max(0, prev.queued - 1),
             failed: prev.failed + 1,
           }));
+          // Track merge failure for run summary (US-002)
+          setRunFailures((prev) => [
+            ...prev,
+            {
+              taskId: parallelEvent.task.id,
+              taskTitle: parallelEvent.task.title,
+              reason: parallelEvent.reason,
+              phase: 'merge',
+            },
+          ]);
           break;
         case 'parallel:main-sync-skipped':
           setMergeStats((prev) => ({
@@ -1419,6 +1484,26 @@ export function RunApp({
           break;
         case 'parallel:main-sync-failed':
           setPendingMainCount((prev) => prev + 1);
+          // Track failure for run summary (US-002)
+          setMainSyncFailureReason(parallelEvent.reason);
+          setRunFailures((prev) => [
+            ...prev,
+            {
+              taskId: parallelEvent.task.id,
+              taskTitle: parallelEvent.task.title,
+              reason: parallelEvent.reason,
+              phase: 'sync',
+            },
+          ]);
+          // Track pending-main task for summary (US-002)
+          setPendingMainTasksList((prev) => [
+            ...prev,
+            {
+              taskId: parallelEvent.task.id,
+              taskTitle: parallelEvent.task.title,
+              commitCount: 1,
+            },
+          ]);
           appendActivityEvent({
             category: 'system',
             eventType: 'failed',
@@ -3189,6 +3274,26 @@ export function RunApp({
           setShowRemoteManagement(false);
         }}
         onClose={() => setShowRemoteManagement(false)}
+      />
+
+      {/* Run Summary Overlay (US-001, US-002) */}
+      <RunSummaryOverlay
+        visible={showRunSummary}
+        status={status}
+        elapsedTime={elapsedTime}
+        epicName={epicName}
+        totalTasks={tasks.length}
+        completedTasks={tasks.filter((t) => t.status === 'done').length}
+        failedTasks={tasks.filter((t) => t.status === 'error').length}
+        pendingMainTasks={pendingMainCount}
+        mergeStats={mergeStats}
+        mainSyncStatus={{
+          hasFailure: mainSyncFailureReason !== undefined,
+          failureReason: mainSyncFailureReason,
+        }}
+        failures={runFailures}
+        pendingMainTasksList={pendingMainTasksList}
+        onClose={() => setShowRunSummary(false)}
       />
     </box>
   );
