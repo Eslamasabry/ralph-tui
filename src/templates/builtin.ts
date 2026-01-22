@@ -38,6 +38,10 @@ Complete the task described above.
 
 **IMPORTANT**: If the work is already complete (implemented in a previous iteration or already exists), verify it works correctly and signal completion immediately.
 
+- Do NOT run \`git add .\` or \`git add -A\`. Stage only relevant task files.
+- Do NOT stage or commit \`.ralph-tui/progress.md\` (local-only context file).
+- Do NOT merge, rebase, or push unless explicitly asked.
+
 When finished (or if already complete), signal completion with:
 <promise>COMPLETE</promise>
 `;
@@ -99,9 +103,12 @@ export const BEADS_TEMPLATE = `{{!-- Full PRD for project context (agent studies
 3. Implement the requirements (stay on current branch)
 4. Run your project's quality checks (typecheck, lint, etc.)
 5. Commit: \`feat: {{taskId}} - {{taskTitle}}\`
-6. Close the bead: \`bd close {{taskId}} --db {{beadsDbPath}} --reason "Brief description"\`
-7. Document learnings (see below)
-8. Signal completion
+6. Do NOT run \`git add .\` or \`git add -A\`. Stage only relevant task files.
+7. Do NOT stage or commit \`.ralph-tui/progress.md\` (local-only context file).
+8. Do NOT merge, rebase, or push unless explicitly asked.
+9. Close the bead if a coordinator is NOT managing task status: \`bd close {{taskId}} --db {{beadsDbPath}} --reason "Brief description"\`
+10. Document learnings (see below)
+11. Signal completion
 
 ## Before Completing
 APPEND to \`.ralph-tui/progress.md\`:
@@ -116,6 +123,8 @@ APPEND to \`.ralph-tui/progress.md\`:
 \`\`\`
 
 If you discovered a **reusable pattern**, also add it to the \`## Codebase Patterns\` section at the TOP of progress.md.
+
+Do NOT stage or commit \`.ralph-tui/progress.md\`.
 
 ## Stop Condition
 **IMPORTANT**: If the work is already complete (implemented in a previous iteration or already exists), verify it works correctly and signal completion immediately.
@@ -193,9 +202,12 @@ Completing this task will unblock: {{blocks}}
 3. Implement the requirements (stay on current branch)
 4. Run your project's quality checks (typecheck, lint, etc.)
 5. Commit: \`feat: {{taskId}} - {{taskTitle}}\`
-6. Close the bead: \`bd close {{taskId}} --db {{beadsDbPath}} --reason "Brief description"\`
-7. Document learnings (see below)
-8. Signal completion
+6. Do NOT run \`git add .\` or \`git add -A\`. Stage only relevant task files.
+7. Do NOT stage or commit \`.ralph-tui/progress.md\` (local-only context file).
+8. Do NOT merge, rebase, or push unless explicitly asked.
+9. Close the bead if a coordinator is NOT managing task status: \`bd close {{taskId}} --db {{beadsDbPath}} --reason "Brief description"\`
+10. Document learnings (see below)
+11. Signal completion
 
 ## Before Completing
 APPEND to \`.ralph-tui/progress.md\`:
@@ -210,6 +222,8 @@ APPEND to \`.ralph-tui/progress.md\`:
 \`\`\`
 
 If you discovered a **reusable pattern**, also add it to the \`## Codebase Patterns\` section at the TOP of progress.md.
+
+Do NOT stage or commit \`.ralph-tui/progress.md\`.
 
 ## Stop Condition
 **IMPORTANT**: If the work is already complete (implemented in a previous iteration or already exists), verify it works correctly and signal completion immediately.
@@ -278,8 +292,11 @@ export const JSON_TEMPLATE = `{{!-- Full PRD for project context (agent studies 
 3. Implement this single story following acceptance criteria
 4. Run quality checks: typecheck, lint, etc.
 5. Commit with message: \`feat: {{taskId}} - {{taskTitle}}\`
-6. Document learnings (see below)
-7. Signal completion
+6. Do NOT run \`git add .\` or \`git add -A\`. Stage only relevant task files.
+7. Do NOT stage or commit \`.ralph-tui/progress.md\` (local-only context file).
+8. Do NOT merge, rebase, or push unless explicitly asked.
+9. Document learnings (see below)
+10. Signal completion
 
 ## Before Completing
 APPEND to \`.ralph-tui/progress.md\`:
@@ -294,6 +311,8 @@ APPEND to \`.ralph-tui/progress.md\`:
 \`\`\`
 
 If you discovered a **reusable pattern**, also add it to the \`## Codebase Patterns\` section at the TOP of progress.md.
+
+Do NOT stage or commit \`.ralph-tui/progress.md\`.
 
 ## Stop Condition
 **IMPORTANT**: If the work is already complete (implemented in a previous iteration or already exists), verify it meets the acceptance criteria and signal completion immediately.

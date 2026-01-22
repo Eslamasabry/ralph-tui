@@ -250,6 +250,10 @@ Complete the task described above.
 
 **IMPORTANT**: If the work is already complete, verify it works correctly and signal completion immediately.
 
+- Do NOT run \`git add .\` or \`git add -A\`. Stage only relevant task files.
+- Do NOT stage or commit \`.ralph-tui/progress.md\` (local-only context file).
+- Do NOT merge, rebase, or push unless explicitly asked.
+
 When finished, signal completion with:
 <promise>COMPLETE</promise>
 `;

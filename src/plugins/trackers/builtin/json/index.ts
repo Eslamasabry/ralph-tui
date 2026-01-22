@@ -323,7 +323,10 @@ const FALLBACK_TEMPLATE = `## Your Task: {{taskId}} - {{taskTitle}}
 1. Implement this story following acceptance criteria
 2. Run quality checks
 3. Commit with: \`feat: {{taskId}} - {{taskTitle}}\`
-4. Signal completion with: <promise>COMPLETE</promise>
+4. Do NOT run \`git add .\` or \`git add -A\`. Stage only relevant task files.
+5. Do NOT stage or commit \`.ralph-tui/progress.md\` (local-only context file).
+6. Do NOT merge, rebase, or push unless explicitly asked.
+7. Signal completion with: <promise>COMPLETE</promise>
 `;
 
 /**

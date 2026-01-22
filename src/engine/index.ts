@@ -2159,10 +2159,13 @@ export class ExecutionEngine {
     lines.push('1. Review the changed files above');
     lines.push('2. Commit your changes with an appropriate message');
     lines.push('3. Use the commit format: `<task-id>: <short title>`');
+    lines.push('4. Do NOT run `git add .` or `git add -A`. Stage only relevant task files');
+    lines.push('5. Do NOT stage or commit `.ralph-tui/progress.md` (local-only context file)');
     lines.push('');
     lines.push('## Before Completing');
     lines.push('- Ensure your changes are committed');
     lines.push('- Do NOT run tests or lint unless explicitly asked');
+    lines.push('- Do NOT merge, rebase, or push unless explicitly asked');
     lines.push('');
     lines.push('When finished and changes are committed, output: <promise>COMPLETE</promise>');
 

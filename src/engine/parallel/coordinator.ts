@@ -939,6 +939,8 @@ export class ParallelCoordinator {
       '- If anything is missing, finish it before committing.',
       `- Commit message: "${this.buildCommitMessage(task)}"`,
       '- If no changes are needed, revert to a clean working tree (no commit).',
+      '- You may append to `.ralph-tui/progress.md` for local context, but do NOT stage or commit it.',
+      '- Do NOT run `git add .` or `git add -A`. Stage only relevant task files.',
       '- Do NOT merge, rebase, or push.',
       '- Do NOT switch branches (no `git checkout main`).',
       '- Do NOT run tests or lint unless explicitly asked.',
