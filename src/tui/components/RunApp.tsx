@@ -421,7 +421,6 @@ export function RunApp({
 	const [showRunSummary, setShowRunSummary] = useState(false);
 	// Cleanup action results for run summary (US-005)
 	const [cleanupActionResults, setCleanupActionResults] = useState<Record<string, CleanupActionUiResult>>({});
-	// Streaming parser for live output - extracts readable content and prevents memory bloat
   // Use agentPlugin prop (from resolved config with CLI override) with fallback to storedConfig
   const resolvedAgentName = agentPlugin || storedConfig?.defaultAgent || storedConfig?.agent || 'claude';
   const outputParserRef = useRef(
@@ -3354,11 +3353,9 @@ export function RunApp({
         }}
         failures={runFailures}
         pendingMainTasksList={pendingMainTasksList}
-        cleanupConfig={storedConfig?.cleanup}
-        cleanupActionResults={cleanupActionResults}
-        onCleanupAction={handleCleanupAction}
-        onClose={() => setShowRunSummary(false)}
-      />
+        snapshotTag={snapshotTag ?? undefined}
+        onRestoreSnapshot={handleRestoreSnapshot}
+
     </box>
   );
 }

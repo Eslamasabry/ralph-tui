@@ -1608,6 +1608,14 @@ export class ExecutionEngine {
   }
 
   /**
+   * Get the snapshot tag if one was created (parallel execution only).
+   * Sequential execution does not create snapshots.
+   */
+  getSnapshotTag(): string | null {
+    return null;
+  }
+
+  /**
    * Handle a subagent event from the parser and update engine state.
    */
   private handleSubagentEvent(event: SubagentEvent): void {

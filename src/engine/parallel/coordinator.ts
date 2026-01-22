@@ -41,6 +41,7 @@ export class ParallelCoordinator {
   private mergeBranch = 'parallel/integration';
   private baseBranch = 'main';
   private snapshotCreated = false;
+  private snapshotTag: string | null = null;
 
   constructor(config: RalphConfig, options: ParallelCoordinatorOptions) {
     this.config = config;
@@ -837,7 +838,12 @@ export class ParallelCoordinator {
     }
 
     this.snapshotCreated = true;
+    this.snapshotTag = tagName;
     console.log(`Snapshot created: ${tagName} (${commit.slice(0, 7)})`);
+  }
+
+  getSnapshotTag(): string | null {
+    return this.snapshotTag;
   }
 
   private async getCurrentBranch(): Promise<string> {
