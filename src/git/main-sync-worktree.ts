@@ -208,6 +208,9 @@ export class MainSyncWorktree {
       };
     }
 
+    // Ensure worktree is clean before merge
+    await this.ensureClean();
+
     // Try fast-forward only merge in the worktree
     const mergeResult = await this.execGit([
       '-C', worktreePath,

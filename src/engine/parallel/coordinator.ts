@@ -12,6 +12,7 @@ import { buildParallelPrompt } from './prompt.js';
 import { WorktreeManager } from './worktree-manager.js';
 import { ParallelWorker } from './worker.js';
 import type { ParallelEvent, ParallelTaskResult, CommitMetadata } from './types.js';
+import { MainSyncWorktree } from '../../git/main-sync-worktree.js';
 
 export interface ParallelCoordinatorOptions {
   maxWorkers: number;
@@ -35,6 +36,7 @@ export class ParallelCoordinator {
   private lastMainSyncAttemptAt = 0;
   private pendingMainSyncRetryCount = 0;
   private readonly maxMainSyncRetries = 10;
+  private mainSyncWorktree: MainSyncWorktree | null = null;
   private mergeWorktreePath: string | null = null;
   private mergeBranch = 'parallel/integration';
   private baseBranch = 'main';
@@ -130,6 +132,15 @@ export class ParallelCoordinator {
     }
 
     this.running = true;
+    this.mainSyncWorktree = new MainSyncWorktree({
+      repoRoot: this.config.cwd,
+      mainBranch: this.baseBranch,
+    });
+    try {
+      await this.mainSyncWorktree.create();
+    } catch {
+      // Ignore worktree creation failures; sync will report failures
+    }
     await this.createSnapshotIfNeeded();
     this.emit({ type: 'parallel:started', timestamp: new Date().toISOString(), workerCount: this.workers.length });
 
@@ -205,6 +216,11 @@ export class ParallelCoordinator {
     if (this.mergeWorktreePath) {
       await this.worktreeManager.removeWorktree('merge');
       this.mergeWorktreePath = null;
+    }
+
+    if (this.mainSyncWorktree) {
+      await this.mainSyncWorktree.cleanup();
+      this.mainSyncWorktree = null;
     }
   }
 
@@ -458,35 +474,32 @@ export class ParallelCoordinator {
   }
 
   private async syncMainBranch(): Promise<{ success: boolean; reason?: string; commit?: string }> {
-    const currentBranch = await this.getCurrentBranch();
-    if (currentBranch !== this.baseBranch) {
+    if (!this.mainSyncWorktree) {
+      return { success: false, reason: 'Main sync worktree unavailable.' };
+    }
+
+    const syncResult = await this.mainSyncWorktree.sync();
+    if (!syncResult.success) {
       this.emit({
         type: 'parallel:main-sync-skipped',
         timestamp: new Date().toISOString(),
-        reason: `Current branch is ${currentBranch} (expected ${this.baseBranch}).`,
+        reason: syncResult.error ?? 'Main sync failed',
       });
-      return { success: false, reason: `Current branch is ${currentBranch} (expected ${this.baseBranch}).` };
+      return { success: false, reason: syncResult.error ?? 'Main sync failed' };
     }
 
-    const clean = await this.isRepoClean(this.config.cwd);
-    if (!clean) {
-      this.emit({
-        type: 'parallel:main-sync-skipped',
-        timestamp: new Date().toISOString(),
-        reason: 'Main working tree has uncommitted changes.',
-      });
-      return { success: false, reason: 'Main working tree has uncommitted changes.' };
-    }
-
-    const result = await this.execGitIn(this.config.cwd, ['merge', '--ff-only', this.mergeBranch]);
+    // Now fast-forward repo root to the synced commit (do not rely on current branch/clean state)
+    const result = await this.execGitIn(this.config.cwd, ['merge', '--ff-only', syncResult.currentCommit]);
     if (result.exitCode !== 0) {
+      const reason = result.stderr.trim() || 'merge --ff-only failed';
       this.emit({
         type: 'parallel:main-sync-skipped',
         timestamp: new Date().toISOString(),
-        reason: result.stderr.trim() || 'merge --ff-only failed',
+        reason,
       });
-      return { success: false, reason: result.stderr.trim() || 'merge --ff-only failed' };
+      return { success: false, reason };
     }
+
     const head = await this.execGitIn(this.config.cwd, ['rev-parse', 'HEAD']);
     if (head.exitCode === 0) {
       this.emit({
