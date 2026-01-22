@@ -29,8 +29,8 @@ import { SettingsView } from './SettingsView.js';
 import { EpicLoaderOverlay } from './EpicLoaderOverlay.js';
 import type { EpicLoaderMode } from './EpicLoaderOverlay.js';
 import { SubagentTreePanel } from './SubagentTreePanel.js';
-import { ActivityLog, type ActivityFilter } from './ActivityLog.js';
 import { TabBar } from './TabBar.js';
+import { ViewTabBar } from './ViewTabBar.js';
 import { RemoteConfigView } from './RemoteConfigView.js';
 import type { RemoteConfigData } from './RemoteConfigView.js';
 import { RemoteManagementOverlay } from './RemoteManagementOverlay.js';
@@ -64,17 +64,19 @@ import type { FormattedSegment } from '../../plugins/agents/output-formatting.js
  * - 'tasks': Show the task list (default)
  * - 'iterations': Show the iteration history
  * - 'iteration-detail': Show detailed view of a single iteration
+ * - 'activity': Show activity timeline and log (full view)
+ * - 'logs': Show logs with sub-views (output/cli/prompt)
+ * - 'settings': Show settings view (full view)
  * Note: Task details are now shown inline in the RightPanel, not as a separate view
  */
-type ViewMode = 'tasks' | 'iterations' | 'iteration-detail';
+type ViewMode = 'tasks' | 'iterations' | 'iteration-detail' | 'activity' | 'logs' | 'settings';
 
 /**
  * Focused pane for TAB-based navigation between panels.
  * - 'output': RightPanel output view has keyboard focus (j/k scroll output)
  * - 'subagentTree': SubagentTreePanel has keyboard focus (j/k select nodes)
- * - 'activity': ActivityLog panel has keyboard focus (j/k scroll events)
  */
-type FocusedPane = 'output' | 'subagentTree' | 'activity';
+type FocusedPane = 'output' | 'subagentTree';
 
 /**
  * Props for the RunApp component
@@ -427,10 +429,6 @@ export function RunApp({
   const [detailIteration, setDetailIteration] = useState<IterationResult | null>(null);
   // Help overlay state
   const [showHelp, setShowHelp] = useState(false);
-  // Activity view state (full-screen timeline overlay)
-  const [showActivityView, setShowActivityView] = useState(false);
-  // Settings view state
-  const [showSettings, setShowSettings] = useState(false);
   // Remote config view state
   const [showRemoteConfig, setShowRemoteConfig] = useState(false);
   const [remoteConfigData, setRemoteConfigData] = useState<RemoteConfigData | null>(null);
@@ -495,23 +493,16 @@ export function RunApp({
   // Track if user manually hid the panel (to respect user intent for auto-show logic)
   // When true, auto-show will not override user's explicit hide action
   const [userManuallyHidPanel, setUserManuallyHidPanel] = useState(false);
-  // Activity panel visibility state (toggled with 'L' key)
-  const [activityPanelVisible, setActivityPanelVisible] = useState(false);
-  // Activity filter state (all/tasks/merges)
-  const [activityFilter, setActivityFilter] = useState<ActivityFilter>('all');
-  // Parallel events list for activity log
+  // Parallel events list for activity log (now integrated into Activity view)
   const [parallelEvents, setParallelEvents] = useState<ParallelEvent[]>([]);
-
-  // Focused pane for TAB-based navigation between output and subagent tree
-  // - 'output': j/k scroll output content (default)
-  // - 'subagentTree': j/k select nodes in the tree
-  // - 'activity': j/k scroll activity events
-  const [focusedPane, setFocusedPane] = useState<FocusedPane>('output');
 
   // Selected node in subagent tree for keyboard navigation
   // - currentTaskId (or 'main' if no task): Task root node is selected
   // - string: Subagent ID is selected
   const [selectedSubagentId, setSelectedSubagentId] = useState<string>('main');
+
+  // Focused pane for TAB-based navigation between panels
+  const [focusedPane, setFocusedPane] = useState<FocusedPane>('output');
 
   // Active agent state from engine - tracks which agent is running and why (primary/fallback)
   const [activeAgentState, setActiveAgentState] = useState<ActiveAgentState | null>(null);
@@ -1389,20 +1380,6 @@ export function RunApp({
         return; // Don't process other keys when help is showing
       }
 
-      // When activity view is showing, A or Esc closes it
-      if (showActivityView) {
-        if (key.name === 'a' || key.name === 'escape') {
-          setShowActivityView(false);
-        }
-        return; // Don't process other keys when activity view is showing
-      }
-
-      // When settings view is showing, let it handle its own keyboard events
-      // Closing is handled by SettingsView internally via onClose callback
-      if (showSettings) {
-        return;
-      }
-
       // When remote config view is showing, let it handle its own keyboard events
       // Closing is handled by RemoteConfigView internally via onClose callback
       if (showRemoteConfig) {
@@ -1438,17 +1415,45 @@ export function RunApp({
           break;
 
         case 'tab':
-          // Toggle focus between output, subagent tree, and activity panels
-          // Only works when panels are visible and in output view mode
-          if (detailsViewMode === 'output') {
-            const panes: FocusedPane[] = [];
-            if (true) panes.push('output'); // RightPanel always available
+          // View mode navigation: Tab cycles through view tabs
+          // View tabs: tasks | iterations | activity | logs | settings
+          // Panel navigation: Toggle between output and subagent tree (when in tasks/iterations views)
+          if (viewMode === 'tasks' || viewMode === 'iterations') {
+            const panes: FocusedPane[] = ['output'];
             if (subagentPanelVisible) panes.push('subagentTree');
-            if (activityPanelVisible) panes.push('activity');
             if (panes.length > 1) {
               const currentIdx = panes.indexOf(focusedPane);
               const nextIdx = (currentIdx + 1) % panes.length;
               setFocusedPane(panes[nextIdx]!);
+            }
+          } else {
+            // Cycle through view tabs
+            const viewModes: ViewMode[] = ['tasks', 'iterations', 'activity', 'logs', 'settings'];
+            const currentIdx = viewModes.indexOf(viewMode);
+            if (currentIdx !== -1) {
+              const nextIdx = (currentIdx + 1) % viewModes.length;
+              setViewMode(viewModes[nextIdx]);
+            }
+          }
+          break;
+
+        case 'shift-tab':
+          // Shift+Tab cycles through view tabs in reverse direction
+          if (viewMode === 'tasks' || viewMode === 'iterations') {
+            const panes: FocusedPane[] = ['output'];
+            if (subagentPanelVisible) panes.push('subagentTree');
+            if (panes.length > 1) {
+              const currentIdx = panes.indexOf(focusedPane);
+              const prevIdx = (currentIdx - 1 + panes.length) % panes.length;
+              setFocusedPane(panes[prevIdx]!);
+            }
+          } else {
+            // Cycle through view tabs in reverse
+            const viewModes: ViewMode[] = ['tasks', 'iterations', 'activity', 'logs', 'settings'];
+            const currentIdx = viewModes.indexOf(viewMode);
+            if (currentIdx !== -1) {
+              const prevIdx = (currentIdx - 1 + viewModes.length) % viewModes.length;
+              setViewMode(viewModes[prevIdx]);
             }
           }
           break;
@@ -1523,20 +1528,7 @@ export function RunApp({
         // Note: 'c' / Ctrl+C is intentionally NOT handled here.
         // Ctrl+C and Ctrl+Shift+C send the same sequence (\x03) in most terminals,
         // so we can't distinguish between "stop" and "copy". Users should use 'q' to quit.
-
-        case 'v':
-          // Shift+V toggles tasks/iterations view
-          if (key.sequence === 'V') {
-            if (viewMode !== 'iteration-detail') {
-              setViewMode((prev) => (prev === 'tasks' ? 'iterations' : 'tasks'));
-            }
-            break;
-          }
-
-          // lowercase 'v' toggles CLI log view in right panel
-          setDetailsViewMode((prev) => (prev === 'cli' ? 'output' : 'cli'));
-          break;
-
+ 
         case 'd':
           // Toggle dashboard visibility
           setShowDashboard((prev) => !prev);
@@ -1623,12 +1615,10 @@ export function RunApp({
           break;
 
         case ',':
-          // Open settings view (comma key, like many text editors)
-          if (storedConfig && onSaveSettings) {
-            setShowSettings(true);
-          }
+          // Switch to settings view (comma key, like many text editors)
+          setViewMode('settings');
           break;
-
+ 
         case 'c':
           // Shift+C: Show config viewer (read-only) for both local and remote
           if (key.sequence === 'C') {
@@ -1723,25 +1713,6 @@ export function RunApp({
           }
           break;
 
-        case 'o':
-          // Cycle through details/output/prompt views in the right panel
-          // Check if Shift+O (uppercase) - direct jump to prompt preview
-          if (key.sequence === 'O') {
-            // Shift+O: Jump directly to prompt view
-            // The effect handles generating the preview when detailsViewMode changes
-            setDetailsViewMode('prompt');
-          } else {
-            // lowercase 'o': Cycle through views
-            // The effect handles generating the preview when detailsViewMode changes to 'prompt'
-            setDetailsViewMode((prev) => {
-              const modes: DetailsViewMode[] = ['details', 'output', 'cli', 'prompt'];
-              const currentIdx = modes.indexOf(prev);
-              const nextIdx = (currentIdx + 1) % modes.length;
-              return modes[nextIdx]!;
-            });
-          }
-          break;
-
         case 't':
           // Check if Shift+T (uppercase) - toggle subagent tree panel
           // key.sequence contains the actual character ('T' for Shift+T, 't' for plain t)
@@ -1791,32 +1762,7 @@ export function RunApp({
             });
           }
           break;
-
-        case 'l':
-          // Toggle activity panel visibility
-          setActivityPanelVisible((prev) => !prev);
-          break;
-
-        // Activity filter keys: 1 = all, 2 = tasks, 3 = merges
-        // Only active when activity panel is visible
-        case '1':
-          if (activityPanelVisible) {
-            setActivityFilter('all');
-          }
-          break;
-
-        case '2':
-          if (activityPanelVisible) {
-            setActivityFilter('tasks');
-          }
-          break;
-
-        case '3':
-          if (activityPanelVisible) {
-            setActivityFilter('merges');
-          }
-          break;
-
+ 
         case 'return':
         case 'enter':
           // Enter drills into iteration details (does NOT start execution - use 's' for that)
@@ -1864,12 +1810,8 @@ export function RunApp({
           }
           break;
 
-        // Remote management: 'a' to add new remote (Shift+A toggles Activity view)
+        // Remote management: 'a' to add new remote
         case 'a':
-          if (key.shift) {
-            setShowActivityView((prev) => !prev);
-            break;
-          }
           // Open add remote overlay
           setRemoteManagementMode('add');
           setEditingRemote(undefined);
@@ -1927,7 +1869,7 @@ export function RunApp({
           break;
       }
     },
-    [displayedTasks, selectedIndex, status, engine, onQuit, viewMode, iterations, iterationSelectedIndex, iterationHistoryLength, onIterationDrillDown, showInterruptDialog, onInterruptConfirm, onInterruptCancel, showHelp, showActivityView, showSettings, showQuitDialog, showEpicLoader, showRemoteManagement, onStart, storedConfig, onSaveSettings, onLoadEpics, subagentDetailLevel, onSubagentPanelVisibilityChange, currentIteration, maxIterations, renderer, detailsViewMode, subagentPanelVisible, focusedPane, navigateSubagentTree, instanceTabs, selectedTabIndex, onSelectTab, isViewingRemote, displayStatus, instanceManager]
+    [displayedTasks, selectedIndex, status, engine, onQuit, viewMode, iterations, iterationSelectedIndex, iterationHistoryLength, onIterationDrillDown, showInterruptDialog, onInterruptConfirm, onInterruptCancel, showHelp, showQuitDialog, showEpicLoader, showRemoteManagement, onStart, storedConfig, onSaveSettings, onLoadEpics, subagentDetailLevel, onSubagentPanelVisibilityChange, currentIteration, maxIterations, renderer, detailsViewMode, subagentPanelVisible, focusedPane, navigateSubagentTree, instanceTabs, selectedTabIndex, onSelectTab, isViewingRemote, displayStatus, instanceManager]
   );
 
   useKeyboard(handleKeyboard);
@@ -2479,6 +2421,18 @@ export function RunApp({
         />
       )}
 
+      {/* View Tab Bar - view navigation (Tasks | Iterations | Activity | Logs | Settings) */}
+      <ViewTabBar
+        currentView={viewMode}
+        views={[
+          { id: 'tasks', label: 'Tasks' },
+          { id: 'iterations', label: 'Iterations' },
+          { id: 'activity', label: 'Activity' },
+          { id: 'logs', label: 'Logs' },
+          { id: 'settings', label: 'Settings' },
+        ]}
+      />
+
       {/* Header - compact design showing essential info + agent/tracker + fallback status */}
       <Header
         status={displayStatus}
@@ -2538,7 +2492,7 @@ export function RunApp({
       {/* Main content area */}
       <box
         style={{
-          flexGrow: 1,
+          flexGrow:1,
           flexDirection: isCompact || viewMode === 'tasks' ? 'column' : 'row',
           height: contentHeight,
         }}
@@ -2558,6 +2512,110 @@ export function RunApp({
             sandboxConfig={sandboxConfig}
             resolvedSandboxMode={resolvedSandboxMode}
             historicContext={iterationDetailHistoricContext}
+          />
+        ) : viewMode === 'activity' ? (
+          // Activity view - timeline + activity log integrated
+          <ActivityView
+            currentIteration={currentIteration}
+            maxIterations={maxIterations}
+            currentTaskId={currentTaskId}
+            currentTaskTitle={currentTaskTitle}
+            currentStatus={iterations.find(i => i.iteration === currentIteration)?.status ?? (status === 'running' || status === 'executing' ? 'running' : undefined)}
+            currentStartedAt={currentIterationStartedAt}
+            currentDurationMs={iterations.find(i => i.iteration === currentIteration)?.durationMs}
+            elapsedTime={elapsedTime}
+            isExecuting={status === 'running' || status === 'executing'}
+            subagentTree={subagentTree}
+            subagentStats={subagentStatsCache.get(currentIteration)}
+            iterations={iterations}
+          />
+        ) : viewMode === 'logs' ? (
+          // Logs view - Output/CLI/Prompt sub-views
+          <box style={{ flexDirection: 'column', flexGrow: 1, height: '100%' }}>
+            <box
+              style={{
+                flexGrow: 1,
+                flexShrink: 1,
+                border: true,
+                borderColor: colors.border.normal,
+                backgroundColor: colors.bg.primary,
+              }}
+            >
+              {/* Log sub-views header */}
+              <box
+                style={{
+                  padding: 1,
+                  backgroundColor: colors.bg.secondary,
+                  borderBottom: true,
+                  borderColor: colors.border.muted,
+                }}
+              >
+                <text fg={colors.fg.secondary}>
+                  <span fg={detailsViewMode === 'output' ? colors.accent.primary : colors.fg.muted}>1</span>
+                  <span fg={colors.fg.muted}> Output</span>
+                  {' | '}
+                  <span fg={detailsViewMode === 'cli' ? colors.accent.primary : colors.fg.muted}>2</span>
+                  <span fg={detailsViewMode === 'cli' ? colors.fg.primary : colors.fg.muted}> CLI</span>
+                  {' | '}
+                  <span fg={detailsViewMode === 'prompt' ? colors.accent.primary : colors.fg.muted}>3</span>
+                  <span fg={detailsViewMode === 'prompt' ? colors.fg.primary : colors.fg.muted}> Prompt</span>
+                </text>
+              </box>
+
+              {/* Log content */}
+              <box style={{ flexGrow: 1, height: '100%' }}>
+                {detailsViewMode === 'output' && (
+                  <LogPane
+                    taskTitle={selectedTask?.title}
+                    taskId={selectedTask?.id}
+                    currentIteration={selectedTaskIteration.iteration}
+                    iterationOutput={displayIterationOutput}
+                    iterationTiming={selectedTaskIteration.timing}
+                    agentName={displayAgentInfo.agent}
+                    currentModel={displayAgentInfo.model}
+                  />
+                )}
+                {detailsViewMode === 'cli' && (
+                  <LogPane
+                    taskTitle={selectedTask?.title}
+                    taskId={selectedTask?.id}
+                    currentIteration={selectedTaskIteration.iteration}
+                    iterationOutput={displayCliOutput}
+                    iterationTiming={selectedTaskIteration.timing}
+                    agentName={displayAgentInfo.agent}
+                    currentModel={displayAgentInfo.model}
+                  />
+                )}
+                {detailsViewMode === 'prompt' && selectedTask && (
+                  <RightPanel
+                    selectedTask={selectedTask}
+                    currentIteration={selectedTaskIteration.iteration}
+                    iterationOutput={displayIterationOutput}
+                    iterationSegments={selectedTaskIteration.segments}
+                    cliOutput={displayCliOutput}
+                    viewMode='prompt'
+                    iterationTiming={selectedTaskIteration.timing}
+                    agentName={displayAgentInfo.agent}
+                    currentModel={displayAgentInfo.model}
+                    promptPreview={promptPreview}
+                    templateSource={templateSource}
+                    isViewingRemote={isViewingRemote}
+                    remoteConnectionStatus={instanceTabs?.[selectedTabIndex]?.status}
+                    remoteAlias={instanceTabs?.[selectedTabIndex]?.alias}
+                  />
+                )}
+              </box>
+            </box>
+          </box>
+        ) : viewMode === 'settings' && storedConfig ? (
+          // Settings view - now part of main view (not overlay)
+          <SettingsView
+            visible={true}
+            config={storedConfig}
+            agents={availableAgents}
+            trackers={availableTrackers}
+            onSave={onSaveSettings}
+            onClose={() => setViewMode('tasks')}
           />
         ) : viewMode === 'tasks' ? (
           <>
@@ -2630,16 +2688,6 @@ export function RunApp({
                 selectedId={selectedSubagentId}
                 onSelect={setSelectedSubagentId}
                 isFocused={focusedPane === 'subagentTree'}
-              />
-            )}
-
-            {/* Activity Log Panel - shown on right side when toggled with 'L' key */}
-            {activityPanelVisible && (
-              <ActivityLog
-                events={parallelEvents}
-                filter={activityFilter}
-                width={50}
-                isFocused={focusedPane === 'activity'}
               />
             )}
           </>
@@ -2773,37 +2821,7 @@ export function RunApp({
 
       {/* Help Overlay */}
       <HelpOverlay visible={showHelp} />
-
-      {/* Activity View (full-screen timeline) */}
-      <ActivityView
-        visible={showActivityView}
-        onClose={() => setShowActivityView(false)}
-        currentIteration={currentIteration}
-        maxIterations={maxIterations}
-        currentTaskId={currentTaskId}
-        currentTaskTitle={currentTaskTitle}
-        currentStatus={iterations.find(i => i.iteration === currentIteration)?.status ?? (status === 'running' || status === 'executing' ? 'running' : undefined)}
-        currentStartedAt={currentIterationStartedAt}
-        currentDurationMs={iterations.find(i => i.iteration === currentIteration)?.durationMs}
-        elapsedTime={elapsedTime}
-        isExecuting={status === 'running' || status === 'executing'}
-        subagentTree={subagentTree}
-        subagentStats={subagentStatsCache.get(currentIteration)}
-        iterations={iterations}
-      />
-
-      {/* Settings View */}
-      {storedConfig && onSaveSettings && (
-        <SettingsView
-          visible={showSettings}
-          config={storedConfig}
-          agents={availableAgents}
-          trackers={availableTrackers}
-          onSave={onSaveSettings}
-          onClose={() => setShowSettings(false)}
-        />
-      )}
-
+ 
       {/* Remote Config View */}
       <RemoteConfigView
         visible={showRemoteConfig}

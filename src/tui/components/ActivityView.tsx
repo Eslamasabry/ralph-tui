@@ -5,8 +5,7 @@
  */
 
 import type { ReactNode } from 'react';
-import { useMemo, useCallback } from 'react';
-import { useKeyboard } from '@opentui/react';
+import { useMemo } from 'react';
 import { colors, formatElapsedTime } from '../theme.js';
 import type { IterationResult, IterationStatus, EngineSubagentStatus } from '../../engine/types.js';
 import type { SubagentTreeNode } from '../../engine/types.js';
@@ -46,10 +45,6 @@ export interface ActivityMetrics {
  * Props for the ActivityView component
  */
 export interface ActivityViewProps {
-  /** Whether the activity view is visible */
-  visible: boolean;
-  /** Callback when activity view should be closed */
-  onClose: () => void;
   /** Current iteration number */
   currentIteration: number;
   /** Maximum iterations (0 = unlimited) */
@@ -485,11 +480,9 @@ function mapActivityEventType(eventType: string): TimelineEventDisplay['type'] {
 }
 
 /**
- * ActivityView component - full-screen overlay showing real-time timeline
+ * ActivityView component - view tab showing real-time timeline
  */
 export function ActivityView({
-  visible,
-  onClose,
   currentIteration,
   maxIterations,
   currentTaskId,
@@ -506,16 +499,6 @@ export function ActivityView({
   timelineEvents = [],
   activityMetrics: providedMetrics,
 }: ActivityViewProps): ReactNode {
-  if (!visible) return null;
-
-  // Keyboard handler for closing the view
-  useKeyboard(
-    useCallback((key: { name: string }) => {
-      if (key.name === 'escape' || key.name === 'A') {
-        onClose();
-      }
-    }, [onClose])
-  );
 
   // Build current activity events (fallback if no real events provided)
   const currentEvents = useMemo(
@@ -602,16 +585,11 @@ export function ActivityView({
 
   return (
     <box
-      title="Activity View [Press 'A' or Esc to toggle]"
       style={{
-        position: 'absolute',
-        top: 0,
-        left: 0,
         width: '100%',
         height: '100%',
         flexDirection: 'column',
         backgroundColor: colors.bg.primary,
-        zIndex: 1000,
       }}
     >
       {/* Header */}
@@ -626,13 +604,6 @@ export function ActivityView({
       >
         <box>
           <text fg={colors.accent.primary}>═══ Activity View ═══</text>
-        </box>
-        <box>
-          <text fg={colors.fg.muted}>Press </text>
-          <text fg={colors.fg.secondary}>Esc</text>
-          <text fg={colors.fg.muted}> or </text>
-          <text fg={colors.fg.secondary}>A</text>
-          <text fg={colors.fg.muted}> to toggle</text>
         </box>
       </box>
 
@@ -811,12 +782,6 @@ export function ActivityView({
           </box>
         )}
 
-        {/* Footer hint */}
-        <box style={{ marginTop: 1 }}>
-          <text fg={colors.fg.dim}>
-            Press 'A' or Esc to toggle this view
-          </text>
-        </box>
       </scrollbox>
     </box>
   );
