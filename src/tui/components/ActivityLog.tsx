@@ -186,7 +186,13 @@ function formatEventDescription(event: ParallelEvent): string {
     case 'parallel:merge-succeeded':
       return `${event.commit.slice(0, 7)} ${event.resolved ? '(resolved)' : ''}`;
     case 'parallel:merge-failed':
-      return `${event.commit.slice(0, 7)}: ${event.reason}`;
+      // Extract task ID and first line of reason for compact display
+      const firstLine = event.reason.split('\n')[0] || '';
+      const taskMatch = firstLine.match(/Task:\s*(\S+)/);
+      const reasonMatch = firstLine.match(/Reason:\s*(.+)/);
+      const taskId = taskMatch ? taskMatch[1] : event.task.id;
+      const reason = reasonMatch ? reasonMatch[1] : firstLine;
+      return `${event.commit.slice(0, 7)} [${taskId}]: ${reason}`;
     case 'parallel:main-sync-skipped':
       return event.reason;
     case 'parallel:main-sync-succeeded':
