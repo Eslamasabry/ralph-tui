@@ -19,6 +19,21 @@ export interface WorktreeManagerOptions {
   worktreesDir?: string;
 }
 
+export interface WorktreeInfo {
+  path: string;
+  branch: string;
+  commit: string;
+  isLocked: boolean;
+  lockReason?: string;
+}
+
+export interface WorktreeCounts {
+  total: number;
+  active: number;
+  locked: number;
+  stale: number;
+}
+
 export interface CreateWorktreeOptions {
   workerId: string;
   branchName: string;
@@ -209,6 +224,7 @@ export class WorktreeManager {
   }
 
 // OURS:
+// OURS:
 <<<<<<< HEAD
 // THEIRS:
   /**
@@ -218,10 +234,14 @@ export class WorktreeManager {
   async listWorktrees(): Promise<WorktreeStatus[]> {
     const { stdout, exitCode } = await this.execGit(['-C', this.repoRoot, 'worktree', 'list', '--porcelain']);
 
+// THEIRS:
+  async listWorktrees(): Promise<WorktreeInfo[]> {
+    const { stdout, exitCode } = await this.execGit(['-C', this.repoRoot, 'worktree', 'list', '--porcelain']); (feat: ralph-tui-wmr.5 - Add worktree health status to dashboard)
     if (exitCode !== 0) {
       return [];
     }
 
+<<<<<<< HEAD
     const worktrees: WorktreeStatus[] = [];
     const lines = stdout.trim().split('\n').filter(Boolean);
 
@@ -277,11 +297,36 @@ export class WorktreeManager {
     // Push the last worktree if exists
     if (currentWorktree) {
       worktrees.push(await this.createWorktreeStatus(currentWorktree));
+=======
+    const worktrees: WorktreeInfo[] = [];
+    const lines = stdout.trim().split('\n');
+    let currentWorktree: Partial<WorktreeInfo> = {};
+
+    for (const line of lines) {
+      if (line.startsWith('worktree ')) {
+        if (currentWorktree.path) {
+          worktrees.push(currentWorktree as WorktreeInfo);
+        }
+        currentWorktree = { path: line.substring('worktree '.length) };
+      } else if (line.startsWith('HEAD ')) {
+        currentWorktree.commit = line.substring('HEAD '.length);
+      } else if (line.startsWith('branch ')) {
+        currentWorktree.branch = line.substring('branch refs/heads/'.length);
+      } else if (line.startsWith('locked ')) {
+        currentWorktree.isLocked = true;
+        currentWorktree.lockReason = line.substring('locked '.length);
+      }
+    }
+
+    if (currentWorktree.path) {
+      worktrees.push(currentWorktree as WorktreeInfo);
+>>>>>>> 1dbe439 (feat: ralph-tui-wmr.5 - Add worktree health status to dashboard)
     }
 
     return worktrees;
   }
 
+<<<<<<< HEAD
   /**
     * Create a WorktreeStatus object with computed health status.
     */
@@ -346,6 +391,72 @@ export class WorktreeManager {
     return summary;
   }
  (ralph-tui-wmr.5: task)
+=======
+  async getWorktreeCounts(): Promise<WorktreeCounts> {
+    const worktrees = await this.listWorktrees();
+
+    let active = 0;
+    let locked = 0;
+
+    for (const wt of worktrees) {
+      if (wt.path === this.repoRoot) {
+        continue;
+      }
+      active++;
+      if (wt.isLocked) {
+        locked++;
+      }
+    }
+
+    const stale = await this.getStaleWorktreeCount();
+
+    return {
+      total: active,
+      active,
+      locked,
+      stale,
+    };
+  }
+
+  private async getStaleWorktreeCount(): Promise<number> {
+    try {
+      const { stdout, exitCode } = await this.execGit(['-C', this.repoRoot, 'worktree', 'list', '--porcelain']);
+      if (exitCode !== 0) {
+        return 0;
+      }
+
+      let staleCount = 0;
+      const lines = stdout.trim().split('\n');
+      let currentPath = '';
+
+      for (const line of lines) {
+        if (line.startsWith('worktree ')) {
+          currentPath = line.substring('worktree '.length);
+        } else if (line.length === 0 && currentPath) {
+          try {
+            await access(currentPath);
+          } catch {
+            staleCount++;
+          }
+          currentPath = '';
+        }
+      }
+
+      if (currentPath) {
+        try {
+          await access(currentPath);
+        } catch {
+          staleCount++;
+        }
+      }
+
+      return staleCount;
+    } catch {
+      return 0;
+    }
+  }
+
+>>>>>>> 1dbe439 (feat: ralph-tui-wmr.5 - Add worktree health status to dashboard)
   private async branchExists(branchName: string): Promise<boolean> {
     const result = await this.execGit(['-C', this.repoRoot, 'rev-parse', '--verify', `refs/heads/${branchName}`]);
     return result.exitCode === 0;

@@ -50,6 +50,7 @@ import type {
   TrackerRealtimeStatus,
 } from '../../engine/types.js';
 import type { ParallelEvent } from '../../engine/parallel/types.js';
+import { WorktreeManager } from '../../engine/parallel/worktree-manager.js';
 import type { TrackerTask } from '../../plugins/trackers/types.js';
 import type { StoredConfig, SubagentDetailLevel, SandboxConfig, SandboxMode } from '../../config/types.js';
 import type { AgentPluginMeta } from '../../plugins/agents/types.js';
@@ -411,6 +412,7 @@ export function RunApp({
     failed: 0,
     syncPending: 0,
   });
+// OURS:
   // Worktree health counts for pruning UI
   const [worktreeHealthSummary, setWorktreeHealthSummary] = useState<{
     total: number;
@@ -427,6 +429,9 @@ export function RunApp({
   });
   // Prune operation in progress
   const [pruning, setPruning] = useState(false);
+// THEIRS:
+  // Worktree health counts
+  const [worktreeCounts, setWorktreeCounts] = useState({ active: 0, locked: 0, stale: 0 }); (feat: ralph-tui-wmr.5 - Add worktree health status to dashboard)
   // Pending main sync count for delivery guarantee visibility
   const [pendingMainCount, setPendingMainCount] = useState(0);
   // List of failures for run summary (US-002)
@@ -605,6 +610,53 @@ export function RunApp({
       subagentTreeFlushRef.current = null;
     }, 150);
   }, []);
+
+  const fetchWorktreeCounts = useCallback(async () => {
+    try {
+      const manager = new WorktreeManager({ repoRoot: cwd });
+      const counts = await manager.getWorktreeCounts();
+      setWorktreeCounts({ active: counts.active, locked: counts.locked, stale: counts.stale });
+    } catch {
+      // Silently fail - worktree counting is not critical
+    }
+  }, [cwd]);
+
+  const handleManualPrune = useCallback(async () => {
+    if (!showDashboard) {
+      return;
+    }
+
+    try {
+      const { pruneWorktrees } = await import('../../cleanup/index.js');
+      const result = await pruneWorktrees(cwd);
+      if (result.success) {
+        appendActivityEvent({
+          category: 'system',
+          eventType: 'completed',
+          timestamp: new Date().toISOString(),
+          severity: 'info',
+          description: 'Worktrees pruned successfully',
+        });
+      } else {
+        appendActivityEvent({
+          category: 'system',
+          eventType: 'failed',
+          timestamp: new Date().toISOString(),
+          severity: 'warning',
+          description: `Prune failed: ${result.error}`,
+        });
+      }
+      await fetchWorktreeCounts();
+    } catch (error) {
+      appendActivityEvent({
+        category: 'system',
+        eventType: 'failed',
+        timestamp: new Date().toISOString(),
+        severity: 'error',
+        description: `Prune error: ${error instanceof Error ? error.message : 'unknown error'}`,
+      });
+    }
+  }, [cwd, showDashboard, fetchWorktreeCounts, appendActivityEvent]);
 
   useEffect(() => {
     return () => {
@@ -1651,6 +1703,17 @@ export function RunApp({
     return () => clearInterval(interval);
   }, [status]);
 
+  // Periodically refresh worktree counts when dashboard is visible
+  useEffect(() => {
+    if (!showDashboard) {
+      return;
+    }
+
+    fetchWorktreeCounts();
+    const interval = setInterval(fetchWorktreeCounts, 5000);
+    return () => clearInterval(interval);
+  }, [showDashboard, fetchWorktreeCounts]);
+
   // Get initial state from engine
   useEffect(() => {
     const state = engine.getState();
@@ -2016,6 +2079,13 @@ export function RunApp({
         case 'd':
           // Toggle dashboard visibility
           setShowDashboard((prev) => !prev);
+          break;
+
+        case 'x':
+          // Manual prune - only when dashboard is visible
+          if (showDashboard) {
+            handleManualPrune();
+          }
           break;
 
         case 'h':
@@ -2992,11 +3062,15 @@ export function RunApp({
           autoCommit={isViewingRemote ? remoteAutoCommit : storedConfig?.autoCommit}
           gitInfo={isViewingRemote ? remoteGitInfo : localGitInfo}
           pendingMainCount={pendingMainCount}
+<<<<<<< HEAD
           worktreeHealth={{
             stale: worktreeHealthSummary.stale,
             prunable: worktreeHealthSummary.prunable,
           }}
           pruning={pruning}
+=======
+          onManualPrune={handleManualPrune}
+>>>>>>> 1dbe439 (feat: ralph-tui-wmr.5 - Add worktree health status to dashboard)
         />
       )}
 
@@ -3152,12 +3226,17 @@ export function RunApp({
                 completedTasks={taskCounts.completed}
                 failedTasks={taskCounts.failed}
                 worktreeCount={mergeStats.worktrees}
+<<<<<<< HEAD
                 worktreeActive={worktreeHealthSummary.active}
                 worktreeLocked={worktreeHealthSummary.locked}
                 worktreeStale={worktreeHealthSummary.stale}
+=======
+                activeWorktrees={worktreeCounts.active}
+                lockedWorktrees={worktreeCounts.locked}
+                staleWorktrees={worktreeCounts.stale}
+>>>>>>> 1dbe439 (feat: ralph-tui-wmr.5 - Add worktree health status to dashboard)
                 mergesQueued={mergeStats.queued}
                 mergesSucceeded={mergeStats.merged}
-                mergesResolved={mergeStats.resolved}
                 mergesFailed={mergeStats.failed}
                 mainSyncPending={mergeStats.syncPending}
                 appVersion={appVersion}
