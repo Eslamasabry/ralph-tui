@@ -622,7 +622,13 @@ export class ParallelCoordinator {
     if (clean) {
       const result = await this.execGitIn(this.config.cwd, ['merge', '--ff-only', commit]);
       if (result.exitCode !== 0) {
-        return { success: false, reason: result.stderr.trim() || 'merge --ff-only failed' };
+        // Fast-forward failed - reset main branch to integration commit
+        console.warn('Fast-forward merge failed, resetting main branch to integration commit');
+        const resetResult = await this.execGitIn(this.config.cwd, ['reset', '--hard', commit]);
+        if (resetResult.exitCode !== 0) {
+          return { success: false, reason: resetResult.stderr.trim() || 'Failed to reset main branch' };
+        }
+        return { success: true };
       }
       return { success: true };
     }
@@ -639,10 +645,15 @@ export class ParallelCoordinator {
 
     const mergeResult = await this.execGitIn(this.config.cwd, ['merge', '--ff-only', commit]);
     if (mergeResult.exitCode !== 0) {
-      if (stashRef) {
-        await this.execGitIn(this.config.cwd, ['stash', 'apply', stashRef]);
+      // Fast-forward failed - reset main branch to integration commit
+      console.warn('Fast-forward merge failed, resetting main branch to integration commit');
+      const resetResult = await this.execGitIn(this.config.cwd, ['reset', '--hard', commit]);
+      if (resetResult.exitCode !== 0) {
+        if (stashRef) {
+          await this.execGitIn(this.config.cwd, ['stash', 'apply', stashRef]);
+        }
+        return { success: false, reason: resetResult.stderr.trim() || 'Failed to reset main branch' };
       }
-      return { success: false, reason: mergeResult.stderr.trim() || 'merge --ff-only failed' };
     }
 
     if (stashRef) {
