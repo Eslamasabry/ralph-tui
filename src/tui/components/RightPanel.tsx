@@ -679,10 +679,11 @@ function TaskOutputView({
                     </box>
                   );
                 }
+                // Always return a box for consistency to avoid TextNodeRenderable issues
                 return (
-                  <text key={i} fg={colors.fg.secondary}>
-                    {line}
-                  </text>
+                  <box key={i} style={{ flexDirection: 'row' }}>
+                    <text fg={colors.fg.secondary}>{line}</text>
+                  </box>
                 );
               })}
             </box>
