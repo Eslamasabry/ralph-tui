@@ -5,7 +5,10 @@
  */
 
 import type { ReactNode } from 'react';
+// OURS:
 import { colors, keyboardShortcuts, layout, statusIndicators } from '../theme.js';
+// THEIRS:
+import { getColors, keyboardShortcuts, layout } from '../theme.js'; (ralph-tui-5no.1: US-001: Header Component Facelift)
 
 /**
  * Version info from package.json
@@ -103,6 +106,15 @@ function renderGroupedShortcuts(): ReactNode {
  * Footer component showing keyboard shortcuts, version info, and system status
  */
 export function Footer(): ReactNode {
+<<<<<<< HEAD
+=======
+  const colors = getColors();
+  // Format keyboard shortcuts as a single string
+  const shortcutText = keyboardShortcuts
+    .map(({ key, description }) => `${key}:${description}`)
+    .join('  ');
+
+>>>>>>> 5976c14 (ralph-tui-5no.1: US-001: Header Component Facelift)
   return (
     <box
       style={{
