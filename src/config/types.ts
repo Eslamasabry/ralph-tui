@@ -279,6 +279,9 @@ export interface StoredConfig {
 
   /** Cleanup configuration for post-run cleanup actions */
   cleanup?: CleanupConfig;
+
+  /** Timeout in minutes after which a lock is considered stale (default: 30) */
+  staleLockTimeoutMinutes?: number;
 }
 
 /**

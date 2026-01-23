@@ -201,6 +201,9 @@ export const StoredConfigSchema = z
 
     // Cleanup configuration
     cleanup: CleanupConfigSchema.optional(),
+
+    /** Timeout in minutes after which a lock is considered stale (default: 30) */
+    staleLockTimeoutMinutes: z.number().int().min(1).max(1440).optional(),
   })
   .strict();
 

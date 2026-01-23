@@ -25,6 +25,17 @@ const SESSION_DIR = '.ralph-tui';
 const LOCK_FILE = 'ralph.lock';
 
 /**
+ * Default timeout in minutes after which a lock is considered stale
+ * if the process is no longer running.
+ */
+export const DEFAULT_STALE_LOCK_TIMEOUT_MINUTES = 30;
+
+/**
+ * Default interval in seconds for periodic stale lock checks
+ */
+const DEFAULT_STALE_LOCK_CHECK_INTERVAL_SECONDS = 60;
+
+/**
  * Result of checking the lock status
  */
 export interface LockCheckResult {
@@ -62,6 +73,24 @@ function isProcessRunning(pid: number): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Check if a lock is stale based on timestamp.
+ * A lock is stale if it's older than the specified timeout.
+ *
+ * @param lock The lock file contents
+ * @param timeoutMinutes Timeout in minutes (default: 30)
+ * @returns true if the lock is stale based on timestamp
+ */
+export function isLockStaleByTimestamp(
+  lock: LockFile,
+  timeoutMinutes: number = DEFAULT_STALE_LOCK_TIMEOUT_MINUTES
+): boolean {
+  const acquiredAt = new Date(lock.acquiredAt);
+  const now = new Date();
+  const ageMinutes = (now.getTime() - acquiredAt.getTime()) / (1000 * 60);
+  return ageMinutes >= timeoutMinutes;
 }
 
 /**
@@ -192,6 +221,88 @@ A previous Ralph session did not exit cleanly:
 
 This may happen if Ralph was terminated unexpectedly (crash, kill -9, etc.).
 `;
+}
+
+/**
+ * Result of a periodic stale lock check
+ */
+export interface PeriodicStaleLockCheckResult {
+  /** Whether a stale lock was found and cleaned */
+  cleaned: boolean;
+
+  /** The PID of the cleaned lock, if any */
+  cleanedPid?: number;
+
+  /** The lock file contents if a stale lock was found (before cleanup) */
+  staleLock?: LockFile;
+}
+
+/**
+ * Check for stale locks and clean them if found.
+ * This is intended to be called periodically during a running session.
+ *
+ * @param cwd Working directory
+ * @param timeoutMinutes Timeout in minutes after which a lock is considered stale
+ * @returns Result indicating if a stale lock was cleaned
+ */
+export async function checkAndCleanStaleLock(
+  cwd: string,
+  timeoutMinutes: number = DEFAULT_STALE_LOCK_TIMEOUT_MINUTES
+): Promise<PeriodicStaleLockCheckResult> {
+  const result: PeriodicStaleLockCheckResult = { cleaned: false };
+
+  const lockStatus = await checkLock(cwd);
+
+  // No lock exists
+  if (!lockStatus.lock) {
+    return result;
+  }
+
+  // Check if process is running
+  const processRunning = isProcessRunning(lockStatus.lock.pid);
+
+  // Lock is stale if process is not running OR if it's older than timeout
+  const isStaleByProcess = !processRunning;
+  const isStaleByTimestamp = isLockStaleByTimestamp(lockStatus.lock, timeoutMinutes);
+
+  if (isStaleByProcess || isStaleByTimestamp) {
+    // Clean the stale lock
+    await deleteLockFile(cwd);
+    result.cleaned = true;
+    result.cleanedPid = lockStatus.lock.pid;
+    result.staleLock = lockStatus.lock;
+
+    console.log(
+      `[session/lock] Cleaned stale lock (PID: ${lockStatus.lock.pid}, ` +
+        `processRunning: ${processRunning}, ageStale: ${isStaleByTimestamp})`
+    );
+  }
+
+  return result;
+}
+
+/**
+ * Start periodic stale lock checking.
+ * Returns a cleanup function to stop the interval.
+ *
+ * @param cwd Working directory
+ * @param timeoutMinutes Timeout in minutes after which a lock is considered stale
+ * @param checkIntervalSeconds How often to check for stale locks (default: 60)
+ * @returns Cleanup function to stop the periodic check
+ */
+export function startPeriodicStaleLockCheck(
+  cwd: string,
+  timeoutMinutes: number = DEFAULT_STALE_LOCK_TIMEOUT_MINUTES,
+  checkIntervalSeconds: number = DEFAULT_STALE_LOCK_CHECK_INTERVAL_SECONDS
+): () => void {
+  const intervalId = setInterval(async () => {
+    await checkAndCleanStaleLock(cwd, timeoutMinutes);
+  }, checkIntervalSeconds * 1000);
+
+  // Return cleanup function
+  return () => {
+    clearInterval(intervalId);
+  };
 }
 
 /**

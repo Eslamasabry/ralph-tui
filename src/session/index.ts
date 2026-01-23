@@ -402,8 +402,13 @@ export {
   acquireLockWithPrompt,
   releaseLock as releaseLockNew,
   registerLockCleanupHandlers,
+  isLockStaleByTimestamp,
+  checkAndCleanStaleLock,
+  startPeriodicStaleLockCheck,
+  DEFAULT_STALE_LOCK_TIMEOUT_MINUTES,
   type LockCheckResult,
   type LockAcquisitionResult,
+  type PeriodicStaleLockCheckResult,
 } from './lock.js';
 
 // Re-export reconciliation module
