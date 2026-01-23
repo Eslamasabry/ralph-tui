@@ -1314,7 +1314,6 @@ export function RunApp({
         // Main sync events for delivery guarantees
         case 'main-sync-failed':
           // Task failed to sync to main - mark it as pending-main
-<<<<<<< HEAD
           if (event.task) {
             setTasks((prev) =>
               prev.map((t) =>
@@ -1331,6 +1330,15 @@ export function RunApp({
                 taskTitle: event.task!.title,
                 reason: event.reason,
                 phase: 'sync',
+              },
+            ]);
+            // Track pending-main task for summary (US-002)
+            setPendingMainTasksList((prev) => [
+              ...prev,
+              {
+                taskId: event.task!.id,
+                taskTitle: event.task!.title,
+                commitCount: 1, // Default to 1 if unknown
               },
             ]);
             appendActivityEvent({
@@ -1352,26 +1360,6 @@ export function RunApp({
               description: `Main sync failed: ${event.reason}`,
             });
           }
-          ]);
-          // Track pending-main task for summary (US-002)
-          setPendingMainTasksList((prev) => [
-            ...prev,
-            {
-              taskId: event.task.id,
-              taskTitle: event.task.title,
-              commitCount: 1, // Default to 1 if unknown
-            },
-          ]);
-          appendActivityEvent({
-            category: 'system',
-            eventType: 'failed',
-            timestamp: event.timestamp,
-            severity: 'error',
-            description: `Main sync failed: ${event.reason}`,
-            taskId: event.task.id,
-            taskTitle: event.task.title,
-          });
->>>>>>> parallel/integration/main
           break;
 
         case 'main-sync-succeeded':
