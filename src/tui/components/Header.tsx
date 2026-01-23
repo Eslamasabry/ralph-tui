@@ -37,10 +37,10 @@ import type { HeaderProps } from '../types.js';
 // Icons and Special Characters
 // ============================================================================
 
-const RATE_LIMIT_ICON = statusIndicators.rateLimited;
-const SANDBOX_ICON = statusIndicators.sandbox;
-const REMOTE_ICON = statusIndicators.remote;
-const STALE_ICON = statusIndicators.stale;
+const RATE_LIMIT_ICON = '⏳';
+const SANDBOX_ICON = '🔒';
+const REMOTE_ICON = '🌐';
+const STALE_ICON = '⚡';
 const SEPARATOR = '│';
 const ARROW = '→';
 const PROGRESS_BRACKET_LEFT = '[';
@@ -51,6 +51,7 @@ const PROGRESS_BRACKET_RIGHT = ']';
 // ============================================================================
 
 /**
+// OURS:
  * Get available width for header sections based on terminal width
  */
 function getAvailableWidth(terminalWidth: number): {
@@ -85,14 +86,13 @@ const VERSION_ICON = '◆';
 /**
  * Truncate text to fit within a given width, adding ellipsis if needed.
  * Uses terminal-aware truncation based on available width.
-=======
+// THEIRS:
 /** Timer icon */
 const TIMER_ICON = '⏱';
 
 /**
  * Truncate text to fit within a given width, adding ellipsis if needed.
- * Handles edge cases for very small widths.
->>>>>>> 92824a0 (feat: ralph-tui-5no.1 - US-001: Header Component Facelift)
+ * Handles edge cases for very small widths. (feat: ralph-tui-5no.1 - US-001: Header Component Facelift)
 =======
 /** Timer icon */
 const TIMER_ICON = '⏱';
@@ -101,6 +101,9 @@ const TIMER_ICON = '⏱';
  * Truncate text to fit within a given width, adding ellipsis if needed.
  * Smart truncation that preserves the end of the string if possible.
 >>>>>>> e351128 (feat: ralph-tui-5no.1 - US-001: Header Component Facelift)
+=======
+ * Truncate text to fit within a given width, adding ellipsis if needed
+>>>>>>> c33fffd (fix: ralph-tui-5no.1 - US-001: Header Component Facelift fixes)
  */
 function truncateText(text: string, maxWidth: number): string {
   if (!text) return '';
@@ -264,27 +267,6 @@ function truncateTaskId(taskId: string | undefined, maxWidth: number): string {
   return truncateText(taskId, maxWidth);
 }
 
-/**
- * Truncate agent/model/tracker info for narrow terminals
- */
-function truncateInfo(
-  agent: string | undefined,
-  model: string | undefined,
-  tracker: string | undefined,
-  sandbox: string | null,
-  maxWidth: number
-): { agent: string; model: string; tracker: string; sandbox: string } {
-  // Priority: model > tracker > sandbox > agent (agent is least important for narrow displays)
-  const result = { agent: '', model: '', tracker: '', sandbox: '' };
-
-  if (model) result.model = truncateText(model, maxWidth);
-  if (tracker) result.tracker = truncateText(tracker, maxWidth);
-  if (sandbox) result.sandbox = sandbox;
-  if (agent) result.agent = truncateText(agent, maxWidth);
-
-  return result;
-}
-
 // ============================================================================
 // Status Display
 // ============================================================================
@@ -296,7 +278,6 @@ interface StatusDisplay {
   indicator: string;
   color: string;
   label: string;
-  bgColor?: string;
 }
 
 /**
@@ -612,7 +593,7 @@ function StatusSection({ statusDisplay }: { statusDisplay: StatusDisplay }): Rea
   return (
     <text>
       <span fg={statusDisplay.color}>{statusDisplay.indicator}</span>
-      <span fg={statusDisplay.color} bold> {statusDisplay.label}</span>
+      <span fg={statusDisplay.color}> {statusDisplay.label}</span>
     </text>
   );
 }
@@ -721,13 +702,11 @@ function AgentInfoSection({
   modelDisplay,
   trackerName,
   sandboxDisplay,
-  isRateLimited,
 }: {
   agentDisplay: AgentDisplayInfo;
   modelDisplay: ModelDisplayInfo | null;
   trackerName: string | undefined;
   sandboxDisplay: string | null;
-  isRateLimited: boolean;
 }): ReactNode {
   const showAnyInfo = agentDisplay.displayName || modelDisplay || trackerName || sandboxDisplay;
   if (!showAnyInfo) return null;
@@ -1234,7 +1213,6 @@ export function Header({
             modelDisplay={modelDisplay}
             trackerName={trackerName}
             sandboxDisplay={sandboxDisplay}
-            isRateLimited={agentDisplay.showRateLimitIcon}
           />
           <ProgressSection
             completedTasks={completedTasks}

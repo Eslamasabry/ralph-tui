@@ -141,7 +141,7 @@ export function Footer(): ReactNode {
 
         {/* Status indicator */}
         <text fg={colors.fg.muted}>
-          <span fg={colors.status.info}>{statusIndicators.ready.symbol}</span>
+          <span fg={colors.status.info}>{statusIndicators.ready}</span>
           <span fg={colors.fg.secondary}> Ready</span>
         </text>
       </box>
