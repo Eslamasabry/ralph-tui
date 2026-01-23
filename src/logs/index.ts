@@ -89,3 +89,15 @@ export type {
   ActivityEventSeverity,
   TimelineEvent,
 } from './activity-events.js';
+
+export type {
+  RunSummary,
+  TaskSummary,
+} from './run-summary.js';
+
+export {
+  formatRunSummaryReport,
+  buildRunSummary,
+  logRunSummary,
+  createPendingMainTaskSummary,
+} from './run-summary.js';

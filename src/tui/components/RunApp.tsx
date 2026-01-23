@@ -38,6 +38,7 @@ import { RemoteManagementOverlay } from './RemoteManagementOverlay.js';
 import type { RemoteManagementMode, ExistingRemoteData } from './RemoteManagementOverlay.js';
 import { Toast, formatConnectionToast } from './Toast.js';
 import type { ConnectionToastMessage } from './Toast.js';
+import { RunSummaryOverlay } from './RunSummaryOverlay.js';
 import type { InstanceTab } from '../../remote/client.js';
 import { addRemote, removeRemote, getRemote } from '../../remote/config.js';
 import type {
@@ -410,7 +411,14 @@ export function RunApp({
   });
   // Pending main sync count for delivery guarantee visibility
   const [pendingMainCount, setPendingMainCount] = useState(0);
-  // Streaming parser for live output - extracts readable content and prevents memory bloat
+  // List of failures for run summary (US-002)
+  const [runFailures, setRunFailures] = useState<Array<{ taskId: string; taskTitle: string; reason: string; phase: 'merge' | 'sync' | 'recovery' | 'execution'; iteration?: number }>>([]);
+  // List of pending-main tasks for run summary (US-002)
+  const [pendingMainTasksList, setPendingMainTasksList] = useState<Array<{ taskId: string; taskTitle: string; commitCount: number }>>([]);
+  // Main sync failure reason for run summary
+  const [mainSyncFailureReason, setMainSyncFailureReason] = useState<string | undefined>(undefined);
+	// Run summary overlay visibility
+	const [showRunSummary, setShowRunSummary] = useState(false);
   // Use agentPlugin prop (from resolved config with CLI override) with fallback to storedConfig
   const resolvedAgentName = agentPlugin || storedConfig?.defaultAgent || storedConfig?.agent || 'claude';
   const outputParserRef = useRef(
@@ -1041,6 +1049,10 @@ export function RunApp({
           } else {
             setStatus('stopped');
           }
+          // Show run summary on complete or error (US-001)
+          if (event.reason === 'error' || event.reason === 'completed') {
+            setShowRunSummary(true);
+          }
           break;
 
         case 'engine:paused':
@@ -1155,6 +1167,17 @@ export function RunApp({
               t.id === event.task.id ? { ...t, status: 'error' as TaskStatus } : t
             )
           );
+          // Track failure for run summary (US-002)
+          setRunFailures((prev) => [
+            ...prev,
+            {
+              taskId: event.task.id,
+              taskTitle: event.task.title,
+              reason: event.error,
+              phase: 'execution',
+              iteration: event.iteration,
+            },
+          ]);
           break;
 
         case 'task:selected':
@@ -1291,6 +1314,7 @@ export function RunApp({
         // Main sync events for delivery guarantees
         case 'main-sync-failed':
           // Task failed to sync to main - mark it as pending-main
+<<<<<<< HEAD
           if (event.task) {
             setTasks((prev) =>
               prev.map((t) =>
@@ -1298,6 +1322,17 @@ export function RunApp({
               )
             );
             setPendingMainCount((prev) => prev + 1);
+            // Track failure for run summary (US-002)
+            setMainSyncFailureReason(event.reason);
+            setRunFailures((prev) => [
+              ...prev,
+              {
+                taskId: event.task!.id,
+                taskTitle: event.task!.title,
+                reason: event.reason,
+                phase: 'sync',
+              },
+            ]);
             appendActivityEvent({
               category: 'system',
               eventType: 'failed',
@@ -1317,6 +1352,26 @@ export function RunApp({
               description: `Main sync failed: ${event.reason}`,
             });
           }
+          ]);
+          // Track pending-main task for summary (US-002)
+          setPendingMainTasksList((prev) => [
+            ...prev,
+            {
+              taskId: event.task.id,
+              taskTitle: event.task.title,
+              commitCount: 1, // Default to 1 if unknown
+            },
+          ]);
+          appendActivityEvent({
+            category: 'system',
+            eventType: 'failed',
+            timestamp: event.timestamp,
+            severity: 'error',
+            description: `Main sync failed: ${event.reason}`,
+            taskId: event.task.id,
+            taskTitle: event.task.title,
+          });
+>>>>>>> parallel/integration/main
           break;
 
         case 'main-sync-succeeded':
@@ -1340,6 +1395,17 @@ export function RunApp({
         case 'main-sync-skipped':
           // Sync was skipped - increment pending-main count
           setPendingMainCount((prev) => prev + 1);
+          // Track as a failure for run summary (US-002)
+          setMainSyncFailureReason(event.reason);
+          setRunFailures((prev) => [
+            ...prev,
+            {
+              taskId: 'N/A',
+              taskTitle: 'Main sync',
+              reason: event.reason,
+              phase: 'sync',
+            },
+          ]);
           appendActivityEvent({
             category: 'system',
             eventType: 'failed',
@@ -1417,6 +1483,16 @@ export function RunApp({
             queued: Math.max(0, prev.queued - 1),
             failed: prev.failed + 1,
           }));
+          // Track merge failure for run summary (US-002)
+          setRunFailures((prev) => [
+            ...prev,
+            {
+              taskId: parallelEvent.task.id,
+              taskTitle: parallelEvent.task.title,
+              reason: parallelEvent.reason,
+              phase: 'merge',
+            },
+          ]);
           break;
         case 'parallel:main-sync-skipped':
           setMergeStats((prev) => ({
@@ -1448,6 +1524,26 @@ export function RunApp({
           break;
         case 'parallel:main-sync-failed':
           setPendingMainCount((prev) => prev + 1);
+          // Track failure for run summary (US-002)
+          setMainSyncFailureReason(parallelEvent.reason);
+          setRunFailures((prev) => [
+            ...prev,
+            {
+              taskId: parallelEvent.task.id,
+              taskTitle: parallelEvent.task.title,
+              reason: parallelEvent.reason,
+              phase: 'sync',
+            },
+          ]);
+          // Track pending-main task for summary (US-002)
+          setPendingMainTasksList((prev) => [
+            ...prev,
+            {
+              taskId: parallelEvent.task.id,
+              taskTitle: parallelEvent.task.title,
+              commitCount: 1,
+            },
+          ]);
           appendActivityEvent({
             category: 'system',
             eventType: 'failed',
@@ -1606,6 +1702,65 @@ export function RunApp({
     const newIdx = Math.max(0, Math.min(flatList.length - 1, currentIdx + direction));
     setSelectedSubagentId(flatList[newIdx]!);
   }, [subagentTree, remoteSubagentTree, isViewingRemote, selectedSubagentId, displayCurrentTaskId]);
+
+
+   // Handle restore snapshot action - resets codebase and reopens failed/blocked tasks
+  const handleRestoreSnapshot = useCallback(async () => {
+    const tag = engine.getSnapshotTag?.() ?? null;
+    if (!tag) {
+      setInfoFeedback('No snapshot available to restore');
+      return;
+    }
+
+    try {
+      // Step 1: Reset the codebase to the snapshot
+      setInfoFeedback(`Restoring to snapshot: ${tag}...`);
+
+      // Use git reset --hard to restore the codebase
+      const { execSync } = await import('node:child_process');
+      try {
+        execSync(`git reset --hard ${tag}`, {
+          cwd,
+          encoding: 'utf-8',
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
+      } catch (gitError) {
+        const errorMessage = gitError instanceof Error ? gitError.message : String(gitError);
+        setInfoFeedback(`Git reset failed: ${errorMessage}`);
+        return;
+      }
+
+      // Step 2: Reopen failed/blocked tasks in the tracker
+      const tracker = engine.getTracker();
+      if (tracker) {
+        // Get all tasks that are not in 'open' status (failed, blocked, in_progress, completed)
+        const allTasks = await tracker.getTasks({ status: ['in_progress', 'completed', 'blocked'] });
+
+        let reopenedCount = 0;
+        for (const task of allTasks) {
+          try {
+            await tracker.updateTaskStatus(task.id, 'open');
+            reopenedCount++;
+          } catch {
+            // Continue on individual failures
+          }
+        }
+
+        // Refresh task list
+        await engine.refreshTasks();
+
+        setInfoFeedback(`Restored to ${tag}. Reopened ${reopenedCount} task(s).`);
+      } else {
+        setInfoFeedback(`Restored to ${tag}. Tracker not available for task reset.`);
+      }
+
+      // Close the run summary overlay after restore
+      setShowRunSummary(false);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      setInfoFeedback(`Restore failed: ${errorMessage}`);
+    }
+   }, [engine, cwd]);
 
   // Handle keyboard navigation
   const handleKeyboard = useCallback(
@@ -3220,6 +3375,29 @@ export function RunApp({
         }}
         onClose={() => setShowRemoteManagement(false)}
       />
+
+      {/* Run Summary Overlay (US-001, US-002, US-005) */}
+      <RunSummaryOverlay
+        visible={showRunSummary}
+        status={status}
+        elapsedTime={elapsedTime}
+        epicName={epicName}
+        totalTasks={tasks.length}
+        completedTasks={tasks.filter((t) => t.status === 'done').length}
+        failedTasks={tasks.filter((t) => t.status === 'error').length}
+        pendingMainTasks={pendingMainCount}
+        mergeStats={mergeStats}
+        mainSyncStatus={{
+          hasFailure: mainSyncFailureReason !== undefined,
+          failureReason: mainSyncFailureReason,
+        }}
+        failures={runFailures}
+        pendingMainTasksList={pendingMainTasksList}
+        snapshotTag={engine.getSnapshotTag?.() ?? undefined}
+        onRestoreSnapshot={handleRestoreSnapshot}
+        onClose={() => setShowRunSummary(false)}
+      />
+
     </box>
   );
 }

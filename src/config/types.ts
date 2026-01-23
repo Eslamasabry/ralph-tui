@@ -62,6 +62,52 @@ export interface NotificationsConfig {
   sound?: NotificationSoundMode;
 }
 
+/**
+ * Cleanup mode - controls when automatic cleanup runs.
+ * - 'off': Cleanup actions are disabled
+ * - 'auto': Cleanup runs automatically when run completes
+ * - 'manual': User must trigger cleanup from Run Summary overlay
+ */
+export type CleanupMode = 'off' | 'auto' | 'manual';
+
+/**
+ * Individual cleanup action configuration.
+ */
+export interface CleanupActionConfig {
+  /** Whether this cleanup action is enabled (default: true) */
+  enabled?: boolean;
+}
+
+/**
+ * Cleanup configuration for post-run cleanup actions.
+ */
+export interface CleanupConfig {
+  /** Overall cleanup mode: off, auto (runs on completion), manual (user must trigger) */
+  mode?: CleanupMode;
+  /** Sync with main branch after run completes */
+  syncMain?: CleanupActionConfig;
+  /** Prune stale worktrees after run completes */
+  pruneWorktrees?: CleanupActionConfig;
+  /** Delete merged branches after run completes */
+  deleteBranches?: CleanupActionConfig;
+  /** Push changes to remote after run completes */
+  push?: CleanupActionConfig;
+  /** Clean up iteration logs (respects logs.keep setting) */
+  cleanupLogs?: CleanupActionConfig;
+}
+
+/**
+ * Default cleanup configuration.
+ */
+export const DEFAULT_CLEANUP_CONFIG: Required<CleanupConfig> = {
+  mode: 'manual',
+  syncMain: { enabled: true },
+  pruneWorktrees: { enabled: true },
+  deleteBranches: { enabled: true },
+  push: { enabled: true },
+  cleanupLogs: { enabled: true },
+};
+
 export type SandboxMode = 'auto' | 'bwrap' | 'sandbox-exec' | 'off';
 
 export interface SandboxConfig {
@@ -230,6 +276,9 @@ export interface StoredConfig {
 
   /** Notifications configuration */
   notifications?: NotificationsConfig;
+
+  /** Cleanup configuration for post-run cleanup actions */
+  cleanup?: CleanupConfig;
 }
 
 /**
@@ -273,6 +322,9 @@ export interface RalphConfig {
   errorHandling: ErrorHandlingConfig;
 
   sandbox?: SandboxConfig;
+
+  /** Cleanup configuration for post-run cleanup actions */
+  cleanup?: CleanupConfig;
 
   /** Custom prompt template path (resolved) */
   promptTemplate?: string;

@@ -1643,6 +1643,22 @@ export class ExecutionEngine {
   }
 
   /**
+   * Get the list of task IDs that are pending main sync.
+   * Used for summary logging to report pending-main tasks.
+   */
+  getPendingMainTaskIds(): string[] {
+    return Array.from(this.pendingMainSyncTasks.keys());
+  }
+
+  /**
+   * Get the snapshot tag if one was created (parallel execution only).
+   * Sequential execution does not create snapshots.
+   */
+  getSnapshotTag(): string | null {
+    return null;
+  }
+
+  /**
    * Handle a subagent event from the parser and update engine state.
    */
   private handleSubagentEvent(event: SubagentEvent): void {

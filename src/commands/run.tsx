@@ -54,7 +54,7 @@ import type { RalphConfig } from '../config/types.js';
 import { projectConfigExists, runSetupWizard, checkAndMigrate } from '../setup/index.js';
 import { createInterruptHandler } from '../interruption/index.js';
 import type { InterruptHandler } from '../interruption/types.js';
-import { createStructuredLogger, clearProgress } from '../logs/index.js';
+import { createStructuredLogger, clearProgress, logRunSummary, buildRunSummary } from '../logs/index.js';
 import { sendCompletionNotification, sendMaxIterationsNotification, sendErrorNotification, resolveNotificationsEnabled } from '../notifications.js';
 import type { NotificationSoundMode } from '../config/types.js';
 import { detectSandboxMode } from '../sandbox/index.js';
@@ -1333,6 +1333,29 @@ async function runHeadless(
 
       case 'engine:stopped':
         logger.engineStopped(event.reason, event.totalIterations, event.tasksCompleted);
+
+        // Log run summary for audit trail (US-007)
+        if (engineStartTime) {
+          const elapsedMs = Date.now() - engineStartTime.getTime();
+          const engineState = engine.getState();
+          const pendingMainTaskIds = engine.getPendingMainTaskIds?.() ?? [];
+          const tracker = engine.getTracker();
+
+          // Build and log the summary
+          buildRunSummary(engineState, {
+            stopReason: event.reason,
+            elapsedMs,
+            pendingMainTaskIds,
+            tracker,
+          }).then((summary) => {
+            logRunSummary(config.cwd, summary).catch(() => {
+              // Silently ignore logging errors
+            });
+          }).catch(() => {
+            // Silently ignore summary building errors
+          });
+        }
+
         // Send max iterations notification if enabled
         if (event.reason === 'max_iterations' && notificationOptions?.notificationsEnabled && engineStartTime) {
           const durationMs = Date.now() - engineStartTime.getTime();
