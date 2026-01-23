@@ -574,7 +574,7 @@ export function SettingsView({
             paddingLeft: 2,
             paddingRight: 2,
             paddingBottom: 1,
-            borderBottom: true,
+            border: true,
             borderColor: colors.border.normal,
             marginBottom: 1,
           }}
@@ -583,7 +583,7 @@ export function SettingsView({
             <text>
               <span fg={colors.accent.primary}>⚙</span>
               <span fg={colors.fg.muted}> </span>
-              <span fg={colors.accent.primary} style={{ fontWeight: 'bold' }}>Settings</span>
+              <span fg={colors.accent.primary}>Settings</span>
             </text>
           </box>
           <box style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -771,7 +771,7 @@ export function SettingsView({
           style={{
             marginTop: 1,
             paddingTop: 1,
-            borderTop: true,
+            border: true,
             borderColor: colors.border.normal,
             flexDirection: 'row',
             justifyContent: 'space-between',
@@ -788,7 +788,7 @@ export function SettingsView({
                 <span fg={colors.fg.secondary}>←→</span>
                 <span fg={colors.fg.muted}> Cycle </span>
                 <span fg={colors.fg.secondary}>Space</span>
-                <span fg={colors.fg.muted}> Toggle '
+                <span fg={colors.fg.muted}> Toggle</span>
               </>
             )}
           </text>
