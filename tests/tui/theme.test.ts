@@ -6,12 +6,24 @@
 import { describe, test, expect } from 'bun:test';
 import {
   colors,
+  darkColors,
+  lightColors,
   statusIndicators,
   keyboardShortcuts,
   fullKeyboardShortcuts,
   layout,
   getTaskStatusColor,
   getTaskStatusIndicator,
+  getRalphStatusColor,
+  getRalphStatusIndicator,
+  getStatusColor,
+  getContrastTextColor,
+  interactionColors,
+  linkColors,
+  codeColors,
+  semanticColors,
+  setThemeMode,
+  getColors,
   formatElapsedTime,
   type RalphStatus,
   type TaskStatus,
@@ -24,6 +36,7 @@ describe('theme', () => {
       expect(colors.bg.secondary).toBeDefined();
       expect(colors.bg.tertiary).toBeDefined();
       expect(colors.bg.highlight).toBeDefined();
+      expect(colors.bg.overlay).toBeDefined();
     });
 
     test('should have foreground colors defined', () => {
@@ -31,6 +44,7 @@ describe('theme', () => {
       expect(colors.fg.secondary).toBeDefined();
       expect(colors.fg.muted).toBeDefined();
       expect(colors.fg.dim).toBeDefined();
+      expect(colors.fg.inverse).toBeDefined();
     });
 
     test('should have status colors defined', () => {
@@ -48,18 +62,50 @@ describe('theme', () => {
       expect(colors.task.blocked).toBeDefined();
       expect(colors.task.error).toBeDefined();
       expect(colors.task.closed).toBeDefined();
+      expect(colors.task.queued).toBeDefined();
     });
 
     test('should have accent colors defined', () => {
       expect(colors.accent.primary).toBeDefined();
       expect(colors.accent.secondary).toBeDefined();
       expect(colors.accent.tertiary).toBeDefined();
+      expect(colors.accent.quaternary).toBeDefined();
     });
 
     test('should have border colors defined', () => {
       expect(colors.border.normal).toBeDefined();
       expect(colors.border.active).toBeDefined();
       expect(colors.border.muted).toBeDefined();
+      expect(colors.border.highlight).toBeDefined();
+    });
+
+    test('should have interaction colors defined', () => {
+      expect(colors.interaction).toBeDefined();
+      expect(colors.interaction.hover).toBeDefined();
+      expect(colors.interaction.focus).toBeDefined();
+      expect(colors.interaction.active).toBeDefined();
+      expect(colors.interaction.selected).toBeDefined();
+      expect(colors.interaction.disabled).toBeDefined();
+    });
+
+    test('should have link colors defined', () => {
+      expect(colors.link).toBeDefined();
+      expect(colors.link.default).toBeDefined();
+      expect(colors.link.hover).toBeDefined();
+      expect(colors.link.visited).toBeDefined();
+    });
+
+    test('should have code colors defined', () => {
+      expect(colors.code).toBeDefined();
+      expect(colors.code.keyword).toBeDefined();
+      expect(colors.code.string).toBeDefined();
+      expect(colors.code.number).toBeDefined();
+      expect(colors.code.comment).toBeDefined();
+      expect(colors.code.function).toBeDefined();
+      expect(colors.code.type).toBeDefined();
+      expect(colors.code.operator).toBeDefined();
+      expect(colors.code.variable).toBeDefined();
+      expect(colors.code.attribute).toBeDefined();
     });
 
     test('should have valid hex color format', () => {
@@ -67,6 +113,34 @@ describe('theme', () => {
       expect(colors.bg.primary).toMatch(hexColorRegex);
       expect(colors.fg.primary).toMatch(hexColorRegex);
       expect(colors.status.success).toMatch(hexColorRegex);
+      expect(colors.code.keyword).toMatch(hexColorRegex);
+      expect(colors.interaction.hover).toMatch(hexColorRegex);
+      expect(colors.link.default).toMatch(hexColorRegex);
+    });
+  });
+
+  describe('theme modes', () => {
+    test('should have dark colors defined', () => {
+      expect(darkColors.bg.primary).toBe('#1a1b26');
+      expect(darkColors.fg.primary).toBe('#c0caf5');
+    });
+
+    test('should have light colors defined', () => {
+      expect(lightColors.bg.primary).toBe('#fafafa');
+      expect(lightColors.fg.primary).toBe('#1a1b26');
+    });
+
+    test('should switch theme mode', () => {
+      setThemeMode('light');
+      expect(getColors()).toBe(lightColors);
+
+      setThemeMode('dark');
+      expect(getColors()).toBe(darkColors);
+    });
+
+    test('should default to dark theme', () => {
+      setThemeMode('dark');
+      expect(getColors()).toBe(darkColors);
     });
   });
 

@@ -106,7 +106,7 @@ export const colorSchemes = {
  * Dark theme color palette - Tokyo Night inspired with modern enhancements
  * Optimized for high contrast and readability in terminal environments
  */
-const darkThemeColors = {
+export const darkColors = {
   // Background colors - layered depth for visual hierarchy
   bg: {
     primary: '#1a1b26',
@@ -194,7 +194,7 @@ const darkThemeColors = {
 /**
  * Light theme color palette - Clean and readable for bright environments
  */
-const lightThemeColors = {
+export const lightColors = {
   // Background colors - clean, light palette
   bg: {
     primary: '#fafafa',
@@ -300,13 +300,13 @@ export function setThemeMode(mode: ThemeMode): void {
  * Get the active color palette based on current theme mode
  */
 export function getColors() {
-  return currentThemeMode === 'dark' ? darkThemeColors : lightThemeColors;
+  return currentThemeMode === 'dark' ? darkColors : lightColors;
 }
 
 /**
  * Color palette for the Ralph TUI (defaults to dark theme for backwards compatibility)
  */
-export const colors = darkThemeColors;
+export const colors = darkColors;
 
 /**
  * Current color scheme (defaults to dark)
