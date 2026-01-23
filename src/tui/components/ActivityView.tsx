@@ -16,7 +16,10 @@
 
 import type { ReactNode } from 'react';
 import { useMemo } from 'react';
+// OURS:
 <<<<<<< HEAD
+// THEIRS:
+import { useTerminalDimensions } from '@opentui/react'; (feat: ralph-tui-5no.10 - US-010: Responsive Design Optimization)
 import { colors, formatElapsedTime, statusIndicators as themeStatusIndicators } from '../theme.js';
 =======
 import { colors, formatElapsedTime, layout } from '../theme.js';
@@ -741,6 +744,8 @@ interface SubagentRowProps {
   node: SubagentTreeNode;
   depth: number;
   maxDepth: number;
+  /** Maximum width for description truncation */
+  maxWidth: number;
 }
 
 /**
@@ -755,7 +760,7 @@ interface SubagentRowProps {
  * Enhanced with bracketed status indicators following Header.tsx patterns
 >>>>>>> 4b45e08 (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
  */
-function SubagentTreeRow({ node, depth, maxDepth }: SubagentRowProps): ReactNode {
+function SubagentTreeRow({ node, depth, maxDepth, maxWidth }: SubagentRowProps): ReactNode {
   const { state } = node;
   const statusDisplay = getSubagentStatusDisplay(state.status);
   const indent = '  '.repeat(depth);
@@ -768,9 +773,8 @@ function SubagentTreeRow({ node, depth, maxDepth }: SubagentRowProps): ReactNode
   const duration = state.durationMs !== undefined ? ` (${formatDuration(state.durationMs)})` : '';
 >>>>>>> 4b45e08 (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
 
-  // Truncate long descriptions for better readability
-  const maxDescWidth = 50;
-  const truncatedDescription = truncateText(state.description, maxDescWidth);
+  // Truncate long descriptions for better readability (adaptive)
+  const truncatedDescription = truncateText(state.description, maxWidth);
 
   // Determine agent type display
   const typeDisplay = `[${state.type}]`;
@@ -813,6 +817,7 @@ function SubagentTreeRow({ node, depth, maxDepth }: SubagentRowProps): ReactNode
           node={child}
           depth={depth + 1}
           maxDepth={maxDepth}
+          maxWidth={maxWidth}
         />
       ))}
     </>
@@ -900,6 +905,20 @@ export function ActivityView({
   timelineEvents = [],
   activityMetrics: providedMetrics,
 }: ActivityViewProps): ReactNode {
+  // Use terminal dimensions for responsive layout
+  const { width } = useTerminalDimensions();
+
+  // Calculate adaptive truncation widths based on terminal size
+  // Small terminals (< 80): more aggressive truncation
+  // Medium terminals (80-120): moderate truncation
+  // Large terminals (>= 120): less truncation for better readability
+  const taskIdTruncWidth = width < 80 ? 20 : width < 120 ? 28 : 35;
+  const taskTitleTruncWidth = width < 80 ? 40 : width < 120 ? 55 : 65;
+  const iterTaskIdTruncWidth = width < 80 ? 15 : width < 120 ? 22 : 28;
+  const iterTaskTitleTruncWidth = width < 80 ? 25 : width < 120 ? 32 : 40;
+
+  // Calculate adaptive max width for subagent descriptions
+  const subagentDescWidth = Math.max(30, Math.min(50, width - 40));
 
   // Build current activity events (fallback if no real events provided)
   const currentEvents = useMemo(
@@ -992,6 +1011,7 @@ export function ActivityView({
   const statusLabel = currentStatus ? statusLabels[currentStatus] : 'Unknown';
 >>>>>>> e5772cd (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
 
+<<<<<<< HEAD
   // Truncate task info for better display
   const truncatedTaskId = truncateText(currentTaskId || '', 30);
   const truncatedTaskTitle = truncateText(currentTaskTitle || '', 60);
@@ -999,6 +1019,11 @@ export function ActivityView({
   // Current status display using helper function
   const statusDisplay = getStatusDisplay(currentStatus);
 >>>>>>> 4b45e08 (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
+=======
+  // Truncate task info for better display (adaptive truncation)
+  const truncatedTaskId = truncateText(currentTaskId || '', taskIdTruncWidth);
+  const truncatedTaskTitle = truncateText(currentTaskTitle || '', taskTitleTruncWidth);
+>>>>>>> 88f9af3 (feat: ralph-tui-5no.10 - US-010: Responsive Design Optimization)
 
   return (
     <box
@@ -1367,6 +1392,7 @@ export function ActivityView({
                   node={node}
                   depth={0}
                   maxDepth={maxSubagentDepth}
+                  maxWidth={subagentDescWidth}
                 />
               ))}
 
@@ -1417,9 +1443,14 @@ export function ActivityView({
                 const iterStatusDisplay = getStatusDisplay(iter.status);
 >>>>>>> 4b45e08 (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
                 const duration = formatDuration(iter.durationMs);
+<<<<<<< HEAD
                 const truncatedIterTaskId = truncateText(iter.task.id, 25);
                 const truncatedIterTaskTitle = truncateText(iter.task.title, 35);
 >>>>>>> e5772cd (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
+=======
+                const truncatedIterTaskId = truncateText(iter.task.id, iterTaskIdTruncWidth);
+                const truncatedIterTaskTitle = truncateText(iter.task.title, iterTaskTitleTruncWidth);
+>>>>>>> 88f9af3 (feat: ralph-tui-5no.10 - US-010: Responsive Design Optimization)
 
                 return (
                   <box

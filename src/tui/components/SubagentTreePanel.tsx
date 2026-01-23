@@ -6,6 +6,7 @@
 
 import type { ReactNode } from 'react';
 import { useRef, useEffect } from 'react';
+import { useTerminalDimensions } from '@opentui/react';
 import { colors } from '../theme.js';
 import type { SubagentTreeNode } from '../../engine/types.js';
 import type { EngineSubagentStatus } from '../../engine/types.js';
@@ -307,8 +308,17 @@ export function SubagentTreePanel({
   onSelect: _onSelect, // Reserved for future keyboard navigation
   isFocused = false,
 }: SubagentTreePanelProps): ReactNode {
+  // Use terminal dimensions for responsive layout
+  const { width: terminalWidth } = useTerminalDimensions();
+
+  // Calculate adaptive panel width based on terminal size
+  // Small terminals (< 100): use 30 width
+  // Medium terminals (100-140): use 40 width
+  // Large terminals (>= 140): use 45 width (default)
+  const effectiveWidth = width ?? (terminalWidth < 100 ? 30 : terminalWidth < 140 ? 40 : 45);
+
   // Calculate max width for row content (panel width minus padding and border)
-  const maxRowWidth = Math.max(20, width - 4);
+  const maxRowWidth = Math.max(20, effectiveWidth - 4);
 
   // Auto-detect active subagent if not provided
   const effectiveActiveId = activeSubagentId ?? findActiveSubagentId(tree);

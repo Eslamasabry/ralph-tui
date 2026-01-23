@@ -6,6 +6,7 @@
  */
 
 import type { ReactNode } from 'react';
+import { useTerminalDimensions } from '@opentui/react';
 import { colors, statusIndicators, layout, type RalphStatus } from '../theme.js';
 import type { SandboxConfig, SandboxMode, CleanupConfig } from '../../config/types.js';
 
@@ -206,6 +207,12 @@ export function ProgressDashboard({
   pendingMainCount,
   cleanupConfig,
 }: ProgressDashboardProps): ReactNode {
+  // Use terminal dimensions for responsive layout
+  const { width } = useTerminalDimensions();
+
+  // Calculate adaptive task title truncation based on available space
+  const taskTruncationWidth = Math.max(20, Math.min(45, width - 70));
+
   const statusDisplay = getStatusDisplay(status, currentTaskId);
   const sandboxDisplay = getSandboxDisplay(sandboxConfig, resolvedSandboxMode);
   const cleanupDisplay = getCleanupDisplay(cleanupConfig);
@@ -221,9 +228,9 @@ export function ProgressDashboard({
     ? `${gitInfo.repoName ?? 'repo'}:${gitInfo.branch}${gitInfo.isDirty ? '*' : ''}`
     : null;
 
-  // Show current task title when executing
+  // Show current task title when executing (adaptive truncation)
   const taskDisplay = currentTaskTitle && (status === 'executing' || status === 'running')
-    ? truncateText(currentTaskTitle, 45)
+    ? truncateText(currentTaskTitle, taskTruncationWidth)
     : null;
 
   // Parse model info for display
@@ -233,6 +240,12 @@ export function ProgressDashboard({
         return { provider, model, full: currentModel, display: provider ? `${provider}/${model}` : model };
       })()
     : null;
+
+  // Calculate adaptive right column width based on terminal size
+  // Small terminals (< 100): use more compact display
+  // Medium terminals (100-140): use 40 width
+  // Large terminals (>= 140): use 50 width
+  const rightColumnWidth = width < 100 ? 30 : width < 140 ? 40 : 50;
 
   // Status indicator for border styling
   const statusIndicator = status === 'running' || status === 'executing' ? '●'
@@ -326,8 +339,8 @@ export function ProgressDashboard({
           )}
         </box>
 
-        {/* Right column: Configuration items */}
-        <box style={{ flexDirection: 'column', width: 50, flexShrink: 0, gap: 1 }}>
+        {/* Right column: Configuration items (adaptive width) */}
+        <box style={{ flexDirection: 'column', width: rightColumnWidth, flexShrink: 0, gap: 1 }}>
           {/* Section header */}
           <text fg={colors.fg.muted}>{SECTIONS.config} Configuration</text>
 

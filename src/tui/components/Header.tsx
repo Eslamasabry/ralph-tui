@@ -33,7 +33,10 @@
 
 import type { ReactNode } from 'react';
 import { useTerminalDimensions } from '@opentui/react';
+// OURS:
 import { getColors, statusIndicators, formatElapsedTime, layout, type RalphStatus } from '../theme.js';
+// THEIRS:
+import { colors, statusIndicators, formatElapsedTime, layout, type RalphStatus } from '../theme.js'; (feat: ralph-tui-5no.10 - US-010: Responsive Design Optimization)
 import type { HeaderProps } from '../types.js';
 
 // ============================================================================
@@ -781,11 +784,15 @@ export function Header({
   trackerRealtimeStatus,
 }: HeaderProps): ReactNode {
 <<<<<<< HEAD
+<<<<<<< HEAD
   const { width: terminalWidth } = useTerminalDimensions();
   const truncationWidths = getTruncationWidths(terminalWidth);
   const statusDisplay = getStatusDisplay(status);
 <<<<<<< HEAD
 =======
+=======
+  const { width } = useTerminalDimensions();
+>>>>>>> 88f9af3 (feat: ralph-tui-5no.10 - US-010: Responsive Design Optimization)
   const statusBadge = getStatusBadge(status);
 >>>>>>> e351128 (feat: ralph-tui-5no.1 - US-001: Header Component Facelift)
   const formattedTime = formatElapsedTime(elapsedTime);
@@ -810,13 +817,24 @@ export function Header({
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   // Show abbreviated task title when executing, with terminal-aware truncation
 =======
+=======
+  // Calculate adaptive truncation widths based on terminal width
+  // Small terminals (< 80): more aggressive truncation
+  // Medium terminals (80-120): moderate truncation
+  // Large terminals (>= 120): less truncation for better readability
+  const titleTruncationWidth = width < 80 ? 25 : width < 120 ? 35 : 45;
+  const idTruncationWidth = width < 80 ? 12 : width < 120 ? 18 : 25;
+
+>>>>>>> 88f9af3 (feat: ralph-tui-5no.10 - US-010: Responsive Design Optimization)
   // Show abbreviated task title when executing (adaptive truncation based on importance)
 >>>>>>> e351128 (feat: ralph-tui-5no.1 - US-001: Header Component Facelift)
   const isActive = status === 'executing' || status === 'running';
   const taskDisplay = isActive
     ? currentTaskTitle
+<<<<<<< HEAD
       ? truncateText(currentTaskTitle, truncationWidths.taskTitle)
 =======
   // Show task title when executing, truncated to fit
@@ -834,6 +852,11 @@ export function Header({
 >>>>>>> 92824a0 (feat: ralph-tui-5no.1 - US-001: Header Component Facelift)
       : currentTaskId
         ? truncateText(currentTaskId, 25)
+=======
+      ? truncateText(currentTaskTitle, titleTruncationWidth)
+      : currentTaskId
+        ? truncateText(currentTaskId, idTruncationWidth)
+>>>>>>> 88f9af3 (feat: ralph-tui-5no.10 - US-010: Responsive Design Optimization)
         : null
     : null;
 
