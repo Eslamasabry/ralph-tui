@@ -37,9 +37,7 @@ export function ViewTabBar({ currentView, views }: ViewTabBarProps): ReactNode {
           <text key={view.id}>
             <span fg={colors.fg.muted}>{index > 0 ? ' │ ' : ''}</span>
             {isActive ? (
-              <span fg={colors.accent.primary}>
-                <strong>{view.label}</strong>
-              </span>
+              <span fg={colors.accent.primary}>{view.label}</span>
             ) : (
               <span fg={colors.fg.secondary}>{view.label}</span>
             )}

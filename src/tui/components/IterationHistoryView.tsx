@@ -274,12 +274,8 @@ function IterationCard({
         <text>
           <span fg={colors.fg.muted}>Task: </span>
           <span fg={colors.accent.primary}>{truncatedTaskId}</span>
-          {taskTitle && (
-            <>
-              <span fg={colors.fg.dim}> - </span>
-              <span fg={colors.fg.secondary}>{truncatedTitle}</span>
-            </>
-          )}
+          <span fg={colors.fg.dim}>{taskTitle ? ' - ' : ''}</span>
+          <span fg={colors.fg.secondary}>{taskTitle ? truncatedTitle : ''}</span>
         </text>
       </box>
 

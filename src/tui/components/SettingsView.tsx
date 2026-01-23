@@ -589,10 +589,9 @@ export function SettingsView({
           <box style={{ flexDirection: 'row', alignItems: 'center' }}>
             <text fg={colors.fg.muted}>
               {hasChanges ? (
-                <>
-                  <span fg={colors.status.warning}>● Modified</span>
-                  <span fg={colors.status.info}>{saving ? ' Saving...' : ''}</span>
-                </>
+                <span fg={colors.status.warning}>
+                  ● Modified{saving ? ' Saving...' : ''}
+                </span>
               ) : (
                 <span fg={colors.fg.muted}>● Unsaved changes</span>
               )}
@@ -792,18 +791,15 @@ export function SettingsView({
               </>
             )}
           </text>
-          <text fg={colors.fg.muted}>
-            {editMode ? (
-              ''
-            ) : (
-              <>
-                <span fg={colors.fg.secondary}>s</span>
-                <span fg={colors.fg.muted}> Save </span>
-                <span fg={colors.fg.secondary}>q/Esc</span>
-                <span fg={colors.fg.muted}> Close</span>
-              </>
-            )}
-          </text>
+            <text fg={colors.fg.muted}>
+              {editMode ? (
+                ''
+              ) : (
+                <span fg={colors.fg.muted}>
+                  <span fg={colors.fg.secondary}>s</span> Save <span fg={colors.fg.secondary}>q/Esc</span> Close
+                </span>
+              )}
+            </text>
         </box>
       </box>
     </box>

@@ -428,29 +428,18 @@ function TaskSummary({ tasks }: { tasks: TaskItem[] }): ReactNode {
         <span fg={colors.status.warning}>○{stats.pending}</span>
         <span fg={colors.fg.muted}> </span>
         <span fg={colors.task.blocked}>⊘{stats.blocked}</span>
-        {stats.blockerIds.length > 0 && (
-          <>
-            <span fg={colors.fg.muted}> by </span>
-            <span fg={colors.task.blocked}>
-              {stats.blockerIds.slice(0, 2).join(', ')}
-              {stats.blockerIds.length > 2 ? '...' : ''}
-            </span>
-          </>
-        )}
+        <span fg={colors.fg.muted}>{stats.blockerIds.length > 0 ? ' by ' : ''}</span>
+        <span fg={colors.task.blocked}>
+          {stats.blockerIds.length > 0
+            ? `${stats.blockerIds.slice(0, 2).join(', ')}${stats.blockerIds.length > 2 ? '...' : ''}`
+            : ''}
+        </span>
         <span fg={colors.fg.muted}> </span>
         <span fg={colors.status.success}>✓{stats.done}</span>
-        {stats.closed > 0 && (
-          <>
-            <span fg={colors.fg.muted}>/</span>
-            <span fg={colors.fg.dim}>✓{stats.closed}</span>
-          </>
-        )}
-        {stats.failed > 0 && (
-          <>
-            <span fg={colors.fg.muted}> </span>
-            <span fg={colors.status.error}>✗{stats.failed}</span>
-          </>
-        )}
+        <span fg={colors.fg.muted}>{stats.closed > 0 ? '/' : ''}</span>
+        <span fg={colors.fg.dim}>{stats.closed > 0 ? `✓${stats.closed}` : ''}</span>
+        <span fg={colors.fg.muted}>{stats.failed > 0 ? ' ' : ''}</span>
+        <span fg={colors.status.error}>{stats.failed > 0 ? `✗${stats.failed}` : ''}</span>
       </text>
     </box>
   );

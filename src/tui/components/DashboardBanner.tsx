@@ -111,10 +111,8 @@ export function DashboardBanner({
         }}
       >
         <text fg={colors.fg.primary}>
-          <strong>Parallel Command Center</strong>
-          {appVersion && appVersion !== 'unknown' && (
-            <span fg={colors.fg.muted}> {appVersion}</span>
-          )}
+          <span fg={colors.fg.primary}>Parallel Command Center</span>
+          <span fg={colors.fg.muted}>{appVersion && appVersion !== 'unknown' ? ` ${appVersion}` : ''}</span>
         </text>
         <text>
           <span fg={statusColor}>{statusIndicator}</span>

@@ -356,7 +356,7 @@ export function RunSummaryOverlay({
 				{/* Main sync status */}
 				{hasMainSyncFailure && (
 					<box style={{ paddingLeft: 1, paddingRight: 1 }}>
-						<text fg={colors.status.warning}>Main sync failed:</text> <text fg={colors.fg.secondary}>{mainSyncStatus.failureReason}</text>
+							<text fg={colors.status.warning}>Main sync failed: <span fg={colors.fg.secondary}>{mainSyncStatus.failureReason}</span></text>
 					</box>
 				)}
 

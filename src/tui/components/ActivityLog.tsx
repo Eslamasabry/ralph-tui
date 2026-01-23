@@ -354,7 +354,7 @@ export function ActivityLog({
         }}
       >
         <text fg={colors.fg.primary}>
-          <strong>Activity</strong>
+          <span fg={colors.fg.primary}>Activity</span>
           <span fg={colors.fg.muted}> (1-3: filter)</span>
         </text>
         <box style={{ flexDirection: 'row', gap: 0 }}>

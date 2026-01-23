@@ -280,7 +280,7 @@ export function ProgressDashboard({
         }}
       >
         <text fg={colors.fg.primary}>
-          <strong>Progress Dashboard</strong>
+          <span fg={colors.fg.primary}>Progress Dashboard</span>
         </text>
         <text>
           <span fg={borderColor}>{statusIndicator}</span>

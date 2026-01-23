@@ -180,10 +180,12 @@ function TimingSummary({ timing }: { timing?: IterationTimingInfo }): ReactNode 
         {/* Timing row */}
         <box style={{ flexDirection: 'row', gap: 3 }}>
           <text fg={colors.fg.muted}>
-            Started: <text fg={colors.fg.secondary}>{startedAt}</text>
+            <span fg={colors.fg.muted}>Started: </span>
+            <span fg={colors.fg.secondary}>{startedAt}</span>
           </text>
           <text fg={colors.fg.muted}>
-            Ended: <text fg={colors.fg.secondary}>{endedAt}</text>
+            <span fg={colors.fg.muted}>Ended: </span>
+            <span fg={colors.fg.secondary}>{endedAt}</span>
           </text>
         </box>
       </box>
