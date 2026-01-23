@@ -1,11 +1,12 @@
 /**
- * ABOUTME: Compact header component for the Ralph TUI.
- * Displays only essential info: status indicator, current task (if running), progress (X/Y), elapsed time.
+ * ABOUTME: Modern header component for the Ralph TUI.
+ * Displays status indicator, current task (if running), progress (X/Y), elapsed time.
  * Also shows active agent name with fallback indicator and rate limit status.
- * Designed for minimal vertical footprint while providing clear visibility into current state.
+ * Designed with improved visual hierarchy, better spacing, and clearer status indicators.
  */
 
 import type { ReactNode } from 'react';
+import { useTerminalDimensions } from '@opentui/react';
 import { colors, statusIndicators, formatElapsedTime, layout, type RalphStatus } from '../theme.js';
 import type { HeaderProps } from '../types.js';
 
@@ -18,8 +19,12 @@ const SANDBOX_ICON = '🔒';
 /** Remote indicator icon */
 const REMOTE_ICON = '🌐';
 
+/** Version indicator icon */
+const VERSION_ICON = '◆';
+
 /**
- * Truncate text to fit within a given width, adding ellipsis if needed
+ * Truncate text to fit within a given width, adding ellipsis if needed.
+ * Uses terminal-aware truncation based on available width.
  */
 function truncateText(text: string, maxWidth: number): string {
   if (text.length <= maxWidth) return text;
@@ -29,7 +34,7 @@ function truncateText(text: string, maxWidth: number): string {
 
 /**
  * Get compact status display for the current Ralph status.
- * Returns a short, scannable label optimized for the compact header.
+ * Returns a short, scannable label optimized for the header with clear color coding.
  */
 function getStatusDisplay(status: RalphStatus): { indicator: string; color: string; label: string } {
   switch (status) {
@@ -57,7 +62,8 @@ function getStatusDisplay(status: RalphStatus): { indicator: string; color: stri
 }
 
 /**
- * Compact mini progress bar for header display
+ * Mini progress bar with improved visual clarity.
+ * Shows completed vs total with distinct filled/empty sections.
  */
 function MiniProgressBar({
   completed,
@@ -92,7 +98,6 @@ function getAgentDisplay(
   activeAgentState: HeaderProps['activeAgentState'],
   rateLimitState: HeaderProps['rateLimitState']
 ): { displayName: string; color: string; showRateLimitIcon: boolean; statusLine: string | null } {
-  // Use active agent from engine state if available, otherwise fall back to config
   const activeAgent = activeAgentState?.plugin ?? agentName;
   const isOnFallback = activeAgentState?.reason === 'fallback';
   const isPrimaryRateLimited = rateLimitState?.limitedAt !== undefined;
@@ -103,7 +108,6 @@ function getAgentDisplay(
   }
 
   if (isOnFallback && isPrimaryRateLimited && primaryAgent) {
-    // On fallback agent due to rate limit - show with indicator and status message
     return {
       displayName: `${activeAgent} (fallback)`,
       color: colors.status.warning,
@@ -113,7 +117,6 @@ function getAgentDisplay(
   }
 
   if (isOnFallback) {
-    // On fallback agent for other reasons
     return {
       displayName: `${activeAgent} (fallback)`,
       color: colors.status.warning,
@@ -151,17 +154,42 @@ function getSandboxDisplay(
 }
 
 /**
- * Compact header component showing essential information:
- * - Status indicator and label
- * - Current task (when executing)
- * - Agent and tracker plugin names (for configuration visibility)
- * - Model being used (provider/model format with logo)
+ * Calculate responsive truncation widths based on terminal width.
+ * Ensures content is properly truncated on narrow terminals.
+ */
+function getTruncationWidths(terminalWidth: number): {
+  taskTitle: number;
+  agentName: number;
+  modelName: number;
+} {
+  // Very narrow terminals (< 60 columns)
+  if (terminalWidth < 60) {
+    return { taskTitle: 15, agentName: 10, modelName: 10 };
+  }
+  // Narrow terminals (60-79 columns)
+  if (terminalWidth < 80) {
+    return { taskTitle: 25, agentName: 15, modelName: 15 };
+  }
+  // Standard terminals (80-119 columns)
+  if (terminalWidth < 120) {
+    return { taskTitle: 35, agentName: 20, modelName: 20 };
+  }
+  // Wide terminals (120+ columns)
+  return { taskTitle: 50, agentName: 30, modelName: 30 };
+}
+
+/**
+ * Modern header component with improved visual hierarchy:
+ * - Status indicator and label with clear color coding
+ * - Current task (when executing) with truncation for narrow terminals
+ * - Agent, tracker plugin, and model names for configuration visibility
  * - Sandbox status when enabled (mode + network status)
  * - Fallback indicator when using fallback agent
  * - Rate limit icon when primary agent is limited
- * - Status line when primary agent is rate limited (explains fallback)
- * - Progress (X/Y tasks) with mini bar
- * - Elapsed time
+ * - Progress (X/Y tasks) with mini bar and percentage
+ * - Elapsed time with icon
+ * - Iteration counter [current/max] or [current/∞]
+ * - Version indicator for app version display
  */
 export function Header({
   status,
@@ -181,28 +209,33 @@ export function Header({
   remoteInfo,
   trackerRealtimeStatus,
 }: HeaderProps): ReactNode {
+  const { width: terminalWidth } = useTerminalDimensions();
+  const truncationWidths = getTruncationWidths(terminalWidth);
   const statusDisplay = getStatusDisplay(status);
   const formattedTime = formatElapsedTime(elapsedTime);
-
-  // Get agent display info including fallback status and status line message
   const agentDisplay = getAgentDisplay(agentName, activeAgentState, rateLimitState);
 
-  // Parse model info for display
+  // Parse model info for display with truncation
   const modelDisplay = currentModel
     ? (() => {
         const [provider, model] = currentModel.includes('/') ? currentModel.split('/') : ['', currentModel];
-        return { provider, model, full: currentModel, display: provider ? `${provider}/${model}` : model };
+        const display = provider ? `${provider}/${model}` : model;
+        return {
+          provider,
+          model: truncateText(model, truncationWidths.modelName),
+          full: currentModel,
+          display: truncateText(display, truncationWidths.modelName),
+        };
       })()
     : null;
 
-  // Get sandbox display info (null if disabled)
   const sandboxDisplay = getSandboxDisplay(sandboxConfig);
 
-  // Show abbreviated task title when executing (max 40 chars), fallback to task ID
+  // Show abbreviated task title when executing, with terminal-aware truncation
   const isActive = status === 'executing' || status === 'running';
   const taskDisplay = isActive
     ? currentTaskTitle
-      ? truncateText(currentTaskTitle, 40)
+      ? truncateText(currentTaskTitle, truncationWidths.taskTitle)
       : currentTaskId
         ? truncateText(currentTaskId, 20)
         : null
@@ -211,6 +244,9 @@ export function Header({
   // Calculate header height: 1 row normally, 2 rows when status line is present
   const headerHeight = agentDisplay.statusLine ? 2 : layout.header.height;
 
+  // Calculate progress percentage for display
+  const progressPercentage = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+
   return (
     <box
       style={{
@@ -218,9 +254,11 @@ export function Header({
         height: headerHeight,
         flexDirection: 'column',
         backgroundColor: colors.bg.secondary,
+        border: true,
+        borderColor: colors.border.normal,
       }}
     >
-      {/* Main header row */}
+      {/* Main header row with improved visual hierarchy */}
       <box
         style={{
           width: '100%',
@@ -232,72 +270,111 @@ export function Header({
           paddingRight: 1,
         }}
       >
-        {/* Left section: Remote indicator (if viewing remote) + Status indicator + label + optional current task */}
-        <box style={{ flexDirection: 'row', gap: 1, flexShrink: 1 }}>
+        {/* Left section: Remote indicator + Status indicator + label + optional current task */}
+        <box style={{ flexDirection: 'row', gap: 1, flexShrink: 1, alignItems: 'center' }}>
+          {/* Remote info (when viewing remote) */}
           {remoteInfo && (
             <text>
-              <span fg={colors.accent.primary}>{REMOTE_ICON} {remoteInfo.name}</span>
-              <span fg={colors.fg.dim}> ({remoteInfo.host}:{remoteInfo.port})</span>
-              <span fg={colors.fg.dim}> │ </span>
+              <span fg={colors.accent.primary}>{REMOTE_ICON}</span>
+              <span fg={colors.fg.dim}> </span>
             </text>
           )}
+
+          {/* Status indicator with clear color coding */}
           <text>
             <span fg={statusDisplay.color}>{statusDisplay.indicator}</span>
             <span fg={statusDisplay.color}> {statusDisplay.label}</span>
           </text>
+
+          {/* Tracker stale indicator */}
           {trackerRealtimeStatus === 'stale' && (
             <text>
-              <span fg={colors.fg.dim}> │ </span>
-              <span fg={colors.status.warning}>{statusIndicators.paused} Stale</span>
+              <span fg={colors.fg.dim}>·</span>
+              <span fg={colors.status.warning}> Stale</span>
             </text>
           )}
+
+          {/* Current task display when active */}
           {taskDisplay && (
             <text>
-              <span fg={colors.fg.muted}> → </span>
+              <span fg={colors.fg.muted}>› </span>
               <span fg={colors.accent.tertiary}>{taskDisplay}</span>
             </text>
           )}
         </box>
 
-        {/* Right section: Agent/Tracker + Model + Sandbox + Progress (X/Y) with mini bar + elapsed time */}
-        <box style={{ flexDirection: 'row', gap: 2, alignItems: 'center' }}>
-          {/* Agent, model, tracker, and sandbox indicators */}
+        {/* Right section: Agent/Model/Tracker + Sandbox + Progress + Time */}
+        <box style={{ flexDirection: 'row', gap: 2, alignItems: 'center', flexShrink: 0 }}>
+          {/* Agent, model, tracker, and sandbox indicators - improved grouping */}
           {(agentDisplay.displayName || trackerName || modelDisplay || sandboxDisplay) && (
-            <text fg={colors.fg.muted}>
+            <text fg={colors.fg.secondary}>
+              {/* Rate limit warning */}
               {agentDisplay.showRateLimitIcon && (
                 <span fg={colors.status.warning}>{RATE_LIMIT_ICON} </span>
               )}
+
+              {/* Agent name with fallback styling */}
               {agentDisplay.displayName && (
-                <span fg={agentDisplay.color}>{agentDisplay.displayName}</span>
+                <span fg={agentDisplay.color}>{truncateText(agentDisplay.displayName, truncationWidths.agentName)}</span>
               )}
-              {agentDisplay.displayName && (trackerName || modelDisplay || sandboxDisplay) && <span fg={colors.fg.dim}> | </span>}
-              {modelDisplay && (
-                <span fg={colors.accent.primary}>{modelDisplay.display}</span>
+
+              {/* Model display */}
+              {(agentDisplay.displayName || modelDisplay) && modelDisplay && (
+                <>
+                  <span fg={colors.fg.dim}>·</span>
+                  <span fg={colors.accent.primary}>{modelDisplay.display}</span>
+                </>
               )}
-              {(agentDisplay.displayName || modelDisplay) && (trackerName || sandboxDisplay) && <span fg={colors.fg.dim}> | </span>}
-              {trackerName && <span fg={colors.accent.tertiary}>{trackerName}</span>}
-              {trackerName && sandboxDisplay && <span fg={colors.fg.dim}> | </span>}
+
+              {/* Tracker name */}
+              {(agentDisplay.displayName || modelDisplay) && trackerName && (
+                <>
+                  <span fg={colors.fg.dim}>·</span>
+                  <span fg={colors.accent.tertiary}>{trackerName}</span>
+                </>
+              )}
+
+              {/* Sandbox status */}
               {sandboxDisplay && (
-                <span fg={colors.status.info}>{SANDBOX_ICON} {sandboxDisplay}</span>
+                <>
+                  <span fg={colors.fg.dim}>·</span>
+                  <span fg={colors.status.info}>{SANDBOX_ICON}</span>
+                  <span fg={colors.status.info}> {sandboxDisplay}</span>
+                </>
               )}
             </text>
           )}
+
+          {/* Progress section with mini bar and percentage */}
           <box style={{ flexDirection: 'row', gap: 1, alignItems: 'center' }}>
             <MiniProgressBar completed={completedTasks} total={totalTasks} width={8} />
             <text fg={colors.fg.secondary}>
               {completedTasks}/{totalTasks}
             </text>
+            <text fg={colors.fg.muted}>
+              ({progressPercentage}%)
+            </text>
           </box>
+
           {/* Iteration counter - show current/max or current/∞ for unlimited */}
           {currentIteration !== undefined && maxIterations !== undefined && (
             <text fg={colors.fg.muted}>
-              <span fg={colors.fg.secondary}>
-                [{currentIteration}/{maxIterations === 0 ? '∞' : maxIterations}]
-              </span>
+              <span fg={colors.fg.secondary}>[</span>
+              <span fg={colors.accent.tertiary}>{currentIteration}</span>
+              <span fg={colors.fg.secondary}>/{maxIterations === 0 ? '∞' : maxIterations}]</span>
             </text>
           )}
-          <text fg={colors.fg.muted}>⏱</text>
-          <text fg={colors.fg.secondary}>{formattedTime}</text>
+
+          {/* Elapsed time with icon */}
+          <box style={{ flexDirection: 'row', gap: 0, alignItems: 'center' }}>
+            <text fg={colors.fg.muted}>⏱</text>
+            <text fg={colors.fg.secondary}> {formattedTime}</text>
+          </box>
+
+          {/* Version indicator (subtle) */}
+          <text fg={colors.fg.dim}>
+            {VERSION_ICON}
+          </text>
         </box>
       </box>
 
