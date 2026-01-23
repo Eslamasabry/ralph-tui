@@ -324,10 +324,10 @@ export function RunSummaryOverlay({
 					}}
 				>
 					<text fg={statusDisplay.color}>Run Summary ({statusDisplay.label})</text>
-					<text fg={colors.fg.muted}>
-						Duration: {formatElapsedTime(elapsedTime)}
-						{epicName && ` • Epic: ${epicName}`}
-					</text>
+				<text fg={colors.fg.muted}>
+					Duration: {formatElapsedTime(elapsedTime)}
+					{epicName ? ` • Epic: ${epicName}` : ''}
+				</text>
 				</box>
 
 				{/* Task and Merge Stats */}
@@ -391,10 +391,10 @@ export function RunSummaryOverlay({
 											)}
 											{failure.conflictFiles && failure.conflictFiles.length > 0 && (
 												<text fg={colors.fg.muted} style={{ paddingLeft: 2 }}>
-													Conflicts: {failure.conflictFiles.slice(0, 3).join(', ')}
-													{failure.conflictFiles.length > 3 && ` +${failure.conflictFiles.length - 3} more`}
-												</text>
-											)}
+												Conflicts: {failure.conflictFiles.slice(0, 3).join(', ')}
+												{failure.conflictFiles.length > 3 ? ` +${failure.conflictFiles.length - 3} more` : ''}
+											</text>
+										)}
 											<text fg={colors.accent.tertiary} style={{ paddingLeft: 2 }}>
 												Try: cd worktrees/merge && git mergetool
 											</text>

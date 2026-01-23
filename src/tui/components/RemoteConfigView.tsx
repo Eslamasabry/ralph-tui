@@ -289,9 +289,9 @@ export function RemoteConfigView({
       <box style={{ marginTop: 1, flexDirection: 'row' }}>
         <text fg={colors.fg.muted}>
           [q/Esc] Close
-          {configData?.globalExists && configData?.projectExists && '  [Tab] Switch'}
+          {configData?.globalExists && configData?.projectExists ? '  [Tab] Switch' : ''}
           {'  [j/k] Scroll'}
-          {onPushConfig && '  [p] Push local config'}
+          {onPushConfig ? '  [p] Push local config' : ''}
         </text>
       </box>
     </box>

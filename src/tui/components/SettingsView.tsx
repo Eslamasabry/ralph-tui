@@ -781,14 +781,14 @@ export function SettingsView({
             {editMode ? (
               'Enter: Apply  Esc: Cancel'
             ) : (
-              <>
+              <span>
                 <span fg={colors.fg.secondary}>↑↓</span>
                 <span fg={colors.fg.muted}> Navigate </span>
                 <span fg={colors.fg.secondary}>←→</span>
                 <span fg={colors.fg.muted}> Cycle </span>
                 <span fg={colors.fg.secondary}>Space</span>
                 <span fg={colors.fg.muted}> Toggle</span>
-              </>
+              </span>
             )}
           </text>
             <text fg={colors.fg.muted}>

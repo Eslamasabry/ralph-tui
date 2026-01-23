@@ -83,6 +83,13 @@ ralph-tui/
 **Display requirements**:
 - ALWAYS strip ANSI codes (causes black background artifacts in OpenTUI)
 
+**OpenTUI <text> children**:
+- Only use strings, <span>, StyledText, or TextNodeRenderable as children
+- Avoid `cond && 'text'` or `cond && <span>` inside <text>; use ternary with ''
+- Avoid fragments or arrays inside <text>; wrap in a single <span> or split into multiple <text>
+- Avoid nested <text> inside <text>
+- Coerce numbers/booleans/null/undefined with `String(...)` or default to ''
+
 **Workflow**:
 - NEVER stop before pushing - work incomplete until `git push` succeeds
 - NEVER say "ready to push" - YOU must push

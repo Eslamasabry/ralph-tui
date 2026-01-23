@@ -646,9 +646,7 @@ export function ActivityView({
                 <span fg={statusColor}>{statusIndicator}</span>
                 <span fg={colors.fg.muted}> </span>
                 <span fg={colors.fg.primary}>{iterationProgress}</span>
-                {isExecuting && (
-                  <span fg={colors.status.success}> (running)</span>
-                )}
+                <span fg={colors.status.success}>{isExecuting ? ' (running)' : ''}</span>
               </text>
             </box>
 
@@ -761,13 +759,13 @@ export function ActivityView({
               {/* Summary line - improved styling */}
               {subagentStats && (
                 <box style={{ marginBottom: 1 }}>
-                  <text fg={colors.fg.muted}>
-                    {String(subagentStats.totalSubagents)} subagents
-                    {subagentStats.failureCount > 0 && ` ✗${String(subagentStats.failureCount)}`}
-                    {subagentStats.maxDepth > 1 && ` (max depth ${String(subagentStats.maxDepth)})`}
-                  </text>
-                </box>
-              )}
+                <text fg={colors.fg.muted}>
+                  {String(subagentStats.totalSubagents)} subagents
+                  {subagentStats.failureCount > 0 ? ` ✗${String(subagentStats.failureCount)}` : ''}
+                  {subagentStats.maxDepth > 1 ? ` (max depth ${String(subagentStats.maxDepth)})` : ''}
+                </text>
+              </box>
+            )}
 
               {/* Subagent tree */}
               {subagentTree.map((node) => (

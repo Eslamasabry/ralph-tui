@@ -25,10 +25,10 @@ const ICONS = {
 function formatShortcut(key: string, description: string): ReactNode {
   const shortcutColors = getColors();
   return (
-    <text>
+    <span>
       <span fg={shortcutColors.accent.primary}>[{key}]</span>
       <span fg={shortcutColors.fg.secondary}> {description}</span>
-    </text>
+    </span>
   );
 }
 
@@ -117,7 +117,7 @@ export function Footer({
         <box style={{ flexDirection: 'row', gap: 2, alignItems: 'center', flexShrink: 1, overflow: 'hidden' }}>
           {primaryShortcuts.map((shortcut, index) => (
             <text key={shortcut.key} fg={footerColors.fg.muted}>
-              {index > 0 && ' '}
+              {index > 0 ? ' ' : ''}
               {formatShortcut(shortcut.key, shortcut.description)}
             </text>
           ))}
@@ -170,7 +170,7 @@ export function Footer({
         </text>
         {secondaryShortcuts.map((shortcut, index) => (
           <text key={shortcut.key} fg={footerColors.fg.muted}>
-            {index > 0 && ' '}
+            {index > 0 ? ' ' : ''}
             {formatShortcut(shortcut.key, shortcut.description)}
           </text>
         ))}

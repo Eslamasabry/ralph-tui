@@ -399,9 +399,9 @@ export function SubagentTreePanel({
             <span fg={isTaskRootSelected && isFocused ? colors.fg.primary : colors.accent.primary}>
               {' '}{currentTaskId || 'Task'}
             </span>
-            {currentTaskTitle && (
-              <span fg={colors.fg.secondary}> {truncateText(currentTaskTitle, Math.max(0, maxRowWidth - (currentTaskId?.length || 4) - 10))}</span>
-            )}
+            {currentTaskTitle
+              ? <span fg={colors.fg.secondary}> {truncateText(currentTaskTitle, Math.max(0, maxRowWidth - (currentTaskId?.length || 4) - 10))}</span>
+              : ''}
             <span fg={colors.fg.muted}>{tree.length > 0 ? ` (${String(tree.length)})` : ''}</span>
           </text>
         </box>

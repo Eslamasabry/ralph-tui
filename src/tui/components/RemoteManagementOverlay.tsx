@@ -482,7 +482,7 @@ function FormField({ label, value, focused, disabled }: FormFieldProps): ReactNo
         border={focused}
       >
         <text fg={fieldFg}>
-          {value || (focused ? '' : '(empty)')}
+          {value ? value : (focused ? '' : '(empty)')}
           {focused && !disabled ? '▏' : ''}
         </text>
       </box>

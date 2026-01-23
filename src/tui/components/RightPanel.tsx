@@ -151,9 +151,13 @@ function NoSelection({
       >
         <box style={{ marginBottom: 1 }}>
           <text fg={colors.status.warning}>
-            {remoteConnectionStatus === 'connecting' && '◐ Connecting...'}
-            {remoteConnectionStatus === 'reconnecting' && '⟳ Reconnecting...'}
-            {remoteConnectionStatus === 'disconnected' && '○ Not Connected'}
+            {remoteConnectionStatus === 'connecting'
+              ? '◐ Connecting...'
+              : remoteConnectionStatus === 'reconnecting'
+                ? '⟳ Reconnecting...'
+                : remoteConnectionStatus === 'disconnected'
+                  ? '○ Not Connected'
+                  : ''}
           </text>
         </box>
 
@@ -263,6 +267,7 @@ function TaskMetadataView({
   const metadataCriteria = task.metadata?.acceptanceCriteria;
   const criteria = parseAcceptanceCriteria(task.description, undefined, metadataCriteria);
   const cleanDescription = extractDescription(task.description);
+  const labels = task.labels ?? [];
 
   return (
     <box style={{ flexDirection: 'column', padding: 1, flexGrow: 1 }}>
@@ -322,16 +327,18 @@ function TaskMetadataView({
           )}
 
           {/* Labels row */}
-          {task.labels && task.labels.length > 0 && (
+          {labels.length > 0 && (
             <box style={{ flexDirection: 'row', marginBottom: 0 }}>
               <text fg={colors.fg.muted}>Labels: </text>
               <text>
-                {task.labels.map((label, i) => (
-                  <span key={label}>
-                    <span fg={colors.accent.secondary}>{label}</span>
-                    {i < task.labels!.length - 1 ? ', ' : ''}
-                  </span>
-                ))}
+                <span>
+                  {labels.map((label, i) => (
+                    <span key={label}>
+                      <span fg={colors.accent.secondary}>{label}</span>
+                      {i < labels.length - 1 ? ', ' : ''}
+                    </span>
+                  ))}
+                </span>
               </text>
             </box>
           )}

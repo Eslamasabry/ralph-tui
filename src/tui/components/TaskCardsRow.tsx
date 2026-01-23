@@ -283,7 +283,7 @@ function TaskCard({
         }}
       >
         <text fg={colors.fg.muted}>
-          {workerLabel || '—'}
+          {workerLabel ? workerLabel : '—'}
         </text>
         <text fg={statusColor}>
           {statusIndicator}
@@ -578,7 +578,7 @@ export function TaskCardsRow({
         {showScrollIndicators && (
           <text fg={colors.fg.muted}>
             {canScrollLeft ? '◀ ' : '  '}
-            {internalScrollOffset + 1}-{Math.min(internalScrollOffset + visibleCards, tasks.length)}/{String(tasks.length)}
+            {String(internalScrollOffset + 1)}-{String(Math.min(internalScrollOffset + visibleCards, tasks.length))}/{String(tasks.length)}
             {canScrollRight ? ' ▶' : '  '}
           </text>
         )}

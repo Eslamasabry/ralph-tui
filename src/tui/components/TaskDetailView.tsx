@@ -171,6 +171,7 @@ export function TaskDetailView({ task, onBack: _onBack }: TaskDetailViewProps): 
   const metadataCriteria = task.metadata?.acceptanceCriteria;
   const criteria = parseAcceptanceCriteria(task.description, undefined, metadataCriteria);
   const cleanDescription = extractDescription(task.description);
+  const labels = task.labels ?? [];
 
   return (
     <box
@@ -225,18 +226,16 @@ export function TaskDetailView({ task, onBack: _onBack }: TaskDetailViewProps): 
 
             {task.assignee && <MetadataRow label="Assignee" value={task.assignee} />}
 
-            {task.labels && task.labels.length > 0 && (
+            {labels.length > 0 && (
               <MetadataRow
                 label="Labels"
                 value={
-                  <text>
-                    {task.labels.map((label, i) => (
-                      <span key={label}>
-                        <span fg={colors.accent.secondary}>{label}</span>
-                        {i < task.labels!.length - 1 ? ', ' : ''}
-                      </span>
-                    ))}
-                  </text>
+                  labels.map((label, i) => (
+                    <span key={label}>
+                      <span fg={colors.accent.secondary}>{label}</span>
+                      {i < labels.length - 1 ? ', ' : ''}
+                    </span>
+                  ))
                 }
               />
             )}

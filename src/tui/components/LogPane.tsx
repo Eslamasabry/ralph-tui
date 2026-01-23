@@ -455,7 +455,7 @@ export function LogPane({
         >
           <text fg={colors.fg.muted}>
             {isLiveStreaming ? '● Live Output' : 'Output'}
-            {displayOutput && ` (${displayOutput.split('\n').length} lines)`}
+            {displayOutput ? ` (${displayOutput.split('\n').length} lines)` : ''}
           </text>
         </box>
         {/* Header separator line */}

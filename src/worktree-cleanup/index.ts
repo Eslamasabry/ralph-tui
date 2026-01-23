@@ -172,8 +172,9 @@ export async function cleanupAllWorktrees(options: WorktreeCleanupOptions): Prom
 	// 3. Prune any stale worktree references
 	try {
 		await execGitAllowFailure(repoRoot, ['worktree', 'prune']);
-	} catch (err) {
+	} catch (_err) {
 		// Prune failure is non-critical
+		void _err;
 	}
 
 	const success = errors.length === 0;

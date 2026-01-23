@@ -49,21 +49,23 @@ export function FormattedText({ segments }: FormattedTextProps): ReactNode {
 
   return (
     <text fg={COLOR_MAP.default}>
-      {segments.map((segment, index) => {
-        const color = segment.color;
-        // Ensure text is always a string
-        const safeText = String(segment.text ?? '');
+      <span>
+        {segments.map((segment, index) => {
+          const color = segment.color;
+          // Ensure text is always a string
+          const safeText = String(segment.text ?? '');
 
-        // Always wrap in span to avoid mixing string and element returns
-        // Use default color when no color specified
-        const textColor = (!color || color === 'default') ? COLOR_MAP.default : COLOR_MAP[color];
+          // Always wrap in span to avoid mixing string and element returns
+          // Use default color when no color specified
+          const textColor = (!color || color === 'default') ? COLOR_MAP.default : COLOR_MAP[color];
 
-        return (
-          <span key={index} fg={textColor} bg={panelBg}>
-            {safeText}
-          </span>
-        );
-      })}
+          return (
+            <span key={index} fg={textColor} bg={panelBg}>
+              {safeText}
+            </span>
+          );
+        })}
+      </span>
     </text>
   );
 }

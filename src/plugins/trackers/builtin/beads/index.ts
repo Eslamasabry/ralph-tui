@@ -473,7 +473,7 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
 
         if (exitCode !== 0) {
           console.error('bd list failed:', stderr);
-          return [];
+          return this.lastTasks;
         }
 
         // Parse JSON output
@@ -482,7 +482,7 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
           beads = JSON.parse(stdout) as BeadJson[];
         } catch (err) {
           console.error('Failed to parse bd list output:', err);
-          return [];
+          return this.lastTasks;
         }
 
         // Convert to TrackerTask

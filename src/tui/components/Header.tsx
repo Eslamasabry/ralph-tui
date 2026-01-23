@@ -345,21 +345,21 @@ function AgentInfoSection({
 
   return (
     <text fg={colors.fg.muted}>
-      {agentDisplay.showRateLimitIcon && (
-        <span fg={colors.status.warning}>{RATE_LIMIT_ICON} </span>
-      )}
-      {agentDisplay.displayName && (
-        <span fg={agentDisplay.color}>{agentDisplay.displayName}</span>
-      )}
-      {agentDisplay.displayName && (modelDisplay || trackerName || sandboxDisplay) && (
-        <span fg={colors.fg.dim}> {SEPARATOR} </span>
-      )}
-      {modelDisplay && (
-        <span fg={colors.accent.primary}>{modelDisplay.display}</span>
-      )}
-      {(agentDisplay.displayName || modelDisplay) && (trackerName || sandboxDisplay) && (
-        <span fg={colors.fg.dim}> {SEPARATOR} </span>
-      )}
+      {agentDisplay.showRateLimitIcon
+        ? <span fg={colors.status.warning}>{RATE_LIMIT_ICON} </span>
+        : ''}
+      {agentDisplay.displayName
+        ? <span fg={agentDisplay.color}>{agentDisplay.displayName}</span>
+        : ''}
+      {agentDisplay.displayName && (modelDisplay || trackerName || sandboxDisplay)
+        ? <span fg={colors.fg.dim}> {SEPARATOR} </span>
+        : ''}
+      {modelDisplay
+        ? <span fg={colors.accent.primary}>{modelDisplay.display}</span>
+        : ''}
+      {(agentDisplay.displayName || modelDisplay) && (trackerName || sandboxDisplay)
+        ? <span fg={colors.fg.dim}> {SEPARATOR} </span>
+        : ''}
       <span fg={colors.accent.tertiary}>{trackerName || ''}</span>
       <span fg={colors.fg.dim}>{(trackerName && sandboxDisplay) ? `${SEPARATOR} ` : ''}</span>
       <span fg={colors.status.info}>{sandboxDisplay ? `${SANDBOX_ICON} ${sandboxDisplay}` : ''}</span>
