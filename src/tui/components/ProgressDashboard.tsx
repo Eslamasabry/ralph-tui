@@ -56,6 +56,13 @@ export interface ProgressDashboardProps {
   pendingMainCount?: number;
   /** Cleanup configuration (if cleanup is enabled) */
   cleanupConfig?: CleanupConfig;
+  /** Worktree health summary for prune button */
+  worktreeHealth?: {
+    stale: number;
+    prunable: number;
+  };
+  /** Whether a prune operation is in progress */
+  pruning?: boolean;
 }
 
 /**
@@ -207,7 +214,6 @@ export function ProgressDashboard({
   pendingMainCount,
   cleanupConfig,
   worktreeHealth,
-  onPruneWorktrees,
   pruning,
 }: ProgressDashboardProps): ReactNode {
   // Use terminal dimensions for responsive layout
@@ -409,11 +415,7 @@ export function ProgressDashboard({
                 ) : (
                   <span>
                     <span fg={colors.status.warning}>[P]</span>{' '}
-                    <span
-                      fg={colors.status.success}
-                      bold={true}
-                      onClick={onPruneWorktrees}
-                    >
+                    <span fg={colors.status.success}>
                       Prune Worktrees
                     </span>
                     {(worktreeHealth.stale > 0 || worktreeHealth.prunable > 0) && (
