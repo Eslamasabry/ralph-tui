@@ -491,7 +491,7 @@ export function LogPane({
       {currentIteration > 0 && (
         <box style={{ marginTop: 1, flexDirection: 'row', justifyContent: 'flex-end' }}>
           <text fg={colors.fg.muted}>
-            Iteration <text fg={colors.accent.primary}>{currentIteration}</text>
+            Iteration <text fg={colors.accent.primary}>{String(currentIteration)}</text>
           </text>
         </box>
       )}

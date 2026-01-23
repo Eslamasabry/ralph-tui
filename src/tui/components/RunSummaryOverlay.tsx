@@ -437,7 +437,7 @@ export function RunSummaryOverlay({
 										fg={isSelected ? colors.bg.primary : (isRestoreAction ? getStatusColor(status) : getStatusColor(status))}
 										bg={isSelected ? colors.accent.primary : undefined}
 									>
-										[{index + 1}]{showLoading ? ' ⟳' : getStatusIcon(status)} {showLoading ? `${action.label}...` : action.label}
+										[{String(index + 1)}]{showLoading ? ' ⟳' : getStatusIcon(status)} {showLoading ? `${action.label}...` : action.label}
 									</text>
 								);
 							})}

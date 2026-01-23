@@ -589,7 +589,7 @@ export function TaskCardsRow({
         {showScrollIndicators && (
           <text fg={colors.fg.muted}>
             {canScrollLeft ? '◀ ' : '  '}
-            {internalScrollOffset + 1}-{Math.min(internalScrollOffset + visibleCards, tasks.length)}/{tasks.length}
+            {internalScrollOffset + 1}-{Math.min(internalScrollOffset + visibleCards, tasks.length)}/{String(tasks.length)}
             {canScrollRight ? ' ▶' : '  '}
           </text>
         )}
