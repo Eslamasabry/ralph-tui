@@ -51,12 +51,20 @@ export class WorktreeManager {
     return join(this.worktreesDir, workerId);
   }
 
-  async createWorktree(options: CreateWorktreeOptions): Promise<string> {
-    const { workerId, branchName, baseRef = 'HEAD', lockReason } = options;
+  /**
+   * Create multiple worktrees in parallel for faster worker initialization.
+   * This is significantly faster than creating worktrees sequentially.
+   *
+   * @param options Array of worktree creation options
+   * @returns Map of workerId to worktreePath
+   */
+  async createWorktrees(options: CreateWorktreeOptions[]): Promise<Map<string, string>> {
     await this.ensureWorktreesDir();
 
-    const worktreePath = this.getWorktreePath(workerId);
+    // Clean up all worktrees in parallel first
+    await Promise.all(options.map((opt) => this.cleanupWorktree(opt.workerId)));
 
+// OURS:
     // Get the expected commit before cleanup
     const expectedCommit = await this.resolveRef(baseRef);
 
@@ -94,10 +102,62 @@ export class WorktreeManager {
     if (lockReason) {
       await this.lockWorktree(worktreePath, lockReason);
     }
+// THEIRS:
+    // Create all worktrees in parallel
+    const results = await Promise.all(
+      options.map(async (opt) => {
+        const { workerId, branchName, baseRef = 'HEAD', lockReason } = opt;
+        const worktreePath = this.getWorktreePath(workerId);
 
-    await this.ensureWorktreeShims(worktreePath);
+        // Use -b flag directly - this creates a new branch if it doesn't exist
+        // and works if branch already exists (git will reuse existing branch)
+        const args = [
+          '-C', this.repoRoot,
+          'worktree',
+          'add',
+          '-b', branchName,
+          worktreePath,
+          baseRef,
+        ];
 
-    return worktreePath;
+        let result = await this.execGit(args);
+
+        if (result.exitCode !== 0) {
+          // Recovery: cleanup stale state and retry
+          await this.cleanupWorktree(workerId);
+          const retryArgs = ['-C', this.repoRoot, 'worktree', 'add', '-f', '-f', '-b', branchName, worktreePath, baseRef];
+          result = await this.execGit(retryArgs);
+          if (result.exitCode !== 0) {
+            throw new Error(`git worktree add failed: ${result.stderr}`);
+          }
+        }
+
+        if (lockReason) {
+          await this.lockWorktree(worktreePath, lockReason);
+        }
+
+        // Create shims in parallel with the worktree creation
+        await this.ensureWorktreeShims(worktreePath);
+
+        return { workerId, worktreePath };
+      })
+    );
+
+    const worktreeMap = new Map<string, string>();
+    for (const result of results) {
+      worktreeMap.set(result.workerId, result.worktreePath);
+    }
+
+    return worktreeMap;
+  } (feat: ralph-tui-wmr.7 - Optimize worktree creation < 500ms)
+
+  /**
+   * Create a single worktree with optimized operations.
+   * Uses parallel operations where possible.
+   */
+  async createWorktree(options: CreateWorktreeOptions): Promise<string> {
+    const worktrees = await this.createWorktrees([options]);
+    return worktrees.get(options.workerId)!;
   }
 
   async lockWorktree(worktreePath: string, reason?: string): Promise<void> {
@@ -147,6 +207,7 @@ export class WorktreeManager {
     }
   }
 
+<<<<<<< HEAD
   private async branchExists(branchName: string): Promise<boolean> {
     const result = await this.execGit(['-C', this.repoRoot, 'rev-parse', '--verify', `refs/heads/${branchName}`]);
     return result.exitCode === 0;
@@ -252,11 +313,17 @@ export class WorktreeManager {
     }
   }
 
+=======
+>>>>>>> 0cffeba (feat: ralph-tui-wmr.7 - Optimize worktree creation < 500ms)
   private async cleanupWorktree(workerId: string): Promise<void> {
     const worktreePath = this.getWorktreePath(workerId);
-    await this.execGitAllowFailure(['-C', this.repoRoot, 'worktree', 'unlock', worktreePath]);
-    await this.execGitAllowFailure(['-C', this.repoRoot, 'worktree', 'remove', '--force', worktreePath]);
-    await this.execGitAllowFailure(['-C', this.repoRoot, 'worktree', 'prune']);
+
+    // Run all git cleanup operations in parallel for faster cleanup
+    await Promise.all([
+      this.execGitAllowFailure(['-C', this.repoRoot, 'worktree', 'unlock', worktreePath]),
+      this.execGitAllowFailure(['-C', this.repoRoot, 'worktree', 'remove', '--force', worktreePath]),
+      this.execGitAllowFailure(['-C', this.repoRoot, 'worktree', 'prune']),
+    ]);
 
     try {
       await rm(worktreePath, { recursive: true, force: true });

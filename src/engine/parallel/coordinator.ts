@@ -85,12 +85,22 @@ export class ParallelCoordinator {
     this.baseBranch = await this.getCurrentBranch();
     this.mergeBranch = `parallel/integration/${this.baseBranch}`;
     await this.ensureBranchAt(this.mergeBranch, this.baseBranch);
-    this.mergeWorktreePath = await this.worktreeManager.createWorktree({
-      workerId: 'merge',
-      branchName: this.mergeBranch,
-      baseRef: this.baseBranch,
-      lockReason: 'merge queue',
-    });
+
+    // Create merge worktree and initialize workers in parallel for faster startup
+    const [mergeWorktreePath] = (
+      await this.worktreeManager.createWorktrees([
+        {
+          workerId: 'merge',
+          branchName: this.mergeBranch,
+          baseRef: this.baseBranch,
+          lockReason: 'merge queue',
+        },
+      ])
+    ).values();
+
+    this.mergeWorktreePath = mergeWorktreePath;
+
+    // Initialize all workers in parallel
     await this.initializeWorkers();
   }
 
@@ -98,16 +108,24 @@ export class ParallelCoordinator {
     const agentRegistry = getAgentRegistry();
     const baseCommit = await this.resolveCommit(this.mergeBranch);
 
+    // Create all worker worktrees in parallel
+    const workerOptions = [];
     for (let i = 0; i < this.maxWorkers; i++) {
       const workerId = `worker-${i + 1}`;
       const branchName = `worker/${workerId}/${Date.now()}`;
-      const worktreePath = await this.worktreeManager.createWorktree({
+      workerOptions.push({
         workerId,
         branchName,
         baseRef: this.mergeBranch,
         lockReason: 'parallel worker active',
       });
+    }
 
+    const worktreeMap = await this.worktreeManager.createWorktrees(workerOptions);
+
+    for (let i = 0; i < this.maxWorkers; i++) {
+      const workerId = `worker-${i + 1}`;
+      const worktreePath = worktreeMap.get(workerId)!;
       const agent = await this.createAgentInstance(agentRegistry);
       const worker = new ParallelWorker(workerId, worktreePath, agent, this.config);
       this.workerBaseCommits.set(workerId, baseCommit);
@@ -404,6 +422,17 @@ export class ParallelCoordinator {
     conflictFiles?: string[]
   ): Promise<void> {
     const commitMetadata = await this.getCommitMetadata(entry.commit, this.config.cwd);
+    const shortCommit = entry.commit.slice(0, 7);
+
+    // Build enhanced error message with task ID, commit hash, conflict files, and suggestions
+    const enhancedReason = this.buildEnhancedErrorMessage({
+      taskId: entry.task.id,
+      taskTitle: entry.task.title,
+      commit: shortCommit,
+      reason,
+      conflictFiles,
+    });
+
     this.emit({
       type: 'parallel:merge-failed',
       timestamp: new Date().toISOString(),
@@ -411,7 +440,7 @@ export class ParallelCoordinator {
       task: entry.task,
       commit: entry.commit,
       commitMetadata,
-      reason,
+      reason: enhancedReason,
       conflictFiles,
     });
 
@@ -423,6 +452,41 @@ export class ParallelCoordinator {
       await this.tracker.updateTaskStatus(entry.task.id, 'blocked');
       await this.tracker.releaseTask?.(entry.task.id, entry.workerId);
     }
+  }
+
+  /**
+   * Build an enhanced error message with task ID, commit hash, conflict files, and manual resolution suggestions.
+   */
+  private buildEnhancedErrorMessage(params: {
+    taskId: string;
+    taskTitle: string;
+    commit: string;
+    reason: string;
+    conflictFiles?: string[];
+  }): string {
+    const { taskId, taskTitle, commit, reason, conflictFiles } = params;
+    const lines: string[] = [];
+
+    // Header with task and commit info
+    lines.push(`Task: ${taskId}`);
+    lines.push(`Title: ${taskTitle}`);
+    lines.push(`Commit: ${commit}`);
+    lines.push(`Reason: ${reason}`);
+
+    // Add conflict files if available
+    if (conflictFiles && conflictFiles.length > 0) {
+      lines.push(`Conflict files: ${conflictFiles.join(', ')}`);
+    }
+
+    // Add suggestions for manual resolution
+    lines.push('');
+    lines.push('Suggestions for manual resolution:');
+    lines.push('1. Run: git merge-tool or manually resolve conflicts in the listed files');
+    lines.push('2. After resolving, run: git add <files> && git commit --amend --no-edit');
+    lines.push('3. Alternatively, skip this commit with: git cherry-pick --skip');
+    lines.push('4. To abort and try later: git cherry-pick --abort');
+
+    return lines.join('\n');
   }
 
   private async markMergeSuccess(
