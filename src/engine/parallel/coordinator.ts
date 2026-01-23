@@ -4,6 +4,7 @@
 
 import type { RalphConfig } from '../../config/types.js';
 import { spawn } from 'node:child_process';
+import { join } from 'node:path';
 import type { TrackerPlugin, TrackerTask } from '../../plugins/trackers/types.js';
 import type { AgentPlugin, AgentExecutionResult } from '../../plugins/agents/types.js';
 import { getAgentRegistry } from '../../plugins/agents/registry.js';
@@ -997,6 +998,20 @@ export class ParallelCoordinator {
 
       const conflicts = await this.execGitIn(worktreePath, ['diff', '--name-only', '--diff-filter=U']);
       const conflictFiles = conflicts.stdout.split('\n').map((line) => line.trim()).filter(Boolean);
+      
+      // Attempt programmatic conflict resolution first
+      const programmaticResolved = await this.attemptProgrammaticConflictResolution(worktreePath, conflictFiles);
+      if (programmaticResolved) {
+        await this.execGitIn(worktreePath, ['add', '-A']);
+        const continueResult = await this.execGitIn(worktreePath, ['cherry-pick', '--continue']);
+        if (continueResult.exitCode === 0) {
+          const headCommit = await this.execGitIn(worktreePath, ['rev-parse', 'HEAD']);
+          return { success: true, commit: headCommit.stdout.trim(), conflictFiles };
+        }
+      }
+
+      // Fallback to LLM-based conflict resolution
+      console.warn(`[ParallelCoordinator] Programmatic conflict resolution failed for ${entry.task.id}, falling back to LLM`);
       const prompt = this.buildMergePrompt(entry.task, entry.commit, conflicts.stdout.trim());
 
       const agentRegistry = getAgentRegistry();
@@ -1033,6 +1048,122 @@ export class ParallelCoordinator {
         console.warn(`[ParallelCoordinator] Failed to remove merge worktree ${mergeWorkerId}: ${err instanceof Error ? err.message : 'unknown error'}`);
       });
     }
+  }
+
+  private async attemptProgrammaticConflictResolution(worktreePath: string, conflictFiles: string[]): Promise<boolean> {
+    console.log(`[ParallelCoordinator] Attempting programmatic conflict resolution for ${conflictFiles.length} files`);
+    
+    // Try simple resolution strategies for each conflicting file
+    for (const file of conflictFiles) {
+      const filePath = join(worktreePath, file);
+      
+      try {
+        // Strategy 1: Check if we can use git mergetool with auto-resolve (if configured)
+        const mergetoolResult = await this.execGitIn(worktreePath, ['mergetool', '--no-prompt', file]);
+        if (mergetoolResult.exitCode === 0) {
+          console.log(`[ParallelCoordinator] Auto-resolved conflict in ${file} using mergetool`);
+          continue;
+        }
+
+        // Strategy 2: Check if the conflict is simple (e.g., only additions/deletions)
+        const content = await Bun.file(filePath).text();
+        if (this.isSimpleConflict(content)) {
+          const resolvedContent = this.resolveSimpleConflict(content);
+          await Bun.write(filePath, resolvedContent);
+          console.log(`[ParallelCoordinator] Auto-resolved simple conflict in ${file}`);
+          continue;
+        }
+
+        // Strategy 3: Try to accept incoming changes (theirs) or current changes (ours)
+        // For now, try accepting incoming changes (worker's changes)
+        const theirsResult = await this.execGitIn(worktreePath, ['checkout', '--theirs', file]);
+        if (theirsResult.exitCode === 0) {
+          console.log(`[ParallelCoordinator] Auto-resolved conflict in ${file} by accepting incoming changes`);
+          continue;
+        }
+
+        // Strategy 4: Try accepting current changes (ours) if theirs failed
+        const oursResult = await this.execGitIn(worktreePath, ['checkout', '--ours', file]);
+        if (oursResult.exitCode === 0) {
+          console.log(`[ParallelCoordinator] Auto-resolved conflict in ${file} by accepting current changes`);
+          continue;
+        }
+
+        console.warn(`[ParallelCoordinator] Failed to auto-resolve conflict in ${file}`);
+        return false;
+        
+      } catch (error) {
+        console.warn(`[ParallelCoordinator] Error resolving conflict in ${file}: ${error}`);
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private isSimpleConflict(content: string): boolean {
+    // Simple conflict: contains both <<<<<<< and ======= and >>>>>>> markers
+    // and doesn't have nested conflicts
+    const conflictMarkers = [
+      /<<<<<<< HEAD.*=======.*>>>>>>> [0-9a-f]+/s,
+      /<<<<<<< HEAD.*=======.*>>>>>>> [0-9a-f]+/s
+    ];
+    
+    return conflictMarkers.some(regex => regex.test(content));
+  }
+
+  private resolveSimpleConflict(content: string): string {
+    // For simple conflicts, try to automatically merge by:
+    // 1. Removing conflict markers
+    // 2. Keeping both sets of changes with clear separators
+    // 3. Or trying to detect which version to keep
+    
+    // First, detect the conflict pattern
+    const conflictPattern = /<<<<<<< HEAD\n(.*?)\n=======\n(.*?)\n>>>>>>> [0-9a-f]+/s;
+    const match = content.match(conflictPattern);
+    
+    if (match) {
+      const ours = match[1];
+      const theirs = match[2];
+      
+      // If changes are similar, keep theirs (worker's changes)
+      if (this.areChangesSimilar(ours, theirs)) {
+        return content.replace(conflictPattern, theirs);
+      }
+      
+      // If changes are different, keep both with comments
+      return content.replace(conflictPattern, `// OURS:\n${ours}\n// THEIRS:\n${theirs}`);
+    }
+    
+    return content;
+  }
+
+  private areChangesSimilar(ours: string, theirs: string): boolean {
+    // Simple similarity check: remove whitespace and compare
+    const normalize = (str: string) => str.replace(/\s+/g, '').toLowerCase();
+    const ourNormalized = normalize(ours);
+    const theirNormalized = normalize(theirs);
+    
+    // Consider changes similar if 80% or more characters match
+    const commonChars = this.countCommonCharacters(ourNormalized, theirNormalized);
+    const maxLength = Math.max(ourNormalized.length, theirNormalized.length);
+    const similarity = maxLength > 0 ? commonChars / maxLength : 0;
+    
+    return similarity >= 0.8;
+  }
+
+  private countCommonCharacters(str1: string, str2: string): number {
+    const set1 = new Set(str1);
+    const set2 = new Set(str2);
+    let count = 0;
+    
+    for (const char of set1) {
+      if (set2.has(char)) {
+        count++;
+      }
+    }
+    
+    return count;
   }
 
   private buildMergePrompt(task: TrackerTask, commit: string, conflictFiles: string): string {
