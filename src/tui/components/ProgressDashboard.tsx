@@ -333,7 +333,7 @@ export function ProgressDashboard({
             <box style={{ flexDirection: 'row' }}>
               <text fg={colors.status.warning}>⚠ </text>
               <text fg={colors.fg.secondary}>Pending main: </text>
-              <text fg={colors.status.warning}>{pendingMainCount}</text>
+              <text fg={colors.status.warning}>{String(pendingMainCount)}</text>
               <text fg={colors.fg.muted}> task(s)</text>
             </box>
           )}
