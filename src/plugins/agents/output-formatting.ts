@@ -66,19 +66,61 @@ export function formatCommand(command: string): string {
   // Normalize newlines to spaces
   let cmd = command.replace(/\n/g, ' ').trim();
 
-  // Extract actual command from env var setup
-  // Pattern: ENV_VAR=value ... ; actual_command
-  // We look for a semicolon that follows an assignment pattern
-  const envAssignmentSemicolonPattern = /^\s*(\w+=[^\s;]*\s*)+(?:;\s*)+/;
-  if (envAssignmentSemicolonPattern.test(cmd)) {
-    cmd = cmd.replace(envAssignmentSemicolonPattern, '').trim();
+  // Handle both types of environment variable declarations
+  // First check for semicolon-separated env vars followed by command
+  // But preserve semicolons inside strings
+  if (cmd.includes(';')) {
+    const parts: string[] = [];
+    let inQuote = '';
+    let currentPart = '';
+    
+    for (let i = 0; i < cmd.length; i++) {
+      const char = cmd[i];
+      
+      if (inQuote) {
+        if (char === inQuote) {
+          inQuote = '';
+        }
+        currentPart += char;
+      } else {
+        if (char === '"' || char === "'") {
+          inQuote = char;
+          currentPart += char;
+        } else if (char === ';') {
+          parts.push(currentPart.trim());
+          currentPart = '';
+        } else {
+          currentPart += char;
+        }
+      }
+    }
+    
+    if (currentPart.trim()) {
+      parts.push(currentPart.trim());
+    }
+
+    // Only filter out parts that are standalone env vars (not containing spaces)
+    const nonEnvParts = parts.filter(part => {
+      const hasSpace = part.includes(' ');
+      const isEnvVar = !hasSpace && part.match(/^[\w_]+=/);
+      return !isEnvVar;
+    });
+    cmd = nonEnvParts.join(' ; ').trim();
   }
 
-  // Also handle inline env vars before command (VAR=val VAR2=val2 command)
+  // Then handle inline env vars before command (VAR=val VAR2=val2 command)
   // If the command starts with lots of VAR= patterns, try to find the actual command
-  const envVarPattern = /^(\s*\w+=[^\s]*\s+)+/;
-  if (envVarPattern.test(cmd)) {
-    cmd = cmd.replace(envVarPattern, '').trim();
+  // We'll do this by finding the first token that doesn't match VAR= format
+  let envVarsEnd = 0;
+  const tokens = cmd.split(/\s+/);
+  let i = 0;
+  while (i < tokens.length && tokens[i].match(/^\w+=[^\s]+$/)) {
+    envVarsEnd += tokens[i].length + 1; // +1 for space separator
+    i++;
+  }
+  
+  if (envVarsEnd > 0) {
+    cmd = cmd.slice(envVarsEnd).trim();
   }
 
   // Truncate very long commands
@@ -201,19 +243,24 @@ export function formatToolCall(toolName: string, input?: ToolInputFormatters): s
 /**
  * Clean a command string (remove env vars, normalize whitespace, truncate).
  */
-function cleanCommand(command: string): string {
+export function cleanCommand(command: string): string {
   let cmd = command.replace(/\n/g, ' ').trim();
 
-  const envAssignmentSemicolonPattern = /^\s*(\w+=[^\s;]*\s*)+(?:;\s*)+/;
-  if (envAssignmentSemicolonPattern.test(cmd)) {
-    cmd = cmd.replace(envAssignmentSemicolonPattern, '').trim();
+  // Extract actual command from env var setup with semicolons
+  // Handle cases like "VAR1=a ; VAR2=b ; actual-command"
+  if (cmd.includes(';')) {
+    const parts = cmd.split(';').map(part => part.trim()).filter(part => part);
+    const nonEnvParts = parts.filter(part => !part.match(/^[\w_]+=/));
+    cmd = nonEnvParts.join(' ').trim();
   }
 
+  // Also handle inline env vars before command (VAR=val VAR2=val2 command)
   const envVarPattern = /^(\s*\w+=[^\s]*\s+)+/;
   if (envVarPattern.test(cmd)) {
     cmd = cmd.replace(envVarPattern, '').trim();
   }
 
+  // Truncate very long commands
   if (cmd.length > 100) {
     cmd = cmd.slice(0, 100) + '...';
   }
@@ -231,7 +278,7 @@ export function formatToolCallSegments(toolName: string, input?: ToolInputFormat
   const segments: FormattedSegment[] = [];
 
   // Tool name in brackets
-  segments.push({ text: `[${toolName}]`, color: 'blue' });
+  segments.push({ text: `[${String(toolName ?? 'unknown')}]`, color: 'blue' });
 
   if (!input) {
     segments.push({ text: '\n' });
@@ -240,19 +287,19 @@ export function formatToolCallSegments(toolName: string, input?: ToolInputFormat
 
   // Description (no color - default text)
   if (input.description) {
-    segments.push({ text: ` ${input.description}` });
+    segments.push({ text: ` ${String(input.description)}` });
   }
 
   // Command with $ prefix (muted color for the $)
   if (input.command) {
-    const cmd = cleanCommand(input.command);
+    const cmd = cleanCommand(String(input.command));
     segments.push({ text: ' $ ', color: 'muted' });
     segments.push({ text: cmd });
   }
 
   // File path in purple
   if (input.file_path || input.path) {
-    const path = input.file_path || input.path || '';
+    const path = String(input.file_path || input.path || '');
     segments.push({ text: ' ' });
     segments.push({ text: path, color: 'purple' });
   }
@@ -260,37 +307,40 @@ export function formatToolCallSegments(toolName: string, input?: ToolInputFormat
   // Pattern with label
   if (input.pattern) {
     segments.push({ text: ' pattern: ', color: 'muted' });
-    segments.push({ text: input.pattern, color: 'cyan' });
+    segments.push({ text: String(input.pattern), color: 'cyan' });
   }
 
   // Query with label
   if (input.query) {
     segments.push({ text: ' query: ', color: 'muted' });
-    segments.push({ text: input.query, color: 'yellow' });
+    segments.push({ text: String(input.query), color: 'yellow' });
   }
 
   // URL in cyan
   if (input.url) {
     segments.push({ text: ' ' });
-    segments.push({ text: input.url, color: 'cyan' });
+    segments.push({ text: String(input.url), color: 'cyan' });
   }
 
   // Content preview
   if (input.content) {
-    const preview = input.content.length > 200
-      ? `${input.content.slice(0, 200)}... (${input.content.length} chars)`
-      : input.content;
+    const contentStr = String(input.content);
+    const preview = contentStr.length > 200
+      ? `${contentStr.slice(0, 200)}... (${contentStr.length} chars)`
+      : contentStr;
     segments.push({ text: ` "${preview}"`, color: 'muted' });
   }
 
   // Edit diff
   if (input.old_string && input.new_string) {
-    const displayOld = input.old_string.length > 50
-      ? input.old_string.slice(0, 50) + '...'
-      : input.old_string;
-    const displayNew = input.new_string.length > 50
-      ? input.new_string.slice(0, 50) + '...'
-      : input.new_string;
+    const oldStr = String(input.old_string);
+    const newStr = String(input.new_string);
+    const displayOld = oldStr.length > 50
+      ? oldStr.slice(0, 50) + '...'
+      : oldStr;
+    const displayNew = newStr.length > 50
+      ? newStr.slice(0, 50) + '...'
+      : newStr;
     segments.push({ text: ' edit: "', color: 'muted' });
     segments.push({ text: displayOld, color: 'pink' });
     segments.push({ text: '" → "', color: 'muted' });
@@ -308,7 +358,7 @@ export function formatToolCallSegments(toolName: string, input?: ToolInputFormat
 export function formatErrorSegments(message: string): FormattedSegment[] {
   return [
     { text: '\n' },
-    { text: `[Error: ${message}]`, color: 'pink' },
+    { text: `[Error: ${String(message ?? 'Unknown error')}]`, color: 'pink' },
     { text: '\n' },
   ];
 }
@@ -389,7 +439,9 @@ export function processAgentEventsToSegments(events: AgentDisplayEvent[]): Forma
       case 'text':
         if (event.content) {
           // Ensure text ends with newline so streaming parser treats it as a complete line
-          const text = event.content.endsWith('\n') ? event.content : event.content + '\n';
+          const text = String(event.content).endsWith('\n') 
+            ? String(event.content) 
+            : String(event.content) + '\n';
           segments.push({ text });
         }
         break;
@@ -403,7 +455,7 @@ export function processAgentEventsToSegments(events: AgentDisplayEvent[]): Forma
         break;
 
       case 'error':
-        segments.push(...formatErrorSegments(event.message));
+        segments.push(...formatErrorSegments(String(event.message ?? 'Unknown error')));
         break;
 
       // Intentionally skip these for clean output:
