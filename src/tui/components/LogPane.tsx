@@ -343,7 +343,7 @@ function LogPaneHeader({
             )}
             {currentIteration > 0 && (
               <text fg={colors.fg.muted}>
-                Iter: <text fg={colors.accent.secondary}>{currentIteration}</text>
+                Iter: <text fg={colors.accent.secondary}>{String(currentIteration)}</text>
               </text>
             )}
           </box>

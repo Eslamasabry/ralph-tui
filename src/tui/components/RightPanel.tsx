@@ -340,7 +340,7 @@ function TaskMetadataView({
           {task.iteration !== undefined && (
             <box style={{ flexDirection: 'row', marginBottom: 0 }}>
               <text fg={colors.fg.muted}>Iteration: </text>
-              <text fg={colors.accent.primary}>{task.iteration}</text>
+              <text fg={colors.accent.primary}>{String(task.iteration)}</text>
             </box>
           )}
         </box>

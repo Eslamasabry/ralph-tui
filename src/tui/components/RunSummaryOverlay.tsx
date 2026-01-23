@@ -346,10 +346,10 @@ export function RunSummaryOverlay({
 					{/* Merge stats row */}
 					<box style={{ flexDirection: 'row', gap: 2 }}>
 						<text fg={colors.fg.muted}>Merges: </text>
-						<text fg={colors.status.success}>{mergeStats.merged} ok</text>
-						{mergeStats.resolved > 0 && <text fg={colors.status.info}>• {mergeStats.resolved} resolved</text>}
-						{mergeStats.failed > 0 && <text fg={colors.status.error}>• {mergeStats.failed} failed</text>}
-						<text fg={colors.fg.muted}>• {mergeStats.queued} queued</text>
+						<text fg={colors.status.success}>{String(mergeStats.merged)} ok</text>
+						{mergeStats.resolved > 0 && <text fg={colors.status.info}>• {String(mergeStats.resolved)} resolved</text>}
+						{mergeStats.failed > 0 && <text fg={colors.status.error}>• {String(mergeStats.failed)} failed</text>}
+						<text fg={colors.fg.muted}>• {String(mergeStats.queued)} queued</text>
 					</box>
 				</box>
 

@@ -342,7 +342,7 @@ export function ChatView({
           {subtitle && <text fg={colors.fg.muted}>{subtitle}</text>}
         </box>
         <text fg={colors.fg.muted}>
-          {messages.length} message{messages.length !== 1 ? 's' : ''}
+          {String(messages.length)} message{messages.length !== 1 ? 's' : ''}
         </text>
       </box>
 

@@ -1,106 +1,12 @@
 /**
  * ABOUTME: Theme constants and types for the Ralph TUI application.
-// OURS:
  * Provides consistent styling across all TUI components with modern dark and light themes.
  */
 
 /**
- * Color schemes for light and dark themes
+ * Theme mode type
  */
-export const colorSchemes = {
-  dark: {
-    // Background colors
-    bg: {
-      primary: '#1a1b26',
-      secondary: '#24283b',
-      tertiary: '#2f3449',
-      highlight: '#3d4259',
-    },
-    // Foreground (text) colors
-    fg: {
-      primary: '#c0caf5',
-      secondary: '#a9b1d6',
-      muted: '#565f89',
-      dim: '#414868',
-    },
-    // Status colors
-    status: {
-      success: '#9ece6a',
-      warning: '#e0af68',
-      error: '#f7768e',
-      info: '#7aa2f7',
-    },
-    // Task status colors
-    task: {
-      done: '#9ece6a',
-      active: '#7aa2f7',
-      actionable: '#9ece6a',
-      pending: '#565f89',
-      blocked: '#f7768e',
-      error: '#f7768e',
-      closed: '#414868',
-    },
-    // Accent colors
-    accent: {
-      primary: '#7aa2f7',
-      secondary: '#bb9af7',
-      tertiary: '#7dcfff',
-    },
-    // Border colors
-    border: {
-      normal: '#3d4259',
-      active: '#7aa2f7',
-      muted: '#2f3449',
-    },
-  },
-  light: {
-    // Background colors - softer, lighter palette
-    bg: {
-      primary: '#fafafa',
-      secondary: '#ffffff',
-      tertiary: '#f0f0f0',
-      highlight: '#e0e0e0',
-    },
-    // Foreground (text) colors - darker for contrast on light backgrounds
-    fg: {
-      primary: '#1a1a2e',
-      secondary: '#4a4a68',
-      muted: '#8888a0',
-      dim: '#b0b0c0',
-    },
-    // Status colors - slightly muted for light theme
-    status: {
-      success: '#2d8a3e',
-      warning: '#b8860b',
-      error: '#c41e3a',
-      info: '#2563eb',
-    },
-    // Task status colors
-    task: {
-      done: '#2d8a3e',
-      active: '#2563eb',
-      actionable: '#2d8a3e',
-      pending: '#8888a0',
-      blocked: '#c41e3a',
-      error: '#c41e3a',
-      closed: '#b0b0c0',
-    },
-    // Accent colors
-    accent: {
-      primary: '#2563eb',
-      secondary: '#7c3aed',
-      tertiary: '#0891b2',
-    },
-    // Border colors
-    border: {
-      normal: '#d0d0e0',
-      active: '#2563eb',
-      muted: '#e8e8f0',
-    },
-// THEIRS:
- * Provides consistent styling across all TUI components with a modern dark theme.
- * Supports both dark and light color schemes with enhanced semantic color categories.
- */
+export type ThemeMode = 'dark' | 'light';
 
 /**
  * Dark theme color palette - Tokyo Night inspired with modern enhancements
@@ -158,7 +64,7 @@ export const darkColors = {
     normal: '#3d4259',
     active: '#7aa2f7',
     muted: '#2f3449',
-    highlight: '#565f89', (ralph-tui-5no.7: US-007: Settings View Facelift)
+    highlight: '#565f89',
   },
 
   // Interaction states - for user feedback
@@ -280,9 +186,12 @@ export const lightColors = {
 };
 
 /**
- * Theme mode type
+ * Color schemes for light and dark themes
  */
-export type ThemeMode = 'dark' | 'light';
+export const colorSchemes = {
+  dark: darkColors,
+  light: lightColors,
+};
 
 /**
  * Current theme mode - defaults to dark
@@ -304,7 +213,7 @@ export function getColors() {
 }
 
 /**
- * Color palette for the Ralph TUI (defaults to dark theme for backwards compatibility)
+ * Active color scheme colors (convenience export for current theme)
  */
 export const colors = darkColors;
 
@@ -329,18 +238,6 @@ export function setColorScheme(scheme: 'light' | 'dark'): void {
 export function getColorScheme(): 'light' | 'dark' {
   return currentColorScheme;
 }
-
-/**
- * Get colors for the current color scheme
- */
-export function getColors() {
-  return colorSchemes[currentColorScheme];
-}
-
-/**
- * Active color scheme colors (convenience export for current theme)
- */
-export const colors = colorSchemes.dark;
 
 /**
  * Status indicator symbols
@@ -485,17 +382,17 @@ export type TaskStatus = 'done' | 'active' | 'actionable' | 'pending' | 'blocked
 /**
  * Ralph status color mapping - returns the appropriate status color for each Ralph status
  */
-export const ralphStatusColors: Record<RalphStatus, string> = {
-  ready: getColors().status.info,
-  running: getColors().status.success,
-  selecting: getColors().status.info,
-  executing: getColors().status.success,
-  pausing: getColors().status.warning,
-  paused: getColors().status.warning,
-  stopped: getColors().fg.muted,
-  complete: getColors().status.success,
-  idle: getColors().fg.muted,
-  error: getColors().status.error,
+export const ralphStatusColors: Record<RalphStatus, keyof typeof darkColors.status> = {
+  ready: 'info',
+  running: 'success',
+  selecting: 'info',
+  executing: 'success',
+  pausing: 'warning',
+  paused: 'warning',
+  stopped: 'info',
+  complete: 'success',
+  idle: 'info',
+  error: 'error',
 };
 
 /**
@@ -516,7 +413,8 @@ export function getTaskStatusIndicator(status: TaskStatus): string {
  * Get the color for a given Ralph status
  */
 export function getRalphStatusColor(status: RalphStatus): string {
-  return ralphStatusColors[status];
+  const colorKey = ralphStatusColors[status];
+  return getColors().status[colorKey];
 }
 
 /**
@@ -532,45 +430,11 @@ export function getRalphStatusIndicator(status: RalphStatus): string {
  */
 export function getStatusColor(status: TaskStatus | RalphStatus, isRalphStatus?: boolean): string {
   if (isRalphStatus || (status in ralphStatusColors)) {
-    return ralphStatusColors[status as RalphStatus];
+    const colorKey = ralphStatusColors[status as RalphStatus];
+    return getColors().status[colorKey];
   }
   return getColors().task[status as TaskStatus];
 }
-
-/**
- * Get interaction state colors
- */
-export const interactionColors = {
-  hover: getColors().interaction.hover,
-  focus: getColors().interaction.focus,
-  active: getColors().interaction.active,
-  selected: getColors().interaction.selected,
-  disabled: getColors().interaction.disabled,
-};
-
-/**
- * Get link colors for the current theme
- */
-export const linkColors = {
-  default: getColors().link.default,
-  hover: getColors().link.hover,
-  visited: getColors().link.visited,
-};
-
-/**
- * Get code syntax colors for the current theme
- */
-export const codeColors = {
-  keyword: getColors().code.keyword,
-  string: getColors().code.string,
-  number: getColors().code.number,
-  comment: getColors().code.comment,
-  function: getColors().code.function,
-  type: getColors().code.type,
-  operator: getColors().code.operator,
-  variable: getColors().code.variable,
-  attribute: getColors().code.attribute,
-};
 
 /**
  * Contrast utility: Get a text color that contrasts well with a background color
@@ -584,23 +448,6 @@ export function getContrastTextColor(backgroundColor: string): string {
   const brightness = (r * 299 + g * 587 + b * 114) / 1000;
   return brightness < 128 ? getColors().fg.inverse : getColors().fg.primary;
 }
-
-/**
- * Get semantic color for common UI patterns
- */
-export const semanticColors = {
-  primaryAction: getColors().accent.primary,
-  secondaryAction: getColors().accent.secondary,
-  destructiveAction: getColors().status.error,
-  success: getColors().status.success,
-  warning: getColors().status.warning,
-  error: getColors().status.error,
-  info: getColors().status.info,
-  activeTab: getColors().accent.primary,
-  inactiveTab: getColors().fg.muted,
-  selected: getColors().interaction.selected,
-  highlighted: getColors().bg.highlight,
-};
 
 /**
  * Format elapsed time in human-readable format

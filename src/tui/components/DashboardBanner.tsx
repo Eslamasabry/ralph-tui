@@ -53,7 +53,7 @@ function StatItem({
   return (
     <text>
       <span fg={colors.fg.muted}>{label}:</span>{' '}
-      <span fg={color}>{value}</span>
+      <span fg={color}>{String(value)}</span>
     </text>
   );
 }

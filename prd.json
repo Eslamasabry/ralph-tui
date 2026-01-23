@@ -1,162 +1,119 @@
 {
-  "name": "UI Facelift PRD",
-  "description": "A comprehensive UI facelift for Ralph TUI to improve visual appeal, user experience, and modernize the interface. This PRD includes tasks for each major page/tab of the application.",
-  "branchName": "feature/ui-facelift-prd",
+  "name": "Worktree Manager & Merge Reliability PRD",
+  "description": "Improve worktree management and merge conflict resolution in the parallel execution system. Fixes critical bugs in conflict marker generation, worktree cleanup, and lock management.",
+  "branchName": "feature/worktree-reliability",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Header Component Facelift",
-      "description": "- As a user, I want the header to have a modern, clean design - So that I can quickly identify the application and its status",
+      "title": "Fix Duplicate Conflict Marker Generation",
+      "description": "- As a developer, I want merge conflict resolution to not produce duplicate conflict markers - So that resolved files are valid code",
       "acceptanceCriteria": [
-        "Redesign the header with improved spacing and visual hierarchy",
-        "Add better status indicators with clearer colors",
-        "Optimize for both light and dark themes",
-        "Ensure header content is properly truncated on narrow terminals"
+        "resolveSimpleConflict() must not produce <<<<<<<, =======, >>>>>>> markers",
+        "Simple conflicts (additions only) should be auto-merged cleanly",
+        "Complex conflicts must fall back to LLM resolution, not produce invalid output",
+        "Test coverage for conflict resolution patterns"
       ],
       "priority": 1,
       "passes": false,
-      "labels": [],
+      "labels": ["bugfix", "worktree", "merge"],
       "dependsOn": []
     },
     {
       "id": "US-002",
-      "title": "Footer Component Facelift",
-      "description": "- As a user, I want the footer to display relevant information clearly - So that I can access important controls and status at a glance",
+      "title": "Worktree Cleanup on Shutdown",
+      "description": "- As a system, I want all worktrees to be properly cleaned up when the coordinator stops - So that orphaned directories don't accumulate",
       "acceptanceCriteria": [
-        "Redesign the footer with improved layout and readability",
-        "Add more intuitive keyboard shortcut indicators",
-        "Include relevant system information (e.g., version, mode)",
-        "Ensure consistent styling with the rest of the UI"
+        "Coordinator shutdown hook removes all worker worktrees",
+        "Coordinator shutdown hook removes merge worktree",
+        "Errors during cleanup are logged with context",
+        "Cleanup is idempotent (safe to call multiple times)",
+        "Manual cleanup command available via CLI"
       ],
-      "priority": 2,
+      "priority": 1,
       "passes": false,
-      "labels": [],
-      "dependsOn": []
+      "labels": ["reliability", "worktree", "cleanup"],
+      "dependsOn": ["ralph-tui-wmr.1"]
     },
     {
       "id": "US-003",
-      "title": "Tasks View Facelift",
-      "description": "- As a user, I want the tasks view to be visually appealing and easy to navigate - So that I can quickly identify task status and priority",
+      "title": "Worktree Validation After Creation",
+      "description": "- As a system, I want to verify worktrees are created correctly - So that failures are detected early",
       "acceptanceCriteria": [
-        "Redesign task cards with improved visual hierarchy",
-        "Add better status indicators and colors",
-        "Optimize for different terminal sizes",
-        "Improve readability of task descriptions and metadata"
+        "WorktreeManager validates branch after creation",
+        "WorktreeManager validates commit is on expected branch",
+        "Validation errors include path, expected vs actual state",
+        "Retry with force flag for stale worktree state"
       ],
-      "priority": 3,
+      "priority": 2,
       "passes": false,
-      "labels": [],
-      "dependsOn": []
-    },
-    {
-      "id": "US-004",
-      "title": "Iteration History View Facelift",
-      "description": "- As a user, I want the iteration history view to be clear and informative - So that I can review past iterations and their outcomes",
+      "labels": ["validation", "worktree", "reliability"],
+"dependsOn": ["ralph-tui-wmr.2"]
+      },
+      {
+        "id": "US-004",
+      "title": "Lock Timeout for Stale Workers",
+      "description": "- As a system, I want worktree locks to auto-expire - So that crashed workers don't leave permanently locked worktrees",
       "acceptanceCriteria": [
-        "Redesign iteration cards with improved visual design",
-        "Add better status indicators and colors",
-        "Optimize for readability of iteration details",
-        "Improve spacing and layout for better visual appeal"
+        "Lock metadata includes timestamp",
+        "Periodic check for locks older than N minutes (default: 30)",
+        "Auto-unlock stale locks with warning log",
+        "Configurable timeout via config.toml",
+        "Warning logged when auto-unlock occurs"
       ],
-      "priority": 4,
+      "priority": 2,
       "passes": false,
-      "labels": [],
-      "dependsOn": []
+      "labels": ["worktree", "locks", "reliability"],
+      "dependsOn": ["ralph-tui-wmr.3"]
     },
     {
       "id": "US-005",
-      "title": "Activity View Facelift",
-      "description": "- As a user, I want the activity view to be visually engaging and informative - So that I can track real-time activity and system events",
+      "title": "Worktree Health Dashboard",
+      "description": "- As a user, I want to see worktree health status in the dashboard - So that I can monitor parallel execution reliability",
       "acceptanceCriteria": [
-        "Redesign the activity timeline with improved visual design",
-        "Add better event indicators and colors",
-        "Optimize for readability of event details",
-        "Improve spacing and layout for better visual appeal"
+        "Dashboard shows: active worktrees, locked worktrees, stale worktrees",
+        "Health status indicator (healthy/warning/critical)",
+        "Manual prune button in settings or dashboard",
+        "Worktree count in run summary overlay"
       ],
-      "priority": 4,
+      "priority": 2,
       "passes": false,
-      "labels": [],
-      "dependsOn": []
+      "labels": ["ui", "dashboard", "worktree"],
+      "dependsOn": ["ralph-tui-wmr.4"]
     },
     {
       "id": "US-006",
-      "title": "Logs View Facelift",
-      "description": "- As a user, I want the logs view to be clear and easy to read - So that I can review detailed execution logs and troubleshoot issues",
+      "title": "Improved Merge Error Messaging",
+      "description": "- As a user, I want clear error messages when merges fail - So that I can understand and fix issues",
       "acceptanceCriteria": [
-        "Redesign log panes with improved visual design",
-        "Add better syntax highlighting and readability",
-        "Optimize for different terminal sizes",
-        "Improve spacing and layout for better visual appeal"
+        "Error messages include: conflict files, commit hash, task ID",
+        "Suggestion for manual resolution when applicable",
+        "Stack trace cleaned for user-facing output",
+        "Error categorization: conflict/timeout/remote/network"
       ],
-      "priority": 4,
+      "priority": 3,
       "passes": false,
-      "labels": [],
-      "dependsOn": []
+      "labels": ["ux", "errors", "merge"],
+      "dependsOn": ["ralph-tui-wmr.1"]
     },
     {
       "id": "US-007",
-      "title": "Settings View Facelift",
-      "description": "- As a user, I want the settings view to be well-organized and easy to use - So that I can configure the application to my needs",
+      "title": "Worktree Performance Optimization",
+      "description": "- As a user, I want faster worktree operations - So that parallel execution has less overhead",
       "acceptanceCriteria": [
-        "Redesign the settings view with improved visual design",
-        "Add better organization and grouping of settings",
-        "Optimize for readability and user experience",
-        "Improve spacing and layout for better visual appeal"
+        "Worktree creation < 500ms for local repos",
+        "Parallel worktree creation for multiple workers",
+        "Cached git operations where possible",
+        "Benchmark tests for worktree operations"
       ],
-      "priority": 4,
+      "priority": 3,
       "passes": false,
-      "labels": [],
-      "dependsOn": []
-    },
-    {
-      "id": "US-008",
-      "title": "Progress Dashboard Facelift",
-      "description": "- As a user, I want the progress dashboard to be visually appealing and informative - So that I can quickly assess the current state of the application",
-      "acceptanceCriteria": [
-        "Redesign the dashboard with improved visual hierarchy",
-        "Add better status indicators and colors",
-        "Optimize for readability of key metrics",
-        "Improve spacing and layout for better visual appeal"
-      ],
-      "priority": 4,
-      "passes": false,
-      "labels": [],
-      "dependsOn": []
-    },
-    {
-      "id": "US-009",
-      "title": "Theme and Color Palette Enhancement",
-      "description": "- As a user, I want the application to have a consistent, modern color palette - So that the interface is visually appealing and easy to use",
-      "acceptanceCriteria": [
-        "Enhance the color palette with modern, harmonious colors",
-        "Ensure consistency across all components and views",
-        "Optimize for both light and dark themes",
-        "Improve contrast and readability"
-      ],
-      "priority": 4,
-      "passes": false,
-      "labels": [],
-      "dependsOn": []
-    },
-    {
-      "id": "US-010",
-      "title": "Responsive Design Optimization",
-      "description": "- As a user, I want the application to look good on different terminal sizes - So that I can use it effectively on various devices and screen dimensions",
-      "acceptanceCriteria": [
-        "Optimize all views for different terminal sizes",
-        "Ensure content is properly truncated and wrapped",
-        "Improve spacing and layout for small terminals",
-        "Test and adjust for various screen dimensions"
-      ],
-      "priority": 4,
-      "passes": false,
-      "labels": [],
-      "dependsOn": []
+      "labels": ["performance", "worktree", "optimization"],
+      "dependsOn": ["ralph-tui-wmr.2"]
     }
   ],
   "metadata": {
-    "createdAt": "2026-01-23T13:03:25.849Z",
+    "createdAt": "2026-01-23T19:30:00.000Z",
     "version": "1.0.0",
-    "sourcePrd": "tasks/prd-ui-facelift.md"
+    "sourcePrd": "tasks/prd-worktree-reliability.md"
   }
 }

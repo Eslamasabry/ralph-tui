@@ -342,7 +342,7 @@ export function RemoteManagementOverlay({
           {/* Remote details */}
           <box style={{ marginBottom: 1 }}>
             <text fg={colors.fg.muted}>
-              Host: {existingRemote.host}:{existingRemote.port}
+              Host: {existingRemote.host}:{String(existingRemote.port)}
             </text>
           </box>
 

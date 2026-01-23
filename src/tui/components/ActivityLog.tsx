@@ -286,7 +286,7 @@ function FilterButton({
           {label}
         </span>
         <span> </span>
-        <span fg={colors.fg.muted}>({count})</span>
+        <span fg={colors.fg.muted}>({String(count)})</span>
       </text>
     </box>
   );

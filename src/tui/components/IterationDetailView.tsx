@@ -640,7 +640,7 @@ export function IterationDetailView({
           <text>
             <span fg={statusColor}>{statusIndicator}</span>
             <span fg={colors.fg.primary}>
-              {' '}Iteration {iteration.iteration} of {totalIterations}
+              {' '}Iteration {String(iteration.iteration)} of {String(totalIterations)}
             </span>
           </text>
         </box>

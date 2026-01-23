@@ -1,29 +1,14 @@
 /**
-// OURS:
- * ABOUTME: ActivityView component for the Ralph TUI - Facelift version.
+ * ABOUTME: ActivityView component for the Ralph TUI.
  * Full-screen overlay showing real-time timeline of agent activity.
  * Displays iteration events, subagent hierarchy, and execution progress.
-// OURS:
  * Features improved visual design with better event indicators and readability.
-// THEIRS:
- * Redesigned with improved visual hierarchy, better event indicators,
- * optimized spacing, and enhanced readability. (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
-// THEIRS:
- * ABOUTME: Modernized ActivityView component for Ralph TUI.
- * Full-screen overlay showing real-time timeline of agent activity with enhanced visual hierarchy.
- * Features bracketed status indicators, pipe separators, and improved readability following Header.tsx patterns. (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
  */
 
 import type { ReactNode } from 'react';
 import { useMemo } from 'react';
-// OURS:
-<<<<<<< HEAD
-// THEIRS:
-import { useTerminalDimensions } from '@opentui/react'; (feat: ralph-tui-5no.10 - US-010: Responsive Design Optimization)
-import { colors, formatElapsedTime, statusIndicators as themeStatusIndicators } from '../theme.js';
-=======
+import { useTerminalDimensions } from '@opentui/react';
 import { colors, formatElapsedTime, layout } from '../theme.js';
->>>>>>> 4b45e08 (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
 import type { IterationResult, IterationStatus, EngineSubagentStatus } from '../../engine/types.js';
 import type { SubagentTreeNode } from '../../engine/types.js';
 import type { SubagentTraceStats } from '../../logs/types.js';
@@ -113,12 +98,7 @@ export interface ActivityViewProps {
 }
 
 /**
-<<<<<<< HEAD
-<<<<<<< HEAD
- * Status indicator symbols with enhanced visibility
-=======
  * Status indicator symbols (aligned with Header.tsx patterns)
->>>>>>> 4b45e08 (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
  */
 const statusIndicatorsEnhanced: Record<IterationStatus, string> = {
   completed: '✓',
@@ -129,8 +109,6 @@ const statusIndicatorsEnhanced: Record<IterationStatus, string> = {
 };
 
 /**
- * Status colors for iterations with improved contrast
-=======
  * Section icons for visual appeal
  */
 const SECTION_ICONS = {
@@ -142,19 +120,7 @@ const SECTION_ICONS = {
 } as const;
 
 /**
- * Status indicator symbols - refined for better visual clarity
- */
-const iterationStatusIndicators: Record<IterationStatus, string> = {
-  completed: themeStatusIndicators.done,
-  running: themeStatusIndicators.running,
-  failed: themeStatusIndicators.error,
-  interrupted: themeStatusIndicators.paused,
-  skipped: '○',
-};
-
-/**
  * Status colors for iterations - using theme colors consistently
->>>>>>> e5772cd (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
  */
 const statusColorsEnhanced: Record<IterationStatus, string> = {
   completed: colors.status.success,
@@ -167,7 +133,6 @@ const statusColorsEnhanced: Record<IterationStatus, string> = {
 /**
  * Status labels for display - UPPERCASE for visual consistency with Header.tsx
  */
-<<<<<<< HEAD
 const statusLabelsEnhanced: Record<IterationStatus, string> = {
   completed: 'Completed',
   running: 'Running',
@@ -177,11 +142,7 @@ const statusLabelsEnhanced: Record<IterationStatus, string> = {
 };
 
 /**
-<<<<<<< HEAD
- * Format an ISO timestamp for display in activity timeline
-=======
  * Format an ISO timestamp for display - compact format
->>>>>>> e5772cd (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
  */
 function formatTimestamp(isoString: string): string {
   const date = new Date(isoString);
@@ -189,11 +150,7 @@ function formatTimestamp(isoString: string): string {
 }
 
 /**
-<<<<<<< HEAD
- * Get the enhanced color for an activity event type with improved contrast
-=======
  * Get the color for an activity event type - refined color scheme
->>>>>>> e5772cd (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
  */
 function getEventColor(type: TimelineEventDisplay['type'], severity?: string): string {
   // If severity is provided, use it for coloring
@@ -222,11 +179,7 @@ function getEventColor(type: TimelineEventDisplay['type'], severity?: string): s
 }
 
 /**
-<<<<<<< HEAD
- * Get the enhanced symbol for an activity event type
-=======
  * Get the symbol for an activity event type - refined symbols
->>>>>>> e5772cd (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
  */
 function getEventSymbol(type: TimelineEventDisplay['type']): string {
   switch (type) {
@@ -247,106 +200,6 @@ function getEventSymbol(type: TimelineEventDisplay['type']): string {
     default:
       return '●';
   }
-=======
-const statusLabels: Record<IterationStatus, string> = {
-  completed: 'COMPLETED',
-  running: 'RUNNING',
-  failed: 'FAILED',
-  interrupted: 'INTERRUPTED',
-  skipped: 'SKIPPED',
-};
-
-/**
- * Get styled status display following Header.tsx patterns.
- * Returns bracketed indicator with optimized color treatment.
- */
-function getStatusDisplay(status: IterationStatus | undefined): {
-  indicator: string;
-  color: string;
-  label: string;
-  bracketColor: string;
-} {
-  if (!status) {
-    return {
-      indicator: '○',
-      color: colors.fg.muted,
-      label: 'UNKNOWN',
-      bracketColor: colors.fg.dim,
-    };
-  }
-
-  const isFailureState = status === 'failed';
-
-  return {
-    indicator: statusIndicators[status],
-    color: statusColors[status],
-    label: statusLabels[status],
-    bracketColor: isFailureState ? colors.status.error : colors.fg.dim,
-  };
-}
-
-/**
- * Get enhanced event display with bracketed format for instant scannability.
- */
-function getEventDisplay(type: TimelineEventDisplay['type']): {
-  symbol: string;
-  color: string;
-  label: string;
-  bracketColor: string;
-} {
-  const isError = type === 'failed';
-  const bracketColor = isError ? colors.status.error : colors.fg.dim;
-
-  switch (type) {
-    case 'started':
-      return { symbol: '▶', color: colors.accent.primary, label: 'STARTED', bracketColor };
-    case 'agent_running':
-      return { symbol: '⚙', color: colors.accent.tertiary, label: 'EXECUTING', bracketColor };
-    case 'task_completed':
-      return { symbol: '✓', color: colors.status.success, label: 'TASK DONE', bracketColor };
-    case 'completed':
-      return { symbol: '✓', color: colors.status.success, label: 'COMPLETED', bracketColor };
-    case 'failed':
-      return { symbol: '✗', color: colors.status.error, label: 'FAILED', bracketColor: colors.status.error };
-    case 'interrupted':
-      return { symbol: '⊘', color: colors.status.warning, label: 'INTERRUPTED', bracketColor };
-    case 'skipped':
-      return { symbol: '⊖', color: colors.fg.muted, label: 'SKIPPED', bracketColor };
-    default:
-      return { symbol: '•', color: colors.fg.secondary, label: 'EVENT', bracketColor };
-  }
-}
-
-/**
- * Get metric display with bracketed format for consistency.
- */
-function getMetricDisplay(
-  label: string,
-  value: number,
-  color: string,
-  isError: boolean = false
-): { display: ReactNode; bracketColor: string } {
-  return {
-    display: (
-      <text>
-        <span fg={isError ? colors.status.error : colors.fg.dim}>[</span>
-        <span fg={color}>{value}</span>
-        <span fg={isError ? colors.status.error : colors.fg.dim}>]</span>
-        <span fg={colors.fg.muted}> {label}</span>
-      </text>
-    ),
-    bracketColor: isError ? colors.status.error : colors.fg.dim,
-  };
-}
-
-/**
- * Format an ISO timestamp for display with bracketed format
- */
-function formatTimestamp(isoString: string): string {
-  const date = new Date(isoString);
-  const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  return `[${time}]`;
->>>>>>> 4b45e08 (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
 }
 
 /**
@@ -363,7 +216,6 @@ function formatDuration(durationMs?: number): string {
 }
 
 /**
-<<<<<<< HEAD
  * Truncate text to fit within a given width, adding ellipsis if needed.
  * Smart truncation that preserves the end of the string if possible.
  */
@@ -371,147 +223,9 @@ function truncateText(text: string, maxWidth: number): string {
   if (text.length <= maxWidth) return text;
   if (maxWidth <= 3) return text.slice(0, maxWidth);
   return text.slice(0, maxWidth - 1) + '…';
-=======
- * Get subagent status display with bracketed format
- */
-function getSubagentStatusDisplay(status: EngineSubagentStatus): {
-  icon: string;
-  color: string;
-  label: string;
-  bracketColor: string;
-} {
-  switch (status) {
-    case 'running':
-      return {
-        icon: '◐',
-        color: colors.status.info,
-        label: 'RUNNING',
-        bracketColor: colors.fg.dim,
-      };
-    case 'completed':
-      return {
-        icon: '✓',
-        color: colors.status.success,
-        label: 'COMPLETED',
-        bracketColor: colors.fg.dim,
-      };
-    case 'error':
-      return {
-        icon: '✗',
-        color: colors.status.error,
-        label: 'ERROR',
-        bracketColor: colors.status.error,
-      };
-    default:
-      return {
-        icon: '○',
-        color: colors.fg.muted,
-        label: 'UNKNOWN',
-        bracketColor: colors.fg.dim,
-      };
-  }
->>>>>>> 4b45e08 (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
 }
 
 /**
- * Build activity events from current iteration state
- */
-function buildCurrentActivityEvents(
-  status: IterationStatus | undefined,
-  startedAt: string | undefined,
-  _durationMs: number | undefined,
-  taskId: string | undefined,
-  _taskTitle: string | undefined
-): TimelineEventDisplay[] {
-  const events: TimelineEventDisplay[] = [];
-
-  if (!startedAt) return events;
-
-  // Start event
-  events.push({
-    timestamp: startedAt,
-    type: 'started',
-    description: `Started working on ${taskId || 'task'}`,
-  });
-
-  // Agent running event (synthetic - represents agent execution phase)
-  events.push({
-    timestamp: startedAt,
-    type: 'agent_running',
-    description: 'Agent executing prompt',
-  });
-
-  // End event based on status
-  if (status === 'completed') {
-    events.push({
-      timestamp: startedAt,
-      type: 'task_completed',
-      description: 'Task marked complete',
-    });
-    events.push({
-      timestamp: startedAt,
-      type: 'completed',
-      description: 'Iteration completed successfully',
-    });
-  } else if (status === 'failed') {
-    events.push({
-      timestamp: startedAt,
-      type: 'failed',
-      description: 'Iteration failed',
-    });
-  } else if (status === 'interrupted') {
-    events.push({
-      timestamp: startedAt,
-      type: 'interrupted',
-      description: 'Iteration interrupted',
-    });
-  } else if (status === 'skipped') {
-    events.push({
-      timestamp: startedAt,
-      type: 'skipped',
-      description: 'Iteration skipped',
-    });
-  }
-
-  return events;
-}
-
-/**
-<<<<<<< HEAD
- * Status icon for subagent based on its completion state with enhanced symbols
- */
-function getSubagentStatusIcon(status: EngineSubagentStatus): string {
-  switch (status) {
-    case 'running':
-      return '◐';
-    case 'completed':
-      return '✓';
-    case 'error':
-      return '✗';
-    default:
-      return '○';
-  }
-}
-
-/**
- * Status color for subagent based on its completion state
- */
-function getSubagentStatusColor(status: EngineSubagentStatus): string {
-  switch (status) {
-    case 'running':
-      return colors.status.info;
-    case 'completed':
-      return colors.status.success;
-    case 'error':
-      return colors.status.error;
-    default:
-      return colors.fg.muted;
-  }
-}
-
-/**
-=======
->>>>>>> 4b45e08 (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
  * Count total subagents in tree (including root nodes)
  */
 function countSubagentChildren(node: SubagentTreeNode): number {
@@ -550,61 +264,30 @@ function computeActivityMetrics(
 }
 
 /**
-<<<<<<< HEAD
-<<<<<<< HEAD
- * Compact stat item for metrics display with icon prefix
-=======
  * Compact stat item for metrics display - improved styling
->>>>>>> e5772cd (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
  */
 function MetricItem({
   icon,
   label,
   value,
   color,
-<<<<<<< HEAD
-  showWhenZero = false,
-=======
-  icon,
->>>>>>> e5772cd (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
 }: {
   icon: string;
   label: string;
   value: number;
   color: string;
-<<<<<<< HEAD
-  showWhenZero?: boolean;
-=======
-  icon?: string;
->>>>>>> e5772cd (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
 }): ReactNode {
-  if (!showWhenZero && value === 0) return null;
-
   return (
     <text>
-<<<<<<< HEAD
-      <span fg={color}>{icon}</span>
-      <span fg={colors.fg.muted}> </span>
-      <span fg={colors.fg.muted}>{label}:</span>{' '}
-      <span fg={color}>{value}</span>
-=======
-      {icon && <span fg={colors.fg.muted}>{icon} </span>}
-      <span fg={colors.fg.muted}>{label}:</span> <span fg={color}>{value}</span>
->>>>>>> e5772cd (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
+      <span fg={colors.fg.muted}>{icon} </span>
+      <span fg={colors.fg.muted}>{label}:</span> <span fg={color}>{String(value)}</span>
     </text>
   );
 }
 
 /**
-<<<<<<< HEAD
- * Activity metrics header section showing summary statistics with improved visual design
-=======
- * Activity metrics header section showing summary statistics - facelift version
->>>>>>> e5772cd (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
-=======
  * Activity metrics header section showing summary statistics
  * Enhanced with bracketed format and pipe separators following Header.tsx patterns
->>>>>>> 4b45e08 (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
  */
 function ActivityMetricsHeader({
   metrics,
@@ -625,70 +308,26 @@ function ActivityMetricsHeader({
         padding: layout.padding.small,
         backgroundColor: colors.bg.secondary,
         border: true,
-<<<<<<< HEAD
-        borderColor: hasErrors ? colors.status.error : hasWarnings ? colors.status.warning : colors.border.normal,
-        marginBottom: 1,
-      }}
-    >
-<<<<<<< HEAD
-      {/* Left side: Event counts with icon prefix */}
-      <box style={{ flexDirection: 'row', gap: 2 }}>
-        <MetricItem icon={EVENTS_ICON} label="Events" value={metrics.totalEvents} color={colors.accent.primary} showWhenZero />
-        <MetricItem icon="✗" label="Err" value={metrics.errorCount} color={colors.status.error} showWhenZero />
-        <MetricItem icon="⚠" label="Warn" value={metrics.warningCount} color={colors.status.warning} showWhenZero />
-        <MetricItem icon="ℹ" label="Info" value={metrics.infoCount} color={colors.status.info} showWhenZero />
-=======
-      {/* Left side: Event counts with improved visual hierarchy */}
-      <box style={{ flexDirection: 'row', gap: 2 }}>
-        <MetricItem label="Events" value={metrics.totalEvents} color={colors.fg.primary} icon={SECTION_ICONS.activity} />
-        {metrics.infoCount > 0 && (
-          <MetricItem label="Info" value={metrics.infoCount} color={colors.status.info} />
-        )}
-        {hasWarnings && (
-          <MetricItem label="Warnings" value={metrics.warningCount} color={colors.status.warning} />
-        )}
-        {hasErrors && (
-          <MetricItem label="Errors" value={metrics.errorCount} color={colors.status.error} />
-        )}
->>>>>>> e5772cd (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
-=======
         borderColor: hasErrors ? colors.status.error : colors.border.normal,
         marginBottom: layout.padding.small,
       }}
     >
-      {/* Left side: Event counts */}
+      {/* Left side: Event counts with improved visual hierarchy */}
       <box style={{ flexDirection: 'row', gap: 2 }}>
-        {getMetricDisplay('EVENTS', metrics.totalEvents, colors.fg.primary).display}
-        <text fg={colors.fg.dim}>│</text>
-        {metrics.errorCount > 0 && (
-          <>
-            {getMetricDisplay('ERRORS', metrics.errorCount, colors.status.error, true).display}
-            <text fg={colors.fg.dim}>│</text>
-          </>
+        <MetricItem icon={SECTION_ICONS.activity} label="Events" value={metrics.totalEvents} color={colors.fg.primary} />
+        {metrics.infoCount > 0 && (
+          <MetricItem icon="ℹ" label="Info" value={metrics.infoCount} color={colors.status.info} />
         )}
-        {metrics.warningCount > 0 && (
-          <>
-            {getMetricDisplay('WARNINGS', metrics.warningCount, colors.status.warning).display}
-            <text fg={colors.fg.dim}>│</text>
-          </>
+        {hasWarnings && (
+          <MetricItem icon="⚠" label="Warnings" value={metrics.warningCount} color={colors.status.warning} />
         )}
-        {getMetricDisplay('INFO', metrics.infoCount, colors.fg.secondary).display}
->>>>>>> 4b45e08 (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
+        {hasErrors && (
+          <MetricItem icon="✗" label="Errors" value={metrics.errorCount} color={colors.status.error} />
+        )}
       </box>
 
       {/* Right side: Progress and subagents */}
       <box style={{ flexDirection: 'row', gap: 2 }}>
-<<<<<<< HEAD
-<<<<<<< HEAD
-        {metrics.completedIterations > 0 && (
-          <MetricItem icon="✓" label="Done" value={metrics.completedIterations} color={colors.status.success} showWhenZero />
-        )}
-        {metrics.failedIterations > 0 && (
-          <MetricItem icon="✗" label="Fail" value={metrics.failedIterations} color={colors.status.error} showWhenZero />
-        )}
-        {hasSubagents && (
-          <MetricItem icon={SUBAGENT_ICON} label="Subagents" value={metrics.totalSubagents} color={colors.accent.primary} showWhenZero />
-=======
         {hasIterations && (
           <>
             {metrics.completedIterations > 0 && (
@@ -716,25 +355,42 @@ function ActivityMetricsHeader({
             color={colors.accent.primary}
             icon={SECTION_ICONS.subagents}
           />
->>>>>>> e5772cd (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
-=======
-        {metrics.completedIterations > 0 && (
-          <>
-            {getMetricDisplay('DONE', metrics.completedIterations, colors.status.success).display}
-            <text fg={colors.fg.dim}>│</text>
-          </>
         )}
-        {metrics.failedIterations > 0 && (
-          <>
-            {getMetricDisplay('FAILED', metrics.failedIterations, colors.status.error, true).display}
-            <text fg={colors.fg.dim}>│</text>
-          </>
->>>>>>> 4b45e08 (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
-        )}
-        {hasSubagents && getMetricDisplay('SUBAGENTS', metrics.totalSubagents, colors.accent.primary).display}
       </box>
     </box>
   );
+}
+
+/**
+ * Status icon for subagent based on its completion state with enhanced symbols
+ */
+function getSubagentStatusIcon(status: EngineSubagentStatus): string {
+  switch (status) {
+    case 'running':
+      return '◐';
+    case 'completed':
+      return '✓';
+    case 'error':
+      return '✗';
+    default:
+      return '○';
+  }
+}
+
+/**
+ * Status color for subagent based on its completion state
+ */
+function getSubagentStatusColor(status: EngineSubagentStatus): string {
+  switch (status) {
+    case 'running':
+      return colors.status.info;
+    case 'completed':
+      return colors.status.success;
+    case 'error':
+      return colors.status.error;
+    default:
+      return colors.fg.muted;
+  }
 }
 
 /**
@@ -749,35 +405,20 @@ interface SubagentRowProps {
 }
 
 /**
-<<<<<<< HEAD
-<<<<<<< HEAD
- * Render a single subagent tree row with improved visual design
-=======
- * Render a single subagent tree row with improved indentation and hierarchy
->>>>>>> e5772cd (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
-=======
  * Render a single subagent tree row with indentation
  * Enhanced with bracketed status indicators following Header.tsx patterns
->>>>>>> 4b45e08 (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
  */
 function SubagentTreeRow({ node, depth, maxDepth, maxWidth }: SubagentRowProps): ReactNode {
   const { state } = node;
-  const statusDisplay = getSubagentStatusDisplay(state.status);
+  const statusColor = getSubagentStatusColor(state.status);
+  const statusIcon = getSubagentStatusIcon(state.status);
   const indent = '  '.repeat(depth);
-<<<<<<< HEAD
   const hasChildren = node.children.length > 0;
   const expandIcon = hasChildren ? (depth < maxDepth ? '▼' : '▶') : ' ';
   const duration = state.durationMs !== undefined ? ` [${formatDuration(state.durationMs)}]` : '';
-=======
-  const expandIcon = node.children.length > 0 ? (depth < maxDepth ? '▼' : '▶') : ' ';
-  const duration = state.durationMs !== undefined ? ` (${formatDuration(state.durationMs)})` : '';
->>>>>>> 4b45e08 (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
 
   // Truncate long descriptions for better readability (adaptive)
   const truncatedDescription = truncateText(state.description, maxWidth);
-
-  // Determine agent type display
-  const typeDisplay = `[${state.type}]`;
 
   return (
     <>
@@ -792,23 +433,10 @@ function SubagentTreeRow({ node, depth, maxDepth, maxWidth }: SubagentRowProps):
         <text>
           <span fg={colors.fg.dim}>{indent}</span>
           <span fg={colors.fg.muted}>{expandIcon}</span>
-<<<<<<< HEAD
           <span fg={statusColor}> {statusIcon}</span>
-<<<<<<< HEAD
           <span fg={colors.accent.tertiary}> [{state.type}]</span>
-=======
-          <span fg={statusDisplay.bracketColor}>[</span>
-          <span fg={statusDisplay.color}>{statusDisplay.icon}</span>
-          <span fg={statusDisplay.bracketColor}>]</span>
-          <span fg={colors.accent.tertiary}> [{state.type.toUpperCase()}]</span>
->>>>>>> 4b45e08 (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
-          <span fg={colors.fg.secondary}> {state.description}</span>
-          <span fg={colors.fg.dim}>{duration}</span>
-=======
-          <span fg={colors.accent.tertiary}> {typeDisplay}</span>
           <span fg={colors.fg.secondary}> {truncatedDescription}</span>
           <span fg={colors.fg.muted}>{duration}</span>
->>>>>>> e5772cd (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
         </text>
       </box>
       {node.children.map((child) => (
@@ -825,36 +453,17 @@ function SubagentTreeRow({ node, depth, maxDepth, maxWidth }: SubagentRowProps):
 }
 
 /**
-<<<<<<< HEAD
-<<<<<<< HEAD
- * Section header component with consistent styling using icon prefix
-=======
  * Section header component with enhanced styling following Header.tsx patterns
  * Uses pipe separators and distinctive accent colors
->>>>>>> 4b45e08 (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
  */
 function SectionHeader({ icon, title }: { icon: string; title: string }): ReactNode {
   return (
     <box style={{ marginBottom: 0 }}>
-<<<<<<< HEAD
       <text>
         <span fg={colors.accent.primary}>{icon}</span>
         <span fg={colors.fg.muted}> </span>
         <span fg={colors.accent.primary}>{title}</span>
-=======
- * Section header component - improved styling with icon
- */
-function SectionHeader({ title, icon }: { title: string; icon?: string }): ReactNode {
-  return (
-    <box style={{ marginBottom: 1 }}>
-      <text fg={colors.accent.primary}>
-        {icon && <span>{icon} </span>}
-        <span>{title}</span>
->>>>>>> e5772cd (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
       </text>
-=======
-      <text fg={colors.accent.primary}>│ {title.toUpperCase()}</text>
->>>>>>> 4b45e08 (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
     </box>
   );
 }
@@ -882,11 +491,7 @@ function mapActivityEventType(eventType: string): TimelineEventDisplay['type'] {
 }
 
 /**
-<<<<<<< HEAD
  * ActivityView component - view tab showing real-time timeline with improved visual design
-=======
- * ActivityView component - facelift version with improved visual design
->>>>>>> e5772cd (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
  */
 export function ActivityView({
   currentIteration,
@@ -894,7 +499,6 @@ export function ActivityView({
   currentTaskId,
   currentTaskTitle,
   currentStatus,
-  currentStartedAt,
   currentDurationMs,
   elapsedTime,
   isExecuting,
@@ -909,45 +513,48 @@ export function ActivityView({
   const { width } = useTerminalDimensions();
 
   // Calculate adaptive truncation widths based on terminal size
-  // Small terminals (< 80): more aggressive truncation
-  // Medium terminals (80-120): moderate truncation
-  // Large terminals (>= 120): less truncation for better readability
   const taskIdTruncWidth = width < 80 ? 20 : width < 120 ? 28 : 35;
   const taskTitleTruncWidth = width < 80 ? 40 : width < 120 ? 55 : 65;
-  const iterTaskIdTruncWidth = width < 80 ? 15 : width < 120 ? 22 : 28;
-  const iterTaskTitleTruncWidth = width < 80 ? 25 : width < 120 ? 32 : 40;
 
   // Calculate adaptive max width for subagent descriptions
   const subagentDescWidth = Math.max(30, Math.min(50, width - 40));
 
+  // Current status display with enhanced indicators
+  const statusIndicator = currentStatus ? statusIndicatorsEnhanced[currentStatus] : '○';
+  const statusColor = currentStatus ? statusColorsEnhanced[currentStatus] : colors.fg.muted;
+  const statusLabel = currentStatus ? statusLabelsEnhanced[currentStatus] : 'Unknown';
+
+  // Truncate task info for better display (adaptive truncation)
+  const truncatedTaskId = truncateText(currentTaskId || '', taskIdTruncWidth);
+  const truncatedTaskTitle = truncateText(currentTaskTitle || '', taskTitleTruncWidth);
+
+  // Determine iteration progress display
+  const iterationProgress = maxIterations > 0
+    ? `Iteration ${currentIteration} of ${maxIterations}`
+    : `Iteration ${currentIteration}`;
+
   // Build current activity events (fallback if no real events provided)
-  const currentEvents = useMemo(
-    () => {
-      // If activityEvents are provided, convert them to display format
-      if (activityEvents.length > 0) {
-        return activityEvents.map((event) => ({
-          timestamp: event.timestamp,
-          type: mapActivityEventType(event.eventType),
-          description: event.description,
-          severity: event.severity,
-          category: event.category,
-        }));
-      }
-      // If timelineEvents are provided, convert them to display format
-      if (timelineEvents.length > 0) {
-        return timelineEvents.map((event) => ({
-          timestamp: event.timestamp,
-          type: event.type,
-          description: event.description,
-          severity: event.severity,
-          category: event.category,
-        }));
-      }
-      // Otherwise build synthetic events from current iteration state
-      return buildCurrentActivityEvents(currentStatus, currentStartedAt, currentDurationMs ?? 0, currentTaskId, currentTaskTitle);
-    },
-    [currentStatus, currentStartedAt, currentDurationMs, currentTaskId, currentTaskTitle, activityEvents, timelineEvents]
-  );
+  const currentEvents = useMemo(() => {
+    if (activityEvents.length > 0) {
+      return activityEvents.map((event) => ({
+        timestamp: event.timestamp,
+        type: mapActivityEventType(event.eventType),
+        description: event.description,
+        severity: event.severity,
+        category: event.category,
+      }));
+    }
+    if (timelineEvents.length > 0) {
+      return timelineEvents.map((event) => ({
+        timestamp: event.timestamp,
+        type: event.type,
+        description: event.description,
+        severity: event.severity,
+        category: event.category,
+      }));
+    }
+    return [];
+  }, [activityEvents, timelineEvents]);
 
   // Calculate max depth for subagent tree expansion
   const maxSubagentDepth = useMemo(() => {
@@ -962,29 +569,6 @@ export function ActivityView({
     return max;
   }, [subagentTree]);
 
-  // Build summary stats
-  const stats = useMemo(() => {
-    const parts: string[] = [];
-    if (subagentStats) {
-      parts.push(`${subagentStats.totalSubagents} subagents`);
-      if (subagentStats.failureCount > 0) {
-        parts.push(`${subagentStats.failureCount} failed`);
-      }
-      if (subagentStats.maxDepth > 1) {
-        parts.push(`max depth ${subagentStats.maxDepth}`);
-      }
-    } else if (subagentTree.length > 0) {
-      const total = subagentTree.reduce((sum, node) => sum + 1 + countSubagentChildren(node), 0);
-      parts.push(`${total} subagents active`);
-    }
-    return parts.join(' • ');
-  }, [subagentStats, subagentTree]);
-
-  // Count total subagents in tree
-  function countSubagentChildren(node: SubagentTreeNode): number {
-    return node.children.reduce((sum, _child) => sum + 1 + countSubagentChildren(node), 0);
-  }
-
   // Compute activity metrics (use provided or compute from props)
   const metrics = useMemo(() => {
     if (providedMetrics) {
@@ -992,38 +576,6 @@ export function ActivityView({
     }
     return computeActivityMetrics(activityEvents, subagentTree, iterations);
   }, [providedMetrics, activityEvents, subagentTree, iterations]);
-
-  // Determine iteration progress display with bracketed format
-  const iterationProgress = maxIterations > 0
-    ? `ITERATION ${currentIteration} OF ${maxIterations}`
-    : `ITERATION ${currentIteration}`;
-
-<<<<<<< HEAD
-<<<<<<< HEAD
-  // Current status display with enhanced indicators
-  const statusIndicator = currentStatus ? statusIndicatorsEnhanced[currentStatus] : '○';
-  const statusColor = currentStatus ? statusColorsEnhanced[currentStatus] : colors.fg.muted;
-  const statusLabel = currentStatus ? statusLabelsEnhanced[currentStatus] : 'Unknown';
-=======
-  // Current status display
-  const statusIndicator = currentStatus ? iterationStatusIndicators[currentStatus] : '○';
-  const statusColor = currentStatus ? statusColors[currentStatus] : colors.fg.muted;
-  const statusLabel = currentStatus ? statusLabels[currentStatus] : 'Unknown';
->>>>>>> e5772cd (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
-
-<<<<<<< HEAD
-  // Truncate task info for better display
-  const truncatedTaskId = truncateText(currentTaskId || '', 30);
-  const truncatedTaskTitle = truncateText(currentTaskTitle || '', 60);
-=======
-  // Current status display using helper function
-  const statusDisplay = getStatusDisplay(currentStatus);
->>>>>>> 4b45e08 (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
-=======
-  // Truncate task info for better display (adaptive truncation)
-  const truncatedTaskId = truncateText(currentTaskId || '', taskIdTruncWidth);
-  const truncatedTaskTitle = truncateText(currentTaskTitle || '', taskTitleTruncWidth);
->>>>>>> 88f9af3 (feat: ralph-tui-5no.10 - US-010: Responsive Design Optimization)
 
   return (
     <box
@@ -1034,11 +586,7 @@ export function ActivityView({
         backgroundColor: colors.bg.primary,
       }}
     >
-<<<<<<< HEAD
       {/* Header with status indicator and title */}
-=======
-      {/* Header - simplified and cleaner */}
->>>>>>> e5772cd (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
       <box
         style={{
           flexDirection: 'row',
@@ -1048,7 +596,6 @@ export function ActivityView({
           backgroundColor: colors.bg.secondary,
         }}
       >
-<<<<<<< HEAD
         <box style={{ flexDirection: 'row', alignItems: 'center' }}>
           <text>
             <span fg={statusColor}>{statusIndicator}</span>
@@ -1065,27 +612,6 @@ export function ActivityView({
             <span fg={colors.fg.muted}>Total:</span>{' '}
             <span fg={colors.accent.tertiary}>{formatElapsedTime(elapsedTime)}</span>
           </text>
-=======
-        <box>
-<<<<<<< HEAD
-          <text fg={colors.accent.primary}>Activity View</text>
-        </box>
-        <box style={{ flexDirection: 'row', gap: 2 }}>
-          <text fg={colors.fg.muted}>
-            <span fg={colors.accent.tertiary}>⏱</span> {formatElapsedTime(elapsedTime)}
-          </text>
-          {isExecuting && (
-            <text fg={colors.status.success}>● Running</text>
-          )}
->>>>>>> e5772cd (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
-=======
-          <text>
-            <span fg={colors.fg.dim}>[</span>
-            <span fg={colors.accent.primary}>▶</span>
-            <span fg={colors.accent.primary}> ACTIVITY VIEW</span>
-            <span fg={colors.fg.dim}>]</span>
-          </text>
->>>>>>> 4b45e08 (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
         </box>
       </box>
 
@@ -1102,153 +628,61 @@ export function ActivityView({
 
       {/* Main content - scrollable */}
       <scrollbox style={{ flexGrow: 1, padding: 1 }}>
-<<<<<<< HEAD
         {/* Current iteration status - improved layout */}
         <box style={{ marginBottom: 2 }}>
-<<<<<<< HEAD
           <SectionHeader icon="▶" title="Current Iteration" />
-=======
-          <SectionHeader title="Current Iteration" icon={SECTION_ICONS.current} />
->>>>>>> e5772cd (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
-=======
-        {/* Current iteration status */}
-        <box style={{ marginBottom: layout.padding.medium }}>
-          <SectionHeader title="Current Iteration" />
->>>>>>> 4b45e08 (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
           <box
             style={{
               padding: layout.padding.small,
               backgroundColor: colors.bg.secondary,
               border: true,
-              borderColor: statusDisplay.color,
+              borderColor: statusColor,
               flexDirection: 'column',
             }}
           >
-<<<<<<< HEAD
-<<<<<<< HEAD
             {/* Status row with improved layout */}
             <box style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 0 }}>
-=======
-            {/* Status row with improved visual hierarchy */}
-=======
-            {/* Status row with bracketed format */}
->>>>>>> 4b45e08 (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
-            <box style={{ flexDirection: 'row', marginBottom: 0 }}>
->>>>>>> e5772cd (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
               <text>
-<<<<<<< HEAD
                 <span fg={statusColor}>{statusIndicator}</span>
                 <span fg={colors.fg.muted}> </span>
                 <span fg={colors.fg.primary}>{iterationProgress}</span>
                 {isExecuting && (
                   <span fg={colors.status.success}> (running)</span>
                 )}
-=======
-                <span fg={statusDisplay.bracketColor}>[</span>
-                <span fg={statusDisplay.color}>{statusDisplay.indicator}</span>
-                <span fg={statusDisplay.color}> {statusDisplay.label}</span>
-                <span fg={statusDisplay.bracketColor}>]</span>
-                <span fg={colors.fg.dim}> │ </span>
-                <span fg={colors.accent.primary}>{iterationProgress}</span>
->>>>>>> 4b45e08 (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
               </text>
             </box>
 
-<<<<<<< HEAD
             {/* Task info with better formatting */}
-=======
-            {/* Task info - improved with better spacing */}
->>>>>>> e5772cd (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
             {currentTaskId && (
               <box style={{ flexDirection: 'row', marginBottom: 0 }}>
-<<<<<<< HEAD
                 <text fg={colors.fg.muted}>Task: </text>
                 <text fg={colors.accent.primary}>{truncatedTaskId}</text>
                 {currentTaskTitle && (
                   <text fg={colors.fg.secondary}> - {truncatedTaskTitle}</text>
                 )}
-=======
-                <text>
-                  <span fg={colors.fg.muted}>TASK: </span>
-                  <span fg={colors.accent.primary}>{currentTaskId}</span>
-                  {currentTaskTitle && (
-                    <>
-                      <span fg={colors.fg.dim}> │ </span>
-                      <span fg={colors.fg.secondary}>{currentTaskTitle}</span>
-                    </>
-                  )}
-                </text>
->>>>>>> 4b45e08 (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
               </box>
             )}
 
-<<<<<<< HEAD
             {/* Duration and status with clear labels */}
-=======
-            {/* Duration row - cleaner display */}
->>>>>>> e5772cd (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
             <box style={{ flexDirection: 'row', marginBottom: 0 }}>
-<<<<<<< HEAD
               <text fg={colors.fg.muted}>Status: </text>
               <text fg={statusColor}>{statusLabel}</text>
               {currentDurationMs !== undefined && currentDurationMs > 0 && (
                 <text fg={colors.fg.muted}> ({formatDuration(currentDurationMs)})</text>
               )}
-<<<<<<< HEAD
-=======
-              <text>
-                <span fg={colors.fg.muted}>DURATION: </span>
-                {currentDurationMs !== undefined && currentDurationMs > 0 ? (
-                  <span fg={colors.accent.tertiary}>{formatDuration(currentDurationMs)}</span>
-                ) : (
-                  <span fg={colors.fg.muted}>N/A</span>
-                )}
-                {isExecuting && (
-                  <>
-                    <span fg={colors.fg.dim}> │ </span>
-                    <span fg={colors.accent.primary}>(EXECUTING...)</span>
-                  </>
-                )}
-              </text>
->>>>>>> 4b45e08 (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
             </box>
 
             {/* Elapsed time with icon */}
             <box style={{ flexDirection: 'row', marginBottom: 0 }}>
-<<<<<<< HEAD
               <text fg={colors.fg.muted}>{TIMER_ICON} Elapsed: </text>
               <text fg={colors.accent.tertiary}>{formatElapsedTime(elapsedTime)}</text>
-=======
-              <text>
-                <span fg={colors.fg.muted}>TOTAL ELAPSED: </span>
-                <span fg={colors.accent.tertiary}>{formatElapsedTime(elapsedTime)}</span>
-              </text>
->>>>>>> 4b45e08 (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
             </box>
           </box>
         </box>
 
-<<<<<<< HEAD
         {/* Activity events timeline with improved visual design */}
         <box style={{ marginBottom: 2 }}>
           <SectionHeader icon={EVENTS_ICON} title="Activity Timeline" />
-=======
-              {isExecuting && (
-                <text fg={colors.accent.primary}> (running…)</text>
-              )}
-            </box>
-          </box>
-        </box>
-
-        {/* Activity events timeline - improved visual design */}
-        <box style={{ marginBottom: 2 }}>
-          <SectionHeader title="Activity Timeline" icon={SECTION_ICONS.activity} />
->>>>>>> e5772cd (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
-=======
-        {/* Activity events timeline */}
-        <box style={{ marginBottom: layout.padding.medium }}>
-          <SectionHeader title="Activity Timeline" />
->>>>>>> 4b45e08 (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
           <box
             style={{
               padding: layout.padding.small,
@@ -1259,23 +693,16 @@ export function ActivityView({
             }}
           >
             {currentEvents.length > 0 ? (
-<<<<<<< HEAD
-<<<<<<< HEAD
               currentEvents.map((event, index) => {
                 const eventColor = getEventColor(event.type, event.severity);
                 const eventSymbol = getEventSymbol(event.type);
                 const isLast = index === currentEvents.length - 1;
 
-=======
-              currentEvents.map((event, index) => {
-                const eventDisplay = getEventDisplay(event.type);
->>>>>>> 4b45e08 (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
                 return (
                   <box
                     key={index}
                     style={{
                       flexDirection: 'row',
-<<<<<<< HEAD
                       alignItems: 'center',
                       marginBottom: isLast ? 0 : 1,
                     }}
@@ -1312,63 +739,16 @@ export function ActivityView({
                   </box>
                 );
               })
-=======
-              currentEvents.map((event, index) => (
-                <box
-                  key={index}
-                  style={{
-                    flexDirection: 'row',
-                    marginBottom: index < currentEvents.length - 1 ? 1 : 0,
-                  }}
-                >
-                  <text>
-                    <span fg={colors.fg.dim}>{formatTimestamp(event.timestamp)}</span>
-                    <span> </span>
-                    <span fg={getEventColor(event.type)}>{getEventSymbol(event.type)}</span>
-                    <span> </span>
-                    <span fg={colors.fg.secondary}>{event.description}</span>
-                  </text>
-                </box>
-              ))
->>>>>>> e5772cd (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
-=======
-                      marginBottom: index < currentEvents.length - 1 ? 1 : 0,
-                    }}
-                  >
-                    <text>
-                      <span fg={colors.fg.dim}>{formatTimestamp(event.timestamp)}</span>
-                      <span fg={colors.fg.dim}> │ </span>
-                      <span fg={eventDisplay.bracketColor}>[</span>
-                      <span fg={eventDisplay.color}>{eventDisplay.symbol}</span>
-                      <span fg={eventDisplay.bracketColor}>]</span>
-                      <span fg={colors.fg.secondary}> {event.description}</span>
-                    </text>
-                  </box>
-                );
-              })
->>>>>>> 4b45e08 (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
             ) : (
               <text fg={colors.fg.muted}>No activity yet - waiting for iteration to start</text>
             )}
           </box>
         </box>
 
-<<<<<<< HEAD
         {/* Subagent activity section with improved styling */}
         {(subagentTree.length > 0 || subagentStats) && (
-<<<<<<< HEAD
           <box style={{ marginBottom: 2 }}>
             <SectionHeader icon={SUBAGENT_ICON} title="Subagent Activity" />
-=======
-        {/* Subagent activity section - improved hierarchy */}
-        {(subagentTree.length > 0 || subagentStats) && (
-          <box style={{ marginBottom: 2 }}>
-            <SectionHeader title="Subagent Activity" icon={SECTION_ICONS.subagents} />
->>>>>>> e5772cd (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
-=======
-          <box style={{ marginBottom: layout.padding.medium }}>
-            <SectionHeader title="Subagent Activity" />
->>>>>>> 4b45e08 (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
             <box
               style={{
                 padding: layout.padding.small,
@@ -1379,9 +759,13 @@ export function ActivityView({
               }}
             >
               {/* Summary line - improved styling */}
-              {stats && (
+              {subagentStats && (
                 <box style={{ marginBottom: 1 }}>
-                  <text fg={colors.fg.muted}>│ {stats}</text>
+                  <text fg={colors.fg.muted}>
+                    {String(subagentStats.totalSubagents)} subagents
+                    {subagentStats.failureCount > 0 && ` ✗${String(subagentStats.failureCount)}`}
+                    {subagentStats.maxDepth > 1 && ` (max depth ${String(subagentStats.maxDepth)})`}
+                  </text>
                 </box>
               )}
 
@@ -1397,28 +781,16 @@ export function ActivityView({
               ))}
 
               {subagentTree.length === 0 && (
-                <text fg={colors.fg.muted}>│ No subagents spawned yet</text>
+                <text fg={colors.fg.muted}>No subagents spawned yet</text>
               )}
             </box>
           </box>
         )}
 
-<<<<<<< HEAD
         {/* Recent iterations summary with improved layout */}
         {iterations.length > 0 && (
-<<<<<<< HEAD
           <box style={{ marginBottom: 2 }}>
             <SectionHeader icon={HISTORY_ICON} title="Recent Iterations" />
-=======
-        {/* Recent iterations summary - improved layout */}
-        {iterations.length > 0 && (
-          <box style={{ marginBottom: 2 }}>
-            <SectionHeader title="Recent Iterations" icon={SECTION_ICONS.iterations} />
->>>>>>> e5772cd (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
-=======
-          <box style={{ marginBottom: layout.padding.medium }}>
-            <SectionHeader title="Recent Iterations" />
->>>>>>> 4b45e08 (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
             <box
               style={{
                 padding: layout.padding.small,
@@ -1428,29 +800,13 @@ export function ActivityView({
                 flexDirection: 'column',
               }}
             >
-              {/* Show last 5 iterations in reverse order with bracketed status */}
+              {/* Show last 5 iterations in reverse order */}
               {[...iterations].reverse().slice(0, 5).map((iter) => {
-<<<<<<< HEAD
-<<<<<<< HEAD
                 const iterStatusIndicator = statusIndicatorsEnhanced[iter.status];
                 const iterStatusColor = statusColorsEnhanced[iter.status];
                 const duration = formatDuration(iter.durationMs);
-                const isLast = iter.iteration === iterations[iterations.length - 1]?.iteration;
-=======
-                const iterStatusIndicator = iterationStatusIndicators[iter.status];
-                const iterStatusColor = statusColors[iter.status];
-=======
-                const iterStatusDisplay = getStatusDisplay(iter.status);
->>>>>>> 4b45e08 (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
-                const duration = formatDuration(iter.durationMs);
-<<<<<<< HEAD
                 const truncatedIterTaskId = truncateText(iter.task.id, 25);
                 const truncatedIterTaskTitle = truncateText(iter.task.title, 35);
->>>>>>> e5772cd (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
-=======
-                const truncatedIterTaskId = truncateText(iter.task.id, iterTaskIdTruncWidth);
-                const truncatedIterTaskTitle = truncateText(iter.task.title, iterTaskTitleTruncWidth);
->>>>>>> 88f9af3 (feat: ralph-tui-5no.10 - US-010: Responsive Design Optimization)
 
                 return (
                   <box
@@ -1458,49 +814,17 @@ export function ActivityView({
                     style={{
                       flexDirection: 'row',
                       alignItems: 'center',
-                      marginBottom: isLast ? 0 : 0,
+                      marginBottom: 0,
                     }}
                   >
                     <text>
-<<<<<<< HEAD
                       <span fg={iterStatusColor}>{iterStatusIndicator}</span>
-<<<<<<< HEAD
                       <span fg={colors.fg.muted}> </span>
-                      <span fg={colors.fg.primary}>#{iter.iteration}</span>
-                      <span fg={colors.fg.muted}> - </span>
-                      <span fg={colors.accent.primary}>{iter.task.id}</span>
-                      <span fg={colors.fg.secondary}> ({iter.task.title})</span>
-                      {duration && (
-                        <>
-                          <span fg={colors.fg.muted}> </span>
-                          <span fg={colors.fg.dim}>[</span>
-                          <span fg={colors.fg.muted}>{duration}</span>
-                          <span fg={colors.fg.dim}>]</span>
-                        </>
-                      )}
-=======
-                      <span fg={colors.fg.primary}> #{iter.iteration}</span>
-                      <span fg={colors.fg.muted}> - {truncatedIterTaskId}</span>
-                      <span fg={colors.fg.secondary}> ({truncatedIterTaskTitle})</span>
-                      {duration && <span fg={colors.fg.dim}> - {duration}</span>}
->>>>>>> e5772cd (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
-=======
-                      <span fg={iterStatusDisplay.bracketColor}>[</span>
-                      <span fg={iterStatusDisplay.color}>{iterStatusDisplay.indicator}</span>
-                      <span fg={iterStatusDisplay.color}> {iterStatusDisplay.label}</span>
-                      <span fg={iterStatusDisplay.bracketColor}>]</span>
-                      <span fg={colors.fg.dim}> │ </span>
-                      <span fg={colors.accent.primary}>#{iter.iteration}</span>
-                      <span fg={colors.fg.dim}> │ </span>
-                      <span fg={colors.fg.secondary}>{iter.task.id}</span>
-                      <span fg={colors.fg.muted}> ({iter.task.title})</span>
-                      {duration && (
-                        <>
-                          <span fg={colors.fg.dim}> │ </span>
-                          <span fg={colors.fg.muted}>{duration}</span>
-                        </>
-                      )}
->>>>>>> 4b45e08 (feat: ralph-tui-5no.5 - US-005: Activity View Facelift)
+                      <span fg={colors.fg.secondary}>Iteration {String(iter.iteration)}:</span>
+                      <span fg={colors.accent.primary}> {truncatedIterTaskId}</span>
+                      <span fg={colors.fg.dim}> - </span>
+                      <span fg={colors.fg.secondary}>{truncatedIterTaskTitle}</span>
+                      <span fg={colors.fg.muted}> ({duration})</span>
                     </text>
                   </box>
                 );
@@ -1508,7 +832,6 @@ export function ActivityView({
             </box>
           </box>
         )}
-
       </scrollbox>
     </box>
   );

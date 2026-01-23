@@ -304,7 +304,7 @@ export function ProgressDashboard({
               <text fg={colors.accent.primary}>{SECTIONS.status} </text>
               <text fg={colors.fg.secondary}>Remote: </text>
               <text fg={colors.accent.primary}>{remoteInfo.name}</text>
-              <text fg={colors.fg.muted}> ({remoteInfo.host}:{remoteInfo.port})</text>
+              <text fg={colors.fg.muted}> ({remoteInfo.host}:{String(remoteInfo.port)})</text>
             </box>
           )}
 

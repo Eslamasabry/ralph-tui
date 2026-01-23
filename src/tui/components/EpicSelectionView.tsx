@@ -174,7 +174,7 @@ export function EpicSelectionView({
       >
         <box style={{ flexDirection: 'row', gap: 2 }}>
           <text fg={colors.accent.primary}>Select Epic</text>
-          <text fg={colors.fg.muted}>({epics.length} available)</text>
+          <text fg={colors.fg.muted}>({String(epics.length)} available)</text>
         </box>
         <text fg={colors.fg.muted}>[{trackerName}]</text>
       </box>
