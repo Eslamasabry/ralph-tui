@@ -2,6 +2,7 @@
  * ABOUTME: Progress Dashboard component for the Ralph TUI.
  * Displays execution status, current task info, and agent/tracker configuration.
  * Shows detailed activity information to make engine state clear.
+ * Redesigned with improved visual hierarchy, better status indicators, and optimized spacing.
  */
 
 import type { ReactNode } from 'react';
@@ -57,12 +58,54 @@ export interface ProgressDashboardProps {
 }
 
 /**
+ * Section icons for visual hierarchy (learned from ActivityView patterns)
+ */
+const SECTIONS = {
+  status: '◎',
+  config: '⚙',
+  task: '▶',
+} as const;
+
+/**
  * Truncate text to fit within a given width, adding ellipsis if needed
  */
 function truncateText(text: string, maxWidth: number): string {
   if (text.length <= maxWidth) return text;
   if (maxWidth <= 3) return text.slice(0, maxWidth);
   return text.slice(0, maxWidth - 1) + '…';
+}
+
+/**
+ * Get status display configuration with detailed activity info
+ */
+function getStatusDisplay(
+  status: RalphStatus,
+  currentTaskId?: string
+): { label: string; color: string; indicator: string } {
+  switch (status) {
+    case 'ready':
+      return { label: 'Ready - Press Enter or s to start', color: colors.status.info, indicator: statusIndicators.ready };
+    case 'running':
+      return { label: 'Running', color: colors.status.success, indicator: statusIndicators.running };
+    case 'selecting':
+      return { label: 'Selecting next task...', color: colors.status.info, indicator: statusIndicators.selecting };
+    case 'executing': {
+      const taskLabel = currentTaskId ? ` (${currentTaskId})` : '';
+      return { label: `Agent running${taskLabel}`, color: colors.status.success, indicator: statusIndicators.executing };
+    }
+    case 'pausing':
+      return { label: 'Pausing after current iteration...', color: colors.status.warning, indicator: statusIndicators.pausing };
+    case 'paused':
+      return { label: 'Paused - Press p to resume', color: colors.status.warning, indicator: statusIndicators.paused };
+    case 'stopped':
+      return { label: 'Stopped', color: colors.fg.muted, indicator: statusIndicators.stopped };
+    case 'complete':
+      return { label: 'All tasks complete!', color: colors.status.success, indicator: statusIndicators.complete };
+    case 'idle':
+      return { label: 'No more tasks available', color: colors.fg.muted, indicator: statusIndicators.idle };
+    case 'error':
+      return { label: 'Failed - Check logs for details', color: colors.status.error, indicator: statusIndicators.blocked };
+  }
 }
 
 /**
@@ -123,41 +166,29 @@ function getCleanupDisplay(
 }
 
 /**
- * Get status display configuration with detailed activity info
+ * Compact stat item for configuration display
  */
-function getStatusDisplay(
-  status: RalphStatus,
-  currentTaskId?: string
-): { label: string; color: string; indicator: string } {
-  switch (status) {
-    case 'ready':
-      return { label: 'Ready - Press Enter or s to start', color: colors.status.info, indicator: statusIndicators.ready };
-    case 'running':
-      return { label: 'Running', color: colors.status.success, indicator: statusIndicators.running };
-    case 'selecting':
-      return { label: 'Selecting next task...', color: colors.status.info, indicator: statusIndicators.selecting };
-    case 'executing': {
-      const taskLabel = currentTaskId ? ` (${currentTaskId})` : '';
-      return { label: `Agent running${taskLabel}`, color: colors.status.success, indicator: statusIndicators.executing };
-    }
-    case 'pausing':
-      return { label: 'Pausing after current iteration...', color: colors.status.warning, indicator: statusIndicators.pausing };
-    case 'paused':
-      return { label: 'Paused - Press p to resume', color: colors.status.warning, indicator: statusIndicators.paused };
-    case 'stopped':
-      return { label: 'Stopped', color: colors.fg.muted, indicator: statusIndicators.stopped };
-    case 'complete':
-      return { label: 'All tasks complete!', color: colors.status.success, indicator: statusIndicators.complete };
-    case 'idle':
-      return { label: 'No more tasks available', color: colors.fg.muted, indicator: statusIndicators.idle };
-    case 'error':
-      return { label: 'Failed - Check logs for details', color: colors.status.error, indicator: statusIndicators.blocked };
-  }
+function ConfigStat({
+  label,
+  value,
+  color,
+}: {
+  label: string;
+  value: ReactNode;
+  color?: string;
+}): ReactNode {
+  return (
+    <text>
+      <span fg={colors.fg.muted}>{label}:</span>{' '}
+      <span fg={color ?? colors.fg.primary}>{value}</span>
+    </text>
+  );
 }
 
 /**
  * Progress Dashboard component showing comprehensive execution status.
  * Provides clear visibility into what the engine is doing at any moment.
+ * Redesigned with improved visual hierarchy and consistent styling.
  */
 export function ProgressDashboard({
   status,
@@ -179,6 +210,12 @@ export function ProgressDashboard({
   const sandboxDisplay = getSandboxDisplay(sandboxConfig, resolvedSandboxMode);
   const cleanupDisplay = getCleanupDisplay(cleanupConfig);
 
+  // Determine border color based on status for visual feedback
+  const borderColor = status === 'error' ? colors.status.error
+    : status === 'complete' ? colors.status.success
+    : status === 'paused' || status === 'pausing' ? colors.status.warning
+    : colors.border.normal;
+
   // Format git info for display
   const gitDisplay = gitInfo?.branch
     ? `${gitInfo.repoName ?? 'repo'}:${gitInfo.branch}${gitInfo.isDirty ? '*' : ''}`
@@ -186,7 +223,7 @@ export function ProgressDashboard({
 
   // Show current task title when executing
   const taskDisplay = currentTaskTitle && (status === 'executing' || status === 'running')
-    ? truncateText(currentTaskTitle, 50)
+    ? truncateText(currentTaskTitle, 45)
     : null;
 
   // Parse model info for display
@@ -197,119 +234,156 @@ export function ProgressDashboard({
       })()
     : null;
 
+  // Status indicator for border styling
+  const statusIndicator = status === 'running' || status === 'executing' ? '●'
+    : status === 'selecting' ? '◐'
+    : status === 'paused' ? '⏸'
+    : status === 'complete' ? '✓'
+    : status === 'error' ? '✗'
+    : status === 'ready' ? '◉'
+    : '○';
+
   return (
     <box
       style={{
         width: '100%',
         height: layout.progressDashboard.height,
-        flexDirection: 'row',
+        flexDirection: 'column',
         backgroundColor: colors.bg.secondary,
         padding: 1,
         border: true,
-        borderColor: colors.border.normal,
+        borderStyle: 'rounded',
+        borderColor: borderColor,
         overflow: 'hidden',
       }}
     >
-      {/* Left column: Status, remote, and current task */}
-      <box style={{ flexDirection: 'column', flexGrow: 1, flexShrink: 1, paddingRight: 2 }}>
-        {/* Status line */}
-        <box style={{ flexDirection: 'row', gap: 1 }}>
-          <text>
-            <span fg={statusDisplay.color}>{statusDisplay.indicator}</span>
-            <span fg={statusDisplay.color}> {statusDisplay.label}</span>
-          </text>
-        </box>
-
-        {/* Remote info (if viewing remote) */}
-        {remoteInfo && (
-          <box style={{ flexDirection: 'row' }}>
-            <text fg={colors.accent.primary}>🌐 Remote: </text>
-            <text fg={colors.fg.primary}>{remoteInfo.name}</text>
-            <text fg={colors.fg.dim}> ({remoteInfo.host}:{remoteInfo.port})</text>
-          </box>
-        )}
-
-        {/* Epic name (if any) */}
-        {epicName && (
-          <box style={{ flexDirection: 'row' }}>
-            <text fg={colors.fg.muted}>Epic: </text>
-            <text fg={colors.accent.primary}>{epicName}</text>
-          </box>
-        )}
-
-        {/* Current task info - shown when executing */}
-        {taskDisplay && (
-          <box style={{ flexDirection: 'row', gap: 1 }}>
-            <text fg={colors.fg.muted}>Task:</text>
-            <text fg={colors.accent.tertiary}>{currentTaskId}</text>
-            <text fg={colors.fg.dim}>-</text>
-            <text fg={colors.fg.primary}>{taskDisplay}</text>
-          </box>
-        )}
+      {/* Title row with status indicator */}
+      <box
+        style={{
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 1,
+        }}
+      >
+        <text fg={colors.fg.primary}>
+          <strong>Progress Dashboard</strong>
+        </text>
+        <text>
+          <span fg={borderColor}>{statusIndicator}</span>
+          <span fg={colors.fg.muted}> {statusDisplay.label}</span>
+        </text>
       </box>
 
-      {/* Right column: Configuration items stacked */}
-      <box style={{ flexDirection: 'column', width: 45, flexShrink: 0 }}>
-        {/* Row 1: Agent and Model */}
-        <box style={{ flexDirection: 'row' }}>
-          <text fg={colors.fg.secondary}>Agent: </text>
-          <text fg={colors.accent.secondary}>{agentName}</text>
-          {modelDisplay && (
-            <>
-              <text fg={colors.fg.muted}> · </text>
-              <text fg={colors.accent.primary}>{modelDisplay.display}</text>
-            </>
+      {/* Main content - two column layout */}
+      <box
+        style={{
+          flexDirection: 'row',
+          flexGrow: 1,
+          gap: 2,
+        }}
+      >
+        {/* Left column: Status and current context */}
+        <box style={{ flexDirection: 'column', flexGrow: 1, flexShrink: 1, gap: 1 }}>
+          {/* Remote info (if viewing remote) */}
+          {remoteInfo && (
+            <box style={{ flexDirection: 'row' }}>
+              <text fg={colors.accent.primary}>{SECTIONS.status} </text>
+              <text fg={colors.fg.secondary}>Remote: </text>
+              <text fg={colors.accent.primary}>{remoteInfo.name}</text>
+              <text fg={colors.fg.muted}> ({remoteInfo.host}:{remoteInfo.port})</text>
+            </box>
+          )}
+
+          {/* Epic name (if any) */}
+          {epicName && (
+            <box style={{ flexDirection: 'row' }}>
+              <text fg={colors.accent.tertiary}>{SECTIONS.task} </text>
+              <text fg={colors.fg.secondary}>Epic: </text>
+              <text fg={colors.accent.primary}>{epicName}</text>
+            </box>
+          )}
+
+          {/* Current task info - shown when executing */}
+          {taskDisplay && currentTaskId && (
+            <box style={{ flexDirection: 'row' }}>
+              <text fg={colors.status.info}>{SECTIONS.task} </text>
+              <text fg={colors.fg.secondary}>Task: </text>
+              <text fg={colors.accent.tertiary}>{currentTaskId}</text>
+              <text fg={colors.fg.dim}> - </text>
+              <text fg={colors.fg.primary}>{taskDisplay}</text>
+            </box>
+          )}
+
+          {/* Pending main sync warning */}
+          {pendingMainCount !== undefined && pendingMainCount > 0 && (
+            <box style={{ flexDirection: 'row' }}>
+              <text fg={colors.status.warning}>⚠ </text>
+              <text fg={colors.fg.secondary}>Pending main: </text>
+              <text fg={colors.status.warning}>{pendingMainCount}</text>
+              <text fg={colors.fg.muted}> task(s)</text>
+            </box>
           )}
         </box>
 
-        {/* Row 2: Tracker */}
-        <box style={{ flexDirection: 'row' }}>
-          <text fg={colors.fg.secondary}>Tracker: </text>
-          <text fg={colors.accent.tertiary}>{trackerName}</text>
-        </box>
+        {/* Right column: Configuration items */}
+        <box style={{ flexDirection: 'column', width: 50, flexShrink: 0, gap: 1 }}>
+          {/* Section header */}
+          <text fg={colors.fg.muted}>{SECTIONS.config} Configuration</text>
 
-        {/* Row 3: Git branch (own line) */}
-        <box style={{ flexDirection: 'row' }}>
-          <text fg={colors.fg.secondary}>Git: </text>
-          <text fg={gitInfo?.isDirty ? colors.status.warning : colors.accent.primary}>
-            {gitDisplay ?? 'not a repo'}
-          </text>
-        </box>
-
-        {/* Row 4: Sandbox and Auto-commit */}
-        <box style={{ flexDirection: 'row' }}>
-          <text fg={sandboxDisplay.enabled ? colors.status.success : colors.status.warning}>
-            {sandboxDisplay.icon}
-          </text>
-          <text fg={sandboxDisplay.enabled ? colors.status.info : colors.fg.muted}>
-            {' '}{sandboxDisplay.text}
-          </text>
-          <text fg={colors.fg.muted}> · </text>
-          <text fg={colors.fg.secondary}>Commit: </text>
-          <text fg={autoCommit ? colors.status.success : colors.fg.muted}>
-            {autoCommit ? '✓ auto' : '✗ manual'}
-          </text>
-        </box>
-
-        {/* Row 5: Cleanup mode */}
-        <box style={{ flexDirection: 'row' }}>
-          <text fg={cleanupDisplay.enabled ? colors.status.info : colors.fg.muted}>
-            {cleanupDisplay.icon}
-          </text>
-          <text fg={cleanupDisplay.enabled ? colors.status.info : colors.fg.muted}>
-            {' '}Cleanup: {cleanupDisplay.text}
-          </text>
-        </box>
-
-        {/* Row 6: Pending main sync count (delivery guarantees) */}
-        {pendingMainCount !== undefined && pendingMainCount > 0 && (
-          <box style={{ flexDirection: 'row' }}>
-            <text fg={colors.status.warning}>⚠</text>
-            <text fg={colors.fg.secondary}> Pending main: </text>
-            <text fg={colors.status.warning}>{pendingMainCount}</text>
-            <text fg={colors.fg.muted}> task(s)</text>
+          {/* Row 1: Agent and Model */}
+          <box style={{ flexDirection: 'row', gap: 2 }}>
+            <ConfigStat label="Agent" value={agentName} color={colors.accent.secondary} />
+            {modelDisplay && (
+              <ConfigStat label="Model" value={modelDisplay.display} color={colors.accent.primary} />
+            )}
           </box>
-        )}
+
+          {/* Row 2: Tracker */}
+          <box style={{ flexDirection: 'row', gap: 2 }}>
+            <ConfigStat label="Tracker" value={trackerName} color={colors.accent.tertiary} />
+          </box>
+
+          {/* Row 3: Git branch */}
+          <box style={{ flexDirection: 'row', gap: 2 }}>
+            <ConfigStat
+              label="Git"
+              value={gitDisplay ?? 'not a repo'}
+              color={gitInfo?.isDirty ? colors.status.warning : colors.accent.primary}
+            />
+          </box>
+
+          {/* Row 4: Sandbox and Commit */}
+          <box style={{ flexDirection: 'row', gap: 2 }}>
+            <text>
+              <span fg={sandboxDisplay.enabled ? colors.status.success : colors.status.warning}>
+                {sandboxDisplay.icon}
+              </span>
+              <span fg={sandboxDisplay.enabled ? colors.status.info : colors.fg.muted}>
+                {' '}{sandboxDisplay.text}
+              </span>
+            </text>
+            <text fg={colors.fg.muted}>·</text>
+            <text>
+              <span fg={colors.fg.secondary}>Commit: </span>
+              <span fg={autoCommit ? colors.status.success : colors.fg.muted}>
+                {autoCommit ? '✓ auto' : '✗ manual'}
+              </span>
+            </text>
+          </box>
+
+          {/* Row 5: Cleanup mode */}
+          <box style={{ flexDirection: 'row', gap: 2 }}>
+            <text>
+              <span fg={cleanupDisplay.enabled ? colors.status.info : colors.fg.muted}>
+                {cleanupDisplay.icon}
+              </span>
+              <span fg={cleanupDisplay.enabled ? colors.status.info : colors.fg.muted}>
+                {' '}Cleanup: {cleanupDisplay.text}
+              </span>
+            </text>
+          </box>
+        </box>
       </box>
     </box>
   );
