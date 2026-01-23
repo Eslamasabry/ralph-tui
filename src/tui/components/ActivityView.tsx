@@ -2,15 +2,34 @@
  * ABOUTME: ActivityView component for the Ralph TUI.
  * Full-screen overlay showing real-time timeline of agent activity.
  * Displays iteration events, subagent hierarchy, and execution progress.
+ * Features improved visual design with better event indicators and readability.
  */
 
 import type { ReactNode } from 'react';
 import { useMemo } from 'react';
-import { colors, formatElapsedTime } from '../theme.js';
+import { colors, statusIndicators, formatElapsedTime } from '../theme.js';
 import type { IterationResult, IterationStatus, EngineSubagentStatus } from '../../engine/types.js';
 import type { SubagentTreeNode } from '../../engine/types.js';
 import type { SubagentTraceStats } from '../../logs/types.js';
 import type { ActivityEvent } from '../../logs/activity-events.js';
+
+/** Activity view header icon */
+const ACTIVITY_ICON = '◎';
+
+/** Timer icon for duration display */
+const TIMER_ICON = '⏱';
+
+/** Events icon for metrics */
+const EVENTS_ICON = '✦';
+
+/** Subagent icon */
+const SUBAGENT_ICON = '⬡';
+
+/** History icon for iterations */
+const HISTORY_ICON = '◫';
+
+/** Calendar icon for timestamps */
+const CALENDAR_ICON = '◷';
 
 /**
  * Timeline event display type (internal representation for UI)
@@ -78,9 +97,9 @@ export interface ActivityViewProps {
 }
 
 /**
- * Status indicator symbols
+ * Status indicator symbols with enhanced visibility
  */
-const statusIndicators: Record<IterationStatus, string> = {
+const statusIndicatorsEnhanced: Record<IterationStatus, string> = {
   completed: '✓',
   running: '▶',
   failed: '✗',
@@ -89,11 +108,11 @@ const statusIndicators: Record<IterationStatus, string> = {
 };
 
 /**
- * Status colors for iterations
+ * Status colors for iterations with improved contrast
  */
-const statusColors: Record<IterationStatus, string> = {
+const statusColorsEnhanced: Record<IterationStatus, string> = {
   completed: colors.status.success,
-  running: colors.accent.primary,
+  running: colors.status.info,
   failed: colors.status.error,
   interrupted: colors.status.warning,
   skipped: colors.fg.dim,
@@ -102,7 +121,7 @@ const statusColors: Record<IterationStatus, string> = {
 /**
  * Status labels for display
  */
-const statusLabels: Record<IterationStatus, string> = {
+const statusLabelsEnhanced: Record<IterationStatus, string> = {
   completed: 'Completed',
   running: 'Running',
   failed: 'Failed',
@@ -111,7 +130,7 @@ const statusLabels: Record<IterationStatus, string> = {
 };
 
 /**
- * Format an ISO timestamp for display
+ * Format an ISO timestamp for display in activity timeline
  */
 function formatTimestamp(isoString: string): string {
   const date = new Date(isoString);
@@ -119,14 +138,19 @@ function formatTimestamp(isoString: string): string {
 }
 
 /**
- * Get the color for an activity event type
+ * Get the enhanced color for an activity event type with improved contrast
  */
-function getEventColor(type: TimelineEventDisplay['type']): string {
+function getEventColor(type: TimelineEventDisplay['type'], severity?: string): string {
+  // If severity is provided, use it for coloring
+  if (severity === 'error') return colors.status.error;
+  if (severity === 'warning') return colors.status.warning;
+  if (severity === 'info') return colors.status.info;
+
   switch (type) {
     case 'started':
-      return colors.accent.primary;
+      return colors.status.info;
     case 'agent_running':
-      return colors.accent.tertiary;
+      return colors.accent.primary;
     case 'task_completed':
       return colors.status.success;
     case 'completed':
@@ -143,7 +167,7 @@ function getEventColor(type: TimelineEventDisplay['type']): string {
 }
 
 /**
- * Get the symbol for an activity event type
+ * Get the enhanced symbol for an activity event type
  */
 function getEventSymbol(type: TimelineEventDisplay['type']): string {
   switch (type) {
@@ -167,7 +191,7 @@ function getEventSymbol(type: TimelineEventDisplay['type']): string {
 }
 
 /**
- * Format duration in human-readable format
+ * Format duration in human-readable format with improved formatting
  */
 function formatDuration(durationMs?: number): string {
   if (durationMs === undefined) return '';
@@ -243,7 +267,7 @@ function buildCurrentActivityEvents(
 }
 
 /**
- * Status icon for subagent based on its completion state
+ * Status icon for subagent based on its completion state with enhanced symbols
  */
 function getSubagentStatusIcon(status: EngineSubagentStatus): string {
   switch (status) {
@@ -313,26 +337,35 @@ function computeActivityMetrics(
 }
 
 /**
- * Compact stat item for metrics display
+ * Compact stat item for metrics display with icon prefix
  */
 function MetricItem({
+  icon,
   label,
   value,
   color,
+  showWhenZero = false,
 }: {
+  icon: string;
   label: string;
   value: number;
   color: string;
+  showWhenZero?: boolean;
 }): ReactNode {
+  if (!showWhenZero && value === 0) return null;
+
   return (
     <text>
-      <span fg={colors.fg.muted}>{label}:</span> <span fg={color}>{value}</span>
+      <span fg={color}>{icon}</span>
+      <span fg={colors.fg.muted}> </span>
+      <span fg={colors.fg.muted}>{label}:</span>{' '}
+      <span fg={color}>{value}</span>
     </text>
   );
 }
 
 /**
- * Activity metrics header section showing summary statistics
+ * Activity metrics header section showing summary statistics with improved visual design
  */
 function ActivityMetricsHeader({
   metrics,
@@ -340,7 +373,9 @@ function ActivityMetricsHeader({
   metrics: ActivityMetrics;
 }): ReactNode {
   const hasErrors = metrics.errorCount > 0;
+  const hasWarnings = metrics.warningCount > 0;
   const hasSubagents = metrics.totalSubagents > 0;
+  const hasIterations = metrics.completedIterations > 0 || metrics.failedIterations > 0;
 
   return (
     <box
@@ -355,40 +390,24 @@ function ActivityMetricsHeader({
         marginBottom: 1,
       }}
     >
-      {/* Left side: Event counts */}
-      <box style={{ flexDirection: 'row', gap: 3 }}>
-        <MetricItem label="Events" value={metrics.totalEvents} color={colors.fg.primary} />
-        {metrics.errorCount > 0 && (
-          <MetricItem label="Errors" value={metrics.errorCount} color={colors.status.error} />
-        )}
-        {metrics.warningCount > 0 && (
-          <MetricItem label="Warnings" value={metrics.warningCount} color={colors.status.warning} />
-        )}
-        <MetricItem label="Info" value={metrics.infoCount} color={colors.fg.secondary} />
+      {/* Left side: Event counts with icon prefix */}
+      <box style={{ flexDirection: 'row', gap: 2 }}>
+        <MetricItem icon={EVENTS_ICON} label="Events" value={metrics.totalEvents} color={colors.accent.primary} showWhenZero />
+        <MetricItem icon="✗" label="Err" value={metrics.errorCount} color={colors.status.error} showWhenZero />
+        <MetricItem icon="⚠" label="Warn" value={metrics.warningCount} color={colors.status.warning} showWhenZero />
+        <MetricItem icon="ℹ" label="Info" value={metrics.infoCount} color={colors.status.info} showWhenZero />
       </box>
 
       {/* Right side: Progress and subagents */}
-      <box style={{ flexDirection: 'row', gap: 3 }}>
-        {metrics.completedIterations > 0 && (
-          <MetricItem
-            label="Done"
-            value={metrics.completedIterations}
-            color={colors.status.success}
-          />
+      <box style={{ flexDirection: 'row', gap: 2 }}>
+        {hasIterations && (
+          <MetricItem icon="✓" label="Done" value={metrics.completedIterations} color={colors.status.success} showWhenZero />
         )}
         {metrics.failedIterations > 0 && (
-          <MetricItem
-            label="Failed"
-            value={metrics.failedIterations}
-            color={colors.status.error}
-          />
+          <MetricItem icon="✗" label="Fail" value={metrics.failedIterations} color={colors.status.error} showWhenZero />
         )}
         {hasSubagents && (
-          <MetricItem
-            label="Subagents"
-            value={metrics.totalSubagents}
-            color={colors.accent.primary}
-          />
+          <MetricItem icon={SUBAGENT_ICON} label="Subagents" value={metrics.totalSubagents} color={colors.accent.primary} showWhenZero />
         )}
       </box>
     </box>
@@ -405,7 +424,7 @@ interface SubagentRowProps {
 }
 
 /**
- * Render a single subagent tree row with indentation
+ * Render a single subagent tree row with improved visual design
  */
 function SubagentTreeRow({ node, depth, maxDepth }: SubagentRowProps): ReactNode {
   const { state } = node;
@@ -431,7 +450,7 @@ function SubagentTreeRow({ node, depth, maxDepth }: SubagentRowProps): ReactNode
           <span fg={statusColor}> {statusIcon}</span>
           <span fg={colors.accent.tertiary}> [{state.type}]</span>
           <span fg={colors.fg.secondary}> {state.description}</span>
-          <span fg={colors.fg.muted}>{duration}</span>
+          <span fg={colors.fg.dim}>{duration}</span>
         </text>
       </box>
       {node.children.map((child) => (
@@ -447,12 +466,16 @@ function SubagentTreeRow({ node, depth, maxDepth }: SubagentRowProps): ReactNode
 }
 
 /**
- * Section header component for consistent styling
+ * Section header component with consistent styling using icon prefix
  */
-function SectionHeader({ title }: { title: string }): ReactNode {
+function SectionHeader({ icon, title }: { icon: string; title: string }): ReactNode {
   return (
     <box style={{ marginBottom: 0 }}>
-      <text fg={colors.accent.primary}>{title}</text>
+      <text>
+        <span fg={colors.accent.primary}>{icon}</span>
+        <span fg={colors.fg.muted}> </span>
+        <span fg={colors.accent.primary}>{title}</span>
+      </text>
     </box>
   );
 }
@@ -480,7 +503,7 @@ function mapActivityEventType(eventType: string): TimelineEventDisplay['type'] {
 }
 
 /**
- * ActivityView component - view tab showing real-time timeline
+ * ActivityView component - view tab showing real-time timeline with improved visual design
  */
 export function ActivityView({
   currentIteration,
@@ -578,10 +601,10 @@ export function ActivityView({
     ? `Iteration ${currentIteration} of ${maxIterations}`
     : `Iteration ${currentIteration}`;
 
-  // Current status display
-  const statusIndicator = currentStatus ? statusIndicators[currentStatus] : '○';
-  const statusColor = currentStatus ? statusColors[currentStatus] : colors.fg.muted;
-  const statusLabel = currentStatus ? statusLabels[currentStatus] : 'Unknown';
+  // Current status display with enhanced indicators
+  const statusIndicator = currentStatus ? statusIndicatorsEnhanced[currentStatus] : '○';
+  const statusColor = currentStatus ? statusColorsEnhanced[currentStatus] : colors.fg.muted;
+  const statusLabel = currentStatus ? statusLabelsEnhanced[currentStatus] : 'Unknown';
 
   return (
     <box
@@ -592,7 +615,7 @@ export function ActivityView({
         backgroundColor: colors.bg.primary,
       }}
     >
-      {/* Header */}
+      {/* Header with status indicator and title */}
       <box
         style={{
           flexDirection: 'row',
@@ -602,8 +625,22 @@ export function ActivityView({
           backgroundColor: colors.bg.secondary,
         }}
       >
-        <box>
-          <text fg={colors.accent.primary}>═══ Activity View ═══</text>
+        <box style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <text>
+            <span fg={statusColor}>{statusIndicator}</span>
+            <span fg={colors.fg.muted}> </span>
+            <span fg={colors.accent.primary}>{ACTIVITY_ICON}</span>
+            <span fg={colors.fg.muted}> </span>
+            <span fg={colors.accent.primary}>Activity View</span>
+          </text>
+        </box>
+        <box style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <text fg={colors.fg.muted}>
+            <span fg={colors.fg.muted}>{TIMER_ICON}</span>
+            <span fg={colors.fg.muted}> </span>
+            <span fg={colors.fg.muted}>Total:</span>{' '}
+            <span fg={colors.accent.tertiary}>{formatElapsedTime(elapsedTime)}</span>
+          </text>
         </box>
       </box>
 
@@ -622,7 +659,7 @@ export function ActivityView({
       <scrollbox style={{ flexGrow: 1, padding: 1 }}>
         {/* Current iteration status */}
         <box style={{ marginBottom: 2 }}>
-          <SectionHeader title="Current Iteration" />
+          <SectionHeader icon="▶" title="Current Iteration" />
           <box
             style={{
               padding: 1,
@@ -632,15 +669,19 @@ export function ActivityView({
               flexDirection: 'column',
             }}
           >
-            {/* Status row */}
-            <box style={{ flexDirection: 'row', marginBottom: 0 }}>
+            {/* Status row with improved layout */}
+            <box style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 0 }}>
               <text>
                 <span fg={statusColor}>{statusIndicator}</span>
-                <span fg={colors.fg.primary}> {iterationProgress}</span>
+                <span fg={colors.fg.muted}> </span>
+                <span fg={colors.fg.primary}>{iterationProgress}</span>
+                {isExecuting && (
+                  <span fg={colors.status.success}> (running)</span>
+                )}
               </text>
             </box>
 
-            {/* Task info */}
+            {/* Task info with better formatting */}
             {currentTaskId && (
               <box style={{ flexDirection: 'row', marginBottom: 0 }}>
                 <text fg={colors.fg.muted}>Task: </text>
@@ -651,29 +692,26 @@ export function ActivityView({
               </box>
             )}
 
-            {/* Duration row */}
+            {/* Duration and status with clear labels */}
             <box style={{ flexDirection: 'row', marginBottom: 0 }}>
               <text fg={colors.fg.muted}>Status: </text>
               <text fg={statusColor}>{statusLabel}</text>
               {currentDurationMs !== undefined && currentDurationMs > 0 && (
                 <text fg={colors.fg.muted}> ({formatDuration(currentDurationMs)})</text>
               )}
-              {isExecuting && (
-                <text fg={colors.accent.primary}> (running...)</text>
-              )}
             </box>
 
-            {/* Elapsed time */}
+            {/* Elapsed time with icon */}
             <box style={{ flexDirection: 'row', marginBottom: 0 }}>
-              <text fg={colors.fg.muted}>Total elapsed: </text>
+              <text fg={colors.fg.muted}>{TIMER_ICON} Elapsed: </text>
               <text fg={colors.accent.tertiary}>{formatElapsedTime(elapsedTime)}</text>
             </box>
           </box>
         </box>
 
-        {/* Activity events timeline */}
+        {/* Activity events timeline with improved visual design */}
         <box style={{ marginBottom: 2 }}>
-          <SectionHeader title="Activity Timeline" />
+          <SectionHeader icon={EVENTS_ICON} title="Activity Timeline" />
           <box
             style={{
               padding: 1,
@@ -684,31 +722,62 @@ export function ActivityView({
             }}
           >
             {currentEvents.length > 0 ? (
-              currentEvents.map((event, index) => (
-                <box
-                  key={index}
-                  style={{
-                    flexDirection: 'row',
-                    marginBottom: index < currentEvents.length - 1 ? 1 : 0,
-                  }}
-                >
-                  <text>
-                    <span fg={colors.fg.dim}>{formatTimestamp(event.timestamp)}</span>
-                    <span fg={getEventColor(event.type)}> {getEventSymbol(event.type)} </span>
-                    <span fg={colors.fg.secondary}>{event.description}</span>
-                  </text>
-                </box>
-              ))
+              currentEvents.map((event, index) => {
+                const eventColor = getEventColor(event.type, event.severity);
+                const eventSymbol = getEventSymbol(event.type);
+                const isLast = index === currentEvents.length - 1;
+
+                return (
+                  <box
+                    key={index}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      marginBottom: isLast ? 0 : 1,
+                    }}
+                  >
+                    {/* Timestamp with icon */}
+                    <text>
+                      <span fg={colors.fg.dim}>
+                        <span fg={colors.fg.muted}>{CALENDAR_ICON}</span>
+                        <span fg={colors.fg.muted}> </span>
+                        {formatTimestamp(event.timestamp)}
+                      </span>
+                      <span fg={colors.fg.muted}> </span>
+                    </text>
+
+                    {/* Event indicator with color */}
+                    <text>
+                      <span fg={eventColor}>{eventSymbol}</span>
+                      <span fg={colors.fg.muted}> </span>
+                    </text>
+
+                    {/* Event description */}
+                    <text>
+                      <span fg={colors.fg.secondary}>{event.description}</span>
+                    </text>
+
+                    {/* Severity badge if present */}
+                    {event.severity && (
+                      <text>
+                        <span fg={colors.fg.muted}> [</span>
+                        <span fg={eventColor}>{event.severity}</span>
+                        <span fg={colors.fg.muted}>]</span>
+                      </text>
+                    )}
+                  </box>
+                );
+              })
             ) : (
               <text fg={colors.fg.muted}>No activity yet - waiting for iteration to start</text>
             )}
           </box>
         </box>
 
-        {/* Subagent activity section */}
+        {/* Subagent activity section with improved styling */}
         {(subagentTree.length > 0 || subagentStats) && (
           <box style={{ marginBottom: 2 }}>
-            <SectionHeader title="Subagent Activity" />
+            <SectionHeader icon={SUBAGENT_ICON} title="Subagent Activity" />
             <box
               style={{
                 padding: 1,
@@ -742,10 +811,10 @@ export function ActivityView({
           </box>
         )}
 
-        {/* Recent iterations summary */}
+        {/* Recent iterations summary with improved layout */}
         {iterations.length > 0 && (
           <box style={{ marginBottom: 2 }}>
-            <SectionHeader title="Recent Iterations" />
+            <SectionHeader icon={HISTORY_ICON} title="Recent Iterations" />
             <box
               style={{
                 padding: 1,
@@ -757,23 +826,35 @@ export function ActivityView({
             >
               {/* Show last 5 iterations in reverse order */}
               {[...iterations].reverse().slice(0, 5).map((iter) => {
-                const iterStatusIndicator = statusIndicators[iter.status];
-                const iterStatusColor = statusColors[iter.status];
+                const iterStatusIndicator = statusIndicatorsEnhanced[iter.status];
+                const iterStatusColor = statusColorsEnhanced[iter.status];
                 const duration = formatDuration(iter.durationMs);
+                const isLast = iter.iteration === iterations[iterations.length - 1]?.iteration;
+
                 return (
                   <box
                     key={iter.iteration}
                     style={{
                       flexDirection: 'row',
-                      marginBottom: 0,
+                      alignItems: 'center',
+                      marginBottom: isLast ? 0 : 0,
                     }}
                   >
                     <text>
                       <span fg={iterStatusColor}>{iterStatusIndicator}</span>
-                      <span fg={colors.fg.primary}> #{iter.iteration}</span>
-                      <span fg={colors.fg.muted}> - {iter.task.id}</span>
+                      <span fg={colors.fg.muted}> </span>
+                      <span fg={colors.fg.primary}>#{iter.iteration}</span>
+                      <span fg={colors.fg.muted}> - </span>
+                      <span fg={colors.accent.primary}>{iter.task.id}</span>
                       <span fg={colors.fg.secondary}> ({iter.task.title})</span>
-                      {duration && <span fg={colors.fg.dim}> - {duration}</span>}
+                      {duration && (
+                        <>
+                          <span fg={colors.fg.muted}> </span>
+                          <span fg={colors.fg.dim}>[</span>
+                          <span fg={colors.fg.muted}>{duration}</span>
+                          <span fg={colors.fg.dim}>]</span>
+                        </>
+                      )}
                     </text>
                   </box>
                 );
