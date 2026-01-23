@@ -424,10 +424,12 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
     return null;
   }
 
+  private lastTasks: TrackerTask[] = [];
+
   async getTasks(filter?: TaskFilter): Promise<TrackerTask[]> {
     if (this.refreshInFlight) {
       this.refreshQueued = true;
-      return []; // Return empty array to avoid stale data
+      return this.lastTasks; // Return last cached tasks to avoid empty list
     }
 
     this.refreshInFlight = true;
@@ -536,13 +538,14 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
         const filteredTasks = this.filterTasks(tasks, filterWithoutParent);
 
         void this.logNewTasks(filteredTasks);
+        this.lastTasks = filteredTasks; // Cache the result
         if (!this.refreshQueued) {
           return filteredTasks;
         }
       } while (this.refreshQueued);
 
       // This line is theoretically unreachable, but TypeScript requires a return
-      return [];
+      return this.lastTasks;
     } finally {
       this.refreshInFlight = false;
     }
