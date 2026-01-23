@@ -178,7 +178,7 @@ export function RemoteConfigView({
       {/* Error state */}
       {error && !loading && (
         <box style={{ flexGrow: 1, justifyContent: 'center', alignItems: 'center' }}>
-          <text fg={colors.status.error}>Error: {error}</text>
+          <text fg={colors.status.error}>Error: {String(error)}</text>
         </box>
       )}
 

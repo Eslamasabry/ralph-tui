@@ -109,7 +109,7 @@ export function EpicSelectionView({
           backgroundColor: colors.bg.primary,
         }}
       >
-        <text fg={colors.status.error}>Error: {error}</text>
+        <text fg={colors.status.error}>Error: {String(error)}</text>
         <text fg={colors.fg.muted}>Press 'q' to quit</text>
       </box>
     );

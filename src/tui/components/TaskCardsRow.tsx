@@ -416,18 +416,18 @@ function TaskSummary({ tasks }: { tasks: TaskItem[] }): ReactNode {
           {'░'.repeat(10 - Math.floor(progressPercent / 10))}
         </text>
         <text fg={colors.fg.muted}>]</text>
-        <text fg={colors.fg.secondary}> {progressPercent}%</text>
+        <text fg={colors.fg.secondary}> {String(progressPercent)}%</text>
       </box>
 
       {/* Status counts with color coding */}
       <text>
-        <span fg={colors.task.active}>●{stats.active}</span>
+        <span fg={colors.task.active}>●{String(stats.active)}</span>
         <span fg={colors.fg.muted}> </span>
-        <span fg={colors.task.actionable}>▶{stats.queued}</span>
+        <span fg={colors.task.actionable}>▶{String(stats.queued)}</span>
         <span fg={colors.fg.muted}> </span>
-        <span fg={colors.status.warning}>○{stats.pending}</span>
+        <span fg={colors.status.warning}>○{String(stats.pending)}</span>
         <span fg={colors.fg.muted}> </span>
-        <span fg={colors.task.blocked}>⊘{stats.blocked}</span>
+        <span fg={colors.task.blocked}>⊘{String(stats.blocked)}</span>
         <span fg={colors.fg.muted}>{stats.blockerIds.length > 0 ? ' by ' : ''}</span>
         <span fg={colors.task.blocked}>
           {stats.blockerIds.length > 0
@@ -435,11 +435,11 @@ function TaskSummary({ tasks }: { tasks: TaskItem[] }): ReactNode {
             : ''}
         </span>
         <span fg={colors.fg.muted}> </span>
-        <span fg={colors.status.success}>✓{stats.done}</span>
+        <span fg={colors.status.success}>✓{String(stats.done)}</span>
         <span fg={colors.fg.muted}>{stats.closed > 0 ? '/' : ''}</span>
-        <span fg={colors.fg.dim}>{stats.closed > 0 ? `✓${stats.closed}` : ''}</span>
+        <span fg={colors.fg.dim}>{stats.closed > 0 ? `✓${String(stats.closed)}` : ''}</span>
         <span fg={colors.fg.muted}>{stats.failed > 0 ? ' ' : ''}</span>
-        <span fg={colors.status.error}>{stats.failed > 0 ? `✗${stats.failed}` : ''}</span>
+        <span fg={colors.status.error}>{stats.failed > 0 ? `✗${String(stats.failed)}` : ''}</span>
       </text>
     </box>
   );

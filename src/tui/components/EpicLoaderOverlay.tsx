@@ -274,7 +274,7 @@ export function EpicLoaderOverlay({
               alignItems: 'center',
             }}
           >
-            <text fg={colors.status.error}>Error: {error}</text>
+            <text fg={colors.status.error}>Error: {String(error)}</text>
             <box style={{ height: 1 }} />
             <text fg={colors.fg.muted}>Press Escape to close</text>
           </box>

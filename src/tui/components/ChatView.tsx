@@ -409,7 +409,7 @@ export function ChatView({
                 borderColor: colors.status.error,
               }}
             >
-              <text fg={colors.status.error}>Error: {error}</text>
+              <text fg={colors.status.error}>Error: {String(error)}</text>
             </box>
           )}
         </scrollbox>

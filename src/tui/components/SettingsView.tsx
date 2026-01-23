@@ -761,7 +761,7 @@ export function SettingsView({
         {/* Error message */}
         {error && (
           <box style={{ marginTop: 1, paddingLeft: 1 }}>
-            <text fg={colors.status.error}>✗ {error}</text>
+            <text fg={colors.status.error}>✗ {String(error)}</text>
           </box>
         )}
 

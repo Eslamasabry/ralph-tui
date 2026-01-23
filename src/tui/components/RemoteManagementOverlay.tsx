@@ -349,7 +349,7 @@ export function RemoteManagementOverlay({
           {/* Error message */}
           {error && (
             <box style={{ marginBottom: 1 }}>
-              <text fg={colors.status.error}>{error}</text>
+              <text fg={colors.status.error}>{String(error)}</text>
             </box>
           )}
 
@@ -428,7 +428,7 @@ export function RemoteManagementOverlay({
         {/* Error message */}
         {error && (
           <box style={{ marginTop: 1, justifyContent: 'center' }}>
-            <text fg={colors.status.error}>{error}</text>
+            <text fg={colors.status.error}>{String(error)}</text>
           </box>
         )}
 
