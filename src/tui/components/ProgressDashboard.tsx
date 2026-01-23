@@ -206,6 +206,9 @@ export function ProgressDashboard({
   gitInfo,
   pendingMainCount,
   cleanupConfig,
+  worktreeHealth,
+  onPruneWorktrees,
+  pruning,
 }: ProgressDashboardProps): ReactNode {
   // Use terminal dimensions for responsive layout
   const { width } = useTerminalDimensions();
@@ -396,6 +399,40 @@ export function ProgressDashboard({
               </span>
             </text>
           </box>
+
+          {/* Row 6: Prune worktrees button */}
+          {(worktreeHealth && (worktreeHealth.stale > 0 || worktreeHealth.prunable > 0)) && (
+            <box style={{ flexDirection: 'row', gap: 2 }}>
+              <text>
+                {pruning ? (
+                  <span fg={colors.status.info}>⟳ Pruning...</span>
+                ) : (
+                  <span>
+                    <span fg={colors.status.warning}>[P]</span>{' '}
+                    <span
+                      fg={colors.status.success}
+                      bold={true}
+                      onClick={onPruneWorktrees}
+                    >
+                      Prune Worktrees
+                    </span>
+                    {(worktreeHealth.stale > 0 || worktreeHealth.prunable > 0) && (
+                      <span fg={colors.fg.muted}>
+                        {' '}
+                        ({worktreeHealth.stale > 0 && (
+                          <span><span fg={colors.status.error}>{worktreeHealth.stale}</span> stale</span>
+                        )}
+                        {worktreeHealth.stale > 0 && worktreeHealth.prunable > 0 && ', '}
+                        {worktreeHealth.prunable > 0 && (
+                          <span><span fg={colors.status.warning}>{worktreeHealth.prunable}</span> prunable</span>
+                        )}
+                      </span>
+                    )}
+                  </span>
+                )}
+              </text>
+            </box>
+          )}
         </box>
       </box>
     </box>
