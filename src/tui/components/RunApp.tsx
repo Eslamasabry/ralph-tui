@@ -412,7 +412,7 @@ export function RunApp({
   // Pending main sync count for delivery guarantee visibility
   const [pendingMainCount, setPendingMainCount] = useState(0);
   // List of failures for run summary (US-002)
-  const [runFailures, setRunFailures] = useState<Array<{ taskId: string; taskTitle: string; reason: string; phase: 'merge' | 'sync' | 'recovery' | 'execution'; iteration?: number }>>([]);
+  const [runFailures, setRunFailures] = useState<Array<{ taskId: string; taskTitle: string; commitHash?: string; reason: string; conflictFiles?: string[]; phase: 'merge' | 'sync' | 'recovery' | 'execution'; iteration?: number }>>([]);
   // List of pending-main tasks for run summary (US-002)
   const [pendingMainTasksList, setPendingMainTasksList] = useState<Array<{ taskId: string; taskTitle: string; commitCount: number }>>([]);
   // Main sync failure reason for run summary
@@ -1477,7 +1477,9 @@ export function RunApp({
             {
               taskId: parallelEvent.task.id,
               taskTitle: parallelEvent.task.title,
+              commitHash: parallelEvent.commit,
               reason: parallelEvent.reason,
+              conflictFiles: parallelEvent.conflictFiles ?? [],
               phase: 'merge',
             },
           ]);

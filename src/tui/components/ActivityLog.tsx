@@ -186,6 +186,7 @@ function formatEventDescription(event: ParallelEvent): string {
     case 'parallel:merge-succeeded':
       return `${event.commit.slice(0, 7)} ${event.resolved ? '(resolved)' : ''}`;
     case 'parallel:merge-failed':
+// OURS:
       // Extract task ID and first line of reason for compact display
       const firstLine = event.reason.split('\n')[0] || '';
       const taskMatch = firstLine.match(/Task:\s*(\S+)/);
@@ -193,6 +194,8 @@ function formatEventDescription(event: ParallelEvent): string {
       const taskId = taskMatch ? taskMatch[1] : event.task.id;
       const reason = reasonMatch ? reasonMatch[1] : firstLine;
       return `${event.commit.slice(0, 7)} [${taskId}]: ${reason}`;
+// THEIRS:
+      return formatMergeFailedDescription(event); (ralph-tui-wmr.6: task)
     case 'parallel:main-sync-skipped':
       return event.reason;
     case 'parallel:main-sync-succeeded':
@@ -206,6 +209,29 @@ function formatEventDescription(event: ParallelEvent): string {
     default:
       return '';
   }
+}
+
+/**
+ * Format detailed merge failure description with conflict files and suggestions
+ */
+function formatMergeFailedDescription(event: Extract<ParallelEvent, { type: 'parallel:merge-failed' }>): string {
+  const parts: string[] = [];
+
+  // Task ID and commit hash
+  parts.push(`${event.task.id} @ ${event.commit.slice(0, 8)}`);
+
+  // Reason
+  parts.push(event.reason);
+
+  // Conflict files (if any)
+  if (event.conflictFiles && event.conflictFiles.length > 0) {
+    const fileList = event.conflictFiles.length <= 3
+      ? event.conflictFiles.join(', ')
+      : `${event.conflictFiles.slice(0, 3).join(', ')} +${event.conflictFiles.length - 3} more`;
+    parts.push(`Conflicts: ${fileList}`);
+  }
+
+  return parts.join(' | ');
 }
 
 /**

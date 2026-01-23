@@ -18,8 +18,12 @@ export interface FailureInfo {
 	taskId: string;
 	/** Task title */
 	taskTitle: string;
+	/** Commit hash (for merge failures) */
+	commitHash?: string;
 	/** Reason for failure */
 	reason: string;
+	/** Conflict files (for merge failures) */
+	conflictFiles?: string[];
 	/** Phase when failure occurred: 'merge' | 'sync' | 'recovery' | 'execution' */
 	phase: 'merge' | 'sync' | 'recovery' | 'execution';
 	/** Iteration number when failure occurred */
@@ -374,9 +378,29 @@ export function RunSummaryOverlay({
 						<text fg={colors.status.error}>Failures:</text>
 						<box style={{ paddingLeft: 2 }}>
 							{failures.slice(0, 4).map((failure, index) => (
-								<text key={index} fg={colors.fg.secondary}>
-									- {failure.taskId}: {failure.reason}
-								</text>
+								<box key={index} style={{ flexDirection: 'column', paddingBottom: 0 }}>
+									<text fg={colors.fg.secondary}>
+										- {failure.taskId}: {failure.reason}
+									</text>
+									{failure.phase === 'merge' && (
+										<>
+											{failure.commitHash && (
+												<text fg={colors.fg.muted} style={{ paddingLeft: 2 }}>
+													Commit: {failure.commitHash.slice(0, 8)}
+												</text>
+											)}
+											{failure.conflictFiles && failure.conflictFiles.length > 0 && (
+												<text fg={colors.fg.muted} style={{ paddingLeft: 2 }}>
+													Conflicts: {failure.conflictFiles.slice(0, 3).join(', ')}
+													{failure.conflictFiles.length > 3 && ` +${failure.conflictFiles.length - 3} more`}
+												</text>
+											)}
+											<text fg={colors.accent.tertiary} style={{ paddingLeft: 2 }}>
+												Try: cd worktrees/merge && git mergetool
+											</text>
+										</>
+									)}
+								</box>
 							))}
 							{failures.length > 4 && (
 								<text fg={colors.fg.muted}>... and {String(failures.length - 4)} more</text>
