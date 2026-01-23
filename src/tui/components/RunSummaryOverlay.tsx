@@ -337,10 +337,10 @@ export function RunSummaryOverlay({
 					{/* Tasks row */}
 					<box style={{ flexDirection: 'row', gap: 2 }}>
 						<text fg={colors.fg.muted}>Tasks: </text>
-						<text fg={colors.fg.primary}>{totalTasks} total</text>
-						<text fg={colors.status.success}>• {completedTasks} done</text>
-						{failedTasks > 0 && <text fg={colors.status.error}>• {failedTasks} failed</text>}
-						{pendingMainTasks > 0 && <text fg={colors.status.warning}>• {pendingMainTasks} pending-main</text>}
+						<text fg={colors.fg.primary}>{String(totalTasks)} total</text>
+						<text fg={colors.status.success}>• {String(completedTasks)} done</text>
+						{failedTasks > 0 && <text fg={colors.status.error}>• {String(failedTasks)} failed</text>}
+						{pendingMainTasks > 0 && <text fg={colors.status.warning}>• {String(pendingMainTasks)} pending-main</text>}
 					</box>
 
 					{/* Merge stats row */}
@@ -379,7 +379,7 @@ export function RunSummaryOverlay({
 								</text>
 							))}
 							{failures.length > 4 && (
-								<text fg={colors.fg.muted}>... and {failures.length - 4} more</text>
+								<text fg={colors.fg.muted}>... and {String(failures.length - 4)} more</text>
 							)}
 						</box>
 					</box>
@@ -392,11 +392,11 @@ export function RunSummaryOverlay({
 						<box style={{ paddingLeft: 2 }}>
 							{pendingMainTasksList.slice(0, 2).map((pending, index) => (
 								<text key={index} fg={colors.fg.secondary}>
-									- {pending.taskId} ({pending.commitCount} commits)
+									- {pending.taskId} ({String(pending.commitCount)} commits)
 								</text>
 							))}
 							{pendingMainTasksList.length > 2 && (
-								<text fg={colors.fg.muted}>... and {pendingMainTasksList.length - 2} more</text>
+								<text fg={colors.fg.muted}>... and {String(pendingMainTasksList.length - 2)} more</text>
 							)}
 						</box>
 					</box>
