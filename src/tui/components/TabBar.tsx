@@ -117,9 +117,7 @@ function Tab({
     >
       <text>
         {/* Status indicator (skip for local since always connected) */}
-        {!tab.isLocal && (
-          <span fg={statusColor}>{statusIndicator} </span>
-        )}
+        <span fg={statusColor}>{!tab.isLocal ? `${statusIndicator} ` : ''}</span>
 
         {/* Tab label - use uppercase for selected to indicate emphasis */}
         <span fg={labelColor}>
@@ -127,14 +125,10 @@ function Tab({
         </span>
 
         {/* Connection metrics for selected connected remote tabs (US-5) */}
-        {metricsStr && (
-          <span fg={colors.fg.dim}>{metricsStr}</span>
-        )}
+        <span fg={colors.fg.dim}>{metricsStr || ''}</span>
 
         {/* Key hint */}
-        {keyHint && (
-          <span fg={colors.fg.dim}> [{keyHint}]</span>
-        )}
+        <span fg={colors.fg.dim}>{keyHint ? `[${keyHint}]` : ''}</span>
 
         {/* Separator */}
         <span fg={colors.border.muted}> {separator}</span>

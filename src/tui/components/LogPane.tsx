@@ -323,10 +323,7 @@ function LogPaneHeader({
         {/* Main title row */}
         <box style={{ flexDirection: 'row', alignItems: 'center', gap: 1 }}>
           {taskTitle ? (
-            <>
-              <text fg={colors.fg.primary}>{taskTitle}</text>
-              {taskId && <text fg={colors.fg.muted}>({taskId})</text>}
-            </>
+            <text fg={colors.fg.primary}>{taskTitle}{taskId ? ` (${taskId})` : ''}</text>
           ) : (
             <text fg={colors.fg.primary}>
               {currentIteration > 0 ? `Iteration ${currentIteration}` : 'Logs'}

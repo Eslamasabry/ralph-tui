@@ -402,7 +402,7 @@ export function SubagentTreePanel({
             {currentTaskTitle && (
               <span fg={colors.fg.secondary}> {truncateText(currentTaskTitle, Math.max(0, maxRowWidth - (currentTaskId?.length || 4) - 10))}</span>
             )}
-            {tree.length > 0 && <span fg={colors.fg.muted}> ({String(tree.length)})</span>}
+            <span fg={colors.fg.muted}>{tree.length > 0 ? ` (${String(tree.length)})` : ''}</span>
           </text>
         </box>
 

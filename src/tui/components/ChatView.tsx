@@ -338,8 +338,7 @@ export function ChatView({
         }}
       >
         <box style={{ flexDirection: 'row', gap: 2 }}>
-          <text fg={colors.accent.primary}>{title}</text>
-          {subtitle && <text fg={colors.fg.muted}>{subtitle}</text>}
+          <text fg={colors.accent.primary}>{title}{subtitle ? ` ${subtitle}` : ''}</text>
         </box>
         <text fg={colors.fg.muted}>
           {String(messages.length)} message{messages.length !== 1 ? 's' : ''}

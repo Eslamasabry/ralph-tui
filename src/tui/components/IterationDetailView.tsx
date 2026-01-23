@@ -250,7 +250,7 @@ function MetadataRow({
       {typeof value === 'string' ? (
         <text fg={valueColor ?? colors.fg.secondary}>{value}</text>
       ) : (
-        value
+        <text fg={valueColor ?? colors.fg.secondary}>{String(value ?? '')}</text>
       )}
     </box>
   );
