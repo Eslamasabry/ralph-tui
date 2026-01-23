@@ -467,3 +467,6 @@ export function registerLockCleanupHandlers(cwd: string): () => void {
     process.off('unhandledRejection', handleUncaughtError);
   };
 }
+
+// Re-export worktree cleanup for convenience
+export { cleanupAllWorktrees, type CleanupResult } from '../worktree-cleanup/index.js';

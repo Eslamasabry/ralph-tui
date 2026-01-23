@@ -22,6 +22,7 @@ import {
   executeInfoCommand,
   executeSkillsCommand,
   executeRemoteCommand,
+  executeCleanupCommand,
 } from './commands/index.js';
 
 /**
@@ -41,6 +42,7 @@ Commands:
   resume [options]    Resume an interrupted session
   status [options]    Check session status (headless, for CI/scripts)
   remote [subcommand] Manage remote server configurations
+  cleanup [options]   Clean up worktrees created by parallel execution
   logs [options]      View/manage iteration output logs
   setup [options]     Run interactive project setup (alias: init)
   doctor [options]    Diagnose agent configuration issues
@@ -89,6 +91,11 @@ Status Options:
   --json              Output in JSON format for CI/scripts
   --cwd <path>        Working directory
 
+Cleanup Options:
+  --status, -s        Show worktree status only
+  --force, -f         Force cleanup even if not a git repository
+  --cwd <path>        Working directory
+
 Convert Options:
   --to <format>       Target format: json
   --output, -o <path> Output file path (default: ./prd.json)
@@ -106,6 +113,8 @@ Examples:
   ralph-tui resume                       # Resume interrupted session
   ralph-tui status                       # Check session status
   ralph-tui status --json                # JSON output for CI/scripts
+  ralph-tui cleanup                      # Clean up worktrees
+  ralph-tui cleanup --status             # Show worktree status
   ralph-tui logs                         # List iteration logs
   ralph-tui logs --iteration 5           # View specific iteration
   ralph-tui logs --task US-005           # View logs for a task
@@ -238,6 +247,12 @@ async function handleSubcommand(args: string[]): Promise<boolean> {
   // Remote command (manage remote configurations)
   if (command === 'remote') {
     await executeRemoteCommand(args.slice(1));
+    return true;
+  }
+
+  // Cleanup command
+  if (command === 'cleanup') {
+    await executeCleanupCommand(args.slice(1));
     return true;
   }
 

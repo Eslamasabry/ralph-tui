@@ -97,3 +97,8 @@ export {
   parseRemoteArgs,
   printRemoteHelp,
 } from './remote.js';
+
+export {
+  executeCleanupCommand,
+  printCleanupHelp,
+} from './cleanup.js';
