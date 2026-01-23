@@ -60,6 +60,8 @@ import { platform } from 'node:os';
 import { writeToClipboard } from '../../utils/index.js';
 import { StreamingOutputParser } from '../output-parser.js';
 import type { FormattedSegment } from '../../plugins/agents/output-formatting.js';
+import { WorktreeManager } from '../../engine/parallel/worktree-manager.js';
+import { pruneWorktrees as pruneWorktreesCleanup } from '../../cleanup/index.js';
 
 /**
  * View modes for the RunApp component
@@ -409,6 +411,22 @@ export function RunApp({
     failed: 0,
     syncPending: 0,
   });
+  // Worktree health counts for pruning UI
+  const [worktreeHealthSummary, setWorktreeHealthSummary] = useState<{
+    total: number;
+    active: number;
+    locked: number;
+    stale: number;
+    prunable: number;
+  }>({
+    total: 0,
+    active: 0,
+    locked: 0,
+    stale: 0,
+    prunable: 0,
+  });
+  // Prune operation in progress
+  const [pruning, setPruning] = useState(false);
   // Pending main sync count for delivery guarantee visibility
   const [pendingMainCount, setPendingMainCount] = useState(0);
   // List of failures for run summary (US-002)
@@ -1748,9 +1766,57 @@ export function RunApp({
       setShowRunSummary(false);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      setInfoFeedback(`Restore failed: ${errorMessage}`);
-    }
-   }, [engine, cwd]);
+       setInfoFeedback(`Restore failed: ${errorMessage}`);
+     }
+    }, [engine, cwd]);
+
+   // Refresh worktree health counts periodically
+   const refreshWorktreeHealth = useCallback(async () => {
+     try {
+       const manager = new WorktreeManager({ repoRoot: cwd });
+       const health = await manager.getWorktreeHealthSummary();
+       setWorktreeHealthSummary({
+         total: health.total,
+         active: health.active,
+         locked: health.locked,
+         stale: health.stale,
+         prunable: health.prunable,
+       });
+     } catch {
+       // Ignore errors - worktree health is not critical
+     }
+   }, [cwd]);
+
+   // Handle manual prune worktrees action
+   const handlePruneWorktrees = useCallback(async () => {
+     if (pruning) return;
+
+     setPruning(true);
+     setInfoFeedback('Pruning worktrees...');
+
+     try {
+       const result = await pruneWorktreesCleanup(cwd);
+       if (result.success) {
+         setInfoFeedback('Worktrees pruned successfully');
+         // Refresh health counts after pruning
+         await refreshWorktreeHealth();
+       } else {
+         setInfoFeedback(`Prune failed: ${result.error ?? 'Unknown error'}`);
+       }
+     } catch (error) {
+       setInfoFeedback(`Prune error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+     } finally {
+       setPruning(false);
+     }
+   }, [cwd, pruning, refreshWorktreeHealth]);
+
+   // Initial load and periodic refresh of worktree health
+   useEffect(() => {
+     refreshWorktreeHealth();
+     // Refresh every 30 seconds
+     const interval = setInterval(refreshWorktreeHealth, 30000);
+     return () => clearInterval(interval);
+   }, [refreshWorktreeHealth]);
 
   // Handle keyboard navigation
   const handleKeyboard = useCallback(
@@ -1998,6 +2064,14 @@ export function RunApp({
             instanceManager.sendRemoteCommand('refreshTasks');
           } else {
             engine.refreshTasks();
+          }
+          break;
+
+        case 'p':
+          // Handle lowercase 'p' for prune worktrees (uppercase is handled separately)
+          // Note: 'P' (uppercase) would have key.sequence === 'P', but we use 'p' for case-insensitive
+          if (key.sequence === 'p' && !isViewingRemote && (worktreeHealthSummary.stale > 0 || worktreeHealthSummary.prunable > 0)) {
+            handlePruneWorktrees();
           }
           break;
 
@@ -2909,15 +2983,20 @@ export function RunApp({
           remoteInfo={
             isViewingRemote && instanceTabs?.[selectedTabIndex]
               ? {
-                name: instanceTabs[selectedTabIndex].alias ?? instanceTabs[selectedTabIndex].label,
-                host: instanceTabs[selectedTabIndex].host ?? 'unknown',
-                port: instanceTabs[selectedTabIndex].port ?? 0,
-              }
+                  name: instanceTabs[selectedTabIndex].alias ?? instanceTabs[selectedTabIndex].label,
+                  host: instanceTabs[selectedTabIndex].host ?? 'unknown',
+                  port: instanceTabs[selectedTabIndex].port ?? 0,
+                }
               : undefined
           }
           autoCommit={isViewingRemote ? remoteAutoCommit : storedConfig?.autoCommit}
           gitInfo={isViewingRemote ? remoteGitInfo : localGitInfo}
           pendingMainCount={pendingMainCount}
+          worktreeHealth={{
+            stale: worktreeHealthSummary.stale,
+            prunable: worktreeHealthSummary.prunable,
+          }}
+          pruning={pruning}
         />
       )}
 
@@ -3073,6 +3152,9 @@ export function RunApp({
                 completedTasks={taskCounts.completed}
                 failedTasks={taskCounts.failed}
                 worktreeCount={mergeStats.worktrees}
+                worktreeActive={worktreeHealthSummary.active}
+                worktreeLocked={worktreeHealthSummary.locked}
+                worktreeStale={worktreeHealthSummary.stale}
                 mergesQueued={mergeStats.queued}
                 mergesSucceeded={mergeStats.merged}
                 mergesResolved={mergeStats.resolved}

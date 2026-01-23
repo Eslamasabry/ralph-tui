@@ -1,10 +1,69 @@
 /**
- * ABOUTME: Types for parallel execution with worktree workers.
- */
+  * ABOUTME: Types for parallel execution with worktree workers.
+  */
 
 import type { TrackerTask } from '../../plugins/trackers/types.js';
 import type { AgentExecutionResult } from '../../plugins/agents/types.js';
 import type { FormattedSegment } from '../../plugins/agents/output-formatting.js';
+
+/**
+ * Health status of a worktree based on its state.
+ */
+export type WorktreeHealthStatus = 'active' | 'locked' | 'stale' | 'prunable';
+
+/**
+ * Summary of worktree health counts for dashboard display.
+ */
+export interface WorktreeHealthSummary {
+  /** Total number of worktrees */
+  total: number;
+  /** Number of active (unlocked) worktrees */
+  active: number;
+  /** Number of locked worktrees */
+  locked: number;
+  /** Number of stale worktrees (on old commits) */
+  stale: number;
+  /** Number of prunable worktrees (already removed from disk) */
+  prunable: number;
+}
+
+/**
+ * Detailed information about a single worktree.
+ */
+export interface WorktreeInfo {
+  /** Worktree path */
+  path: string;
+  /** Branch name */
+  branch: string;
+  /** Commit hash */
+  commit: string;
+  /** Whether the worktree is locked */
+  locked: boolean;
+  /** Lock reason if locked */
+  lockReason?: string;
+  /** Current health status */
+  status: WorktreeHealthStatus;
+}
+
+/**
+ * Worktree status with computed health information.
+ */
+export interface WorktreeStatus {
+  /** Full path to worktree */
+  path: string;
+  /** Relative path from repo root */
+  relativePath: string;
+  /** Commit hash */
+  commit: string;
+  /** Branch name */
+  branch: string;
+  /** Whether the worktree is locked */
+  locked: boolean;
+  /** Lock reason if locked */
+  lockReason?: string;
+  /** Current health status */
+  status: WorktreeHealthStatus;
+}
 
 /**
  * Commit metadata captured for merge events.

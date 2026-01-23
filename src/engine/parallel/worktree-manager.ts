@@ -5,7 +5,8 @@
 
 import { spawn } from 'node:child_process';
 import { mkdir, rm, access, writeFile, chmod } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
+import type { WorktreeStatus, WorktreeHealthSummary, WorktreeHealthStatus } from './types.js';
 
 interface GitCommandResult {
   stdout: string;
@@ -207,7 +208,144 @@ export class WorktreeManager {
     }
   }
 
+// OURS:
 <<<<<<< HEAD
+// THEIRS:
+  /**
+   * List all worktrees with their status information.
+   * Parses `git worktree list --porcelain` output to determine health status.
+   */
+  async listWorktrees(): Promise<WorktreeStatus[]> {
+    const { stdout, exitCode } = await this.execGit(['-C', this.repoRoot, 'worktree', 'list', '--porcelain']);
+
+    if (exitCode !== 0) {
+      return [];
+    }
+
+    const worktrees: WorktreeStatus[] = [];
+    const lines = stdout.trim().split('\n').filter(Boolean);
+
+    // Parse porcelain output format:
+    // worktree <path>
+    // HEAD <commit>
+    // branch <ref>
+    // locked [<reason>]
+
+    let currentWorktree: Partial<WorktreeStatus> | null = null;
+
+    for (const line of lines) {
+      const [prefix, ...rest] = line.split(' ');
+      const value = rest.join(' ');
+
+      switch (prefix) {
+        case 'worktree': {
+          // Start of a new worktree entry
+          if (currentWorktree) {
+            // Push the previous worktree
+            worktrees.push(await this.createWorktreeStatus(currentWorktree));
+          }
+          currentWorktree = {
+            path: value,
+            relativePath: relative(this.repoRoot, value),
+            locked: false,
+          };
+          break;
+        }
+        case 'HEAD': {
+          if (currentWorktree) {
+            currentWorktree.commit = value;
+          }
+          break;
+        }
+        case 'branch': {
+          if (currentWorktree) {
+            // Branch ref format: refs/heads/branch-name or just branch-name
+            currentWorktree.branch = value.replace(/^refs\/heads\//, '');
+          }
+          break;
+        }
+        case 'locked': {
+          if (currentWorktree) {
+            currentWorktree.locked = true;
+            currentWorktree.lockReason = value || undefined;
+          }
+          break;
+        }
+      }
+    }
+
+    // Push the last worktree if exists
+    if (currentWorktree) {
+      worktrees.push(await this.createWorktreeStatus(currentWorktree));
+    }
+
+    return worktrees;
+  }
+
+  /**
+    * Create a WorktreeStatus object with computed health status.
+    */
+  private async createWorktreeStatus(data: Partial<WorktreeStatus>): Promise<WorktreeStatus> {
+    const { path, relativePath, commit, branch, locked, lockReason } = data;
+
+    let status: WorktreeHealthStatus;
+
+    if (locked) {
+      status = 'locked';
+    } else {
+      try {
+        await access(path!);
+        status = 'active';
+      } catch {
+        status = 'stale';
+      }
+    }
+
+    return {
+      path: path!,
+      relativePath: relativePath!,
+      commit: commit!,
+      branch: branch ?? 'unknown',
+      locked: locked ?? false,
+      lockReason,
+      status,
+    };
+  }
+
+  /**
+    * Get a summary of worktree health counts.
+    */
+  async getWorktreeHealthSummary(): Promise<WorktreeHealthSummary> {
+    const worktrees = await this.listWorktrees();
+
+    const summary: WorktreeHealthSummary = {
+      total: worktrees.length,
+      active: 0,
+      locked: 0,
+      stale: 0,
+      prunable: 0,
+    };
+
+    for (const wt of worktrees) {
+      switch (wt.status) {
+        case 'active':
+          summary.active++;
+          break;
+        case 'locked':
+          summary.locked++;
+          break;
+        case 'stale':
+          summary.stale++;
+          break;
+        case 'prunable':
+          summary.prunable++;
+          break;
+      }
+    }
+
+    return summary;
+  }
+ (ralph-tui-wmr.5: task)
   private async branchExists(branchName: string): Promise<boolean> {
     const result = await this.execGit(['-C', this.repoRoot, 'rev-parse', '--verify', `refs/heads/${branchName}`]);
     return result.exitCode === 0;

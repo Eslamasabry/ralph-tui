@@ -111,6 +111,25 @@ export async function pruneWorktrees(cwd: string): Promise<CleanupActionResult> 
 }
 
 /**
+ * Simple prune result for TUI display
+ */
+export interface PruneWorktreesResult {
+	success: boolean;
+	error?: string;
+}
+
+/**
+ * Prune worktrees and return simple result (for TUI use).
+ */
+export async function pruneWorktreesCleanup(cwd: string): Promise<PruneWorktreesResult> {
+	const result = await pruneWorktrees(cwd);
+	return {
+		success: result.success,
+		error: result.error,
+	};
+}
+
+/**
  * Get list of merged branches (excluding main and current branch)
  */
 async function getMergedBranches(cwd: string, currentBranch: string): Promise<string[]> {

@@ -22,8 +22,14 @@ export interface DashboardBannerProps {
   completedTasks: number;
   /** Number of failed tasks */
   failedTasks: number;
-  /** Number of active worktrees */
+  /** Total number of worktrees */
   worktreeCount: number;
+  /** Number of active worktrees (locked for parallel worker) */
+  worktreeActive: number;
+  /** Number of locked worktrees (locked for other reasons) */
+  worktreeLocked: number;
+  /** Number of stale worktrees (directory missing) */
+  worktreeStale: number;
   /** Number of queued merges */
   mergesQueued: number;
   /** Number of successful merges */
@@ -71,6 +77,9 @@ export function DashboardBanner({
   completedTasks,
   failedTasks,
   worktreeCount,
+  worktreeActive,
+  worktreeLocked,
+  worktreeStale,
   mergesQueued,
   mergesSucceeded,
   mergesResolved,
@@ -147,6 +156,9 @@ export function DashboardBanner({
         }}
       >
         <StatItem label="Worktrees" value={worktreeCount} color={colors.accent.primary} />
+        {worktreeActive > 0 && <StatItem label="Active" value={worktreeActive} color={colors.status.success} />}
+        {worktreeLocked > 0 && <StatItem label="Locked" value={worktreeLocked} color={colors.status.warning} />}
+        {worktreeStale > 0 && <StatItem label="Stale" value={worktreeStale} color={colors.status.error} />}
         <StatItem label="Merge Q" value={mergesQueued} color={colors.fg.muted} />
         <StatItem label="Merged" value={mergesSucceeded} color={colors.status.success} />
         <StatItem label="Resolved" value={mergesResolved} color={colors.status.info} />
