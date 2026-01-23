@@ -80,13 +80,24 @@ mock.module('node:fs', () => ({
 }));
 
 // Mock fs/promises for readFile
+import fsPromises from 'node:fs/promises';
 mock.module('node:fs/promises', () => ({
+  ...fsPromises,
   readFile: async () => {
     if (mockReadFileShouldFail) {
       throw new Error('ENOENT: no such file or directory');
     }
     return mockReadFileContent;
   },
+  writeFile: async () => {},
+  mkdir: async () => {},
+  open: async () => ({
+    writeFile: async () => {},
+    close: async () => {},
+  }),
+  unlink: async () => {},
+  stat: async () => {},
+  readdir: async () => {},
 }));
 
 // Import after mocking

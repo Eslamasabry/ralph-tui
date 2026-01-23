@@ -235,6 +235,9 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
   protected labels: string[] = [];
   private workingDir: string = process.cwd();
   private knownTaskIds: Set<string> | null = null;
+  private taskCache = new Map<string, TrackerTask>();
+  private refreshInFlight = false;
+  private refreshQueued = false;
 
   private async getLockDir(): Promise<string> {
     const lockDir = join(this.workingDir, this.beadsDir, '.locks');
@@ -422,97 +425,135 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
   }
 
   async getTasks(filter?: TaskFilter): Promise<TrackerTask[]> {
-    // Build bd list command args
-    // Use --all to include closed issues (TUI filters visibility via showClosedTasks state)
-    const args = ['list', '--json', '--all'];
-
-    // Filter by parent (epic) - beads in an epic are children of the epic issue
-    if (filter?.parentId) {
-      args.push('--parent', filter.parentId);
-    } else if (this.epicId) {
-      args.push('--parent', this.epicId);
+    if (this.refreshInFlight) {
+      this.refreshQueued = true;
+      return []; // Return empty array to avoid stale data
     }
 
-    // Filter by status
-    if (filter?.status) {
-      const statuses = Array.isArray(filter.status)
-        ? filter.status
-        : [filter.status];
-      // Map our statuses to bd statuses
-      const bdStatuses = statuses.map(mapStatusToBd);
-      // bd only supports single --status, so use the first one
-      // For multiple statuses, we'll filter in memory
-      if (bdStatuses.length === 1) {
-        args.push('--status', bdStatuses[0]!);
-      }
-    }
-
-    // Filter by labels (separate from epic hierarchy)
-    const labelsToFilter =
-      filter?.labels && filter.labels.length > 0 ? filter.labels : this.labels;
-    if (labelsToFilter.length > 0) {
-      args.push('--label', labelsToFilter.join(','));
-    }
-
-    const { stdout, exitCode, stderr } = await execBd(args, this.workingDir);
-
-    if (exitCode !== 0) {
-      console.error('bd list failed:', stderr);
-      return [];
-    }
-
-    // Parse JSON output
-    let beads: BeadJson[];
+    this.refreshInFlight = true;
     try {
-      beads = JSON.parse(stdout) as BeadJson[];
-    } catch (err) {
-      console.error('Failed to parse bd list output:', err);
-      return [];
-    }
+      do {
+        this.refreshQueued = false;
 
-    // Convert to TrackerTask
-    let tasks = beads.map(beadToTask);
+        // Build bd list command args
+        // Use --all to include closed issues (TUI filters visibility via showClosedTasks state)
+        const args = ['list', '--json', '--all'];
 
-    // Hydrate dependencies if bd list didn't include them
-    const needsDeps = tasks.filter((task) => {
-      if (task.dependsOn && task.dependsOn.length > 0) {
-        return false;
-      }
-      const dependencyCount = typeof task.metadata?.dependencyCount === 'number'
-        ? task.metadata.dependencyCount
-        : 0;
-      return dependencyCount > 0;
-    });
+        // Filter by parent (epic) - beads in an epic are children of the epic issue
+        if (filter?.parentId) {
+          args.push('--parent', filter.parentId);
+        } else if (this.epicId) {
+          args.push('--parent', this.epicId);
+        }
 
-    if (needsDeps.length > 0) {
-      const hydrated = await Promise.all(needsDeps.map((task) => this.getTask(task.id)));
-      const taskMap = new Map(tasks.map((task) => [task.id, task]));
-      for (const hydratedTask of hydrated) {
-        if (hydratedTask) {
-          const existing = taskMap.get(hydratedTask.id);
-          if (existing) {
-            taskMap.set(hydratedTask.id, {
-              ...existing,
-              dependsOn: hydratedTask.dependsOn,
-              blocks: hydratedTask.blocks,
-            });
+        // Filter by status
+        if (filter?.status) {
+          const statuses = Array.isArray(filter.status)
+            ? filter.status
+            : [filter.status];
+          // Map our statuses to bd statuses
+          const bdStatuses = statuses.map(mapStatusToBd);
+          // bd only supports single --status, so use the first one
+          // For multiple statuses, we'll filter in memory
+          if (bdStatuses.length === 1) {
+            args.push('--status', bdStatuses[0]!);
           }
         }
-      }
-      tasks = Array.from(taskMap.values());
+
+        // Filter by labels (separate from epic hierarchy)
+        const labelsToFilter =
+          filter?.labels && filter.labels.length > 0 ? filter.labels : this.labels;
+        if (labelsToFilter.length > 0) {
+          args.push('--label', labelsToFilter.join(','));
+        }
+
+        const { stdout, exitCode, stderr } = await execBd(args, this.workingDir);
+
+        if (exitCode !== 0) {
+          console.error('bd list failed:', stderr);
+          return [];
+        }
+
+        // Parse JSON output
+        let beads: BeadJson[];
+        try {
+          beads = JSON.parse(stdout) as BeadJson[];
+        } catch (err) {
+          console.error('Failed to parse bd list output:', err);
+          return [];
+        }
+
+        // Convert to TrackerTask
+        let tasks = beads.map(beadToTask);
+
+        // Hydrate dependencies if bd list didn't include them
+        const needsDeps = tasks.filter((task) => {
+          if (task.dependsOn && task.dependsOn.length > 0) {
+            return false;
+          }
+          const dependencyCount = typeof task.metadata?.dependencyCount === 'number'
+            ? task.metadata.dependencyCount
+            : 0;
+          return dependencyCount > 0;
+        });
+
+        if (needsDeps.length > 0) {
+          const hydrated = await Promise.all(
+            needsDeps.map(async (task) => {
+              // Check if we already have this task in cache
+              if (this.taskCache.has(task.id)) {
+                return this.taskCache.get(task.id);
+              }
+              // Fetch from bd show
+              const hydratedTask = await this.getTask(task.id);
+              if (hydratedTask) {
+                this.taskCache.set(task.id, hydratedTask);
+              }
+              return hydratedTask;
+            })
+          );
+          
+          const taskMap = new Map(tasks.map((task) => [task.id, task]));
+          for (const hydratedTask of hydrated) {
+            if (hydratedTask) {
+              const existing = taskMap.get(hydratedTask.id);
+              if (existing) {
+                taskMap.set(hydratedTask.id, {
+                  ...existing,
+                  dependsOn: hydratedTask.dependsOn,
+                  blocks: hydratedTask.blocks,
+                });
+              }
+            }
+          }
+          tasks = Array.from(taskMap.values());
+        }
+
+        // Apply additional filtering that bd doesn't support directly
+        // Note: Remove parentId from filter since bd already handled it via --parent flag
+        // (bd list --json doesn't include parent field in output, so filterTasks would incorrectly remove tasks)
+        const filterWithoutParent = filter ? { ...filter, parentId: undefined } : undefined;
+        const filteredTasks = this.filterTasks(tasks, filterWithoutParent);
+
+        void this.logNewTasks(filteredTasks);
+        if (!this.refreshQueued) {
+          return filteredTasks;
+        }
+      } while (this.refreshQueued);
+
+      // This line is theoretically unreachable, but TypeScript requires a return
+      return [];
+    } finally {
+      this.refreshInFlight = false;
     }
-
-    // Apply additional filtering that bd doesn't support directly
-    // Note: Remove parentId from filter since bd already handled it via --parent flag
-    // (bd list --json doesn't include parent field in output, so filterTasks would incorrectly remove tasks)
-    const filterWithoutParent = filter ? { ...filter, parentId: undefined } : undefined;
-    const filteredTasks = this.filterTasks(tasks, filterWithoutParent);
-
-    void this.logNewTasks(filteredTasks);
-    return filteredTasks;
   }
 
   override async getTask(id: string): Promise<TrackerTask | undefined> {
+    // Check if we already have this task in cache
+    if (this.taskCache.has(id)) {
+      return this.taskCache.get(id);
+    }
+    
     const { stdout, exitCode, stderr } = await execBd(
       ['show', id, '--json'],
       this.workingDir
@@ -536,7 +577,9 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
       return undefined;
     }
 
-    return beadToTask(beads[0]!);
+    const task = beadToTask(beads[0]!);
+    this.taskCache.set(id, task); // Cache the task
+    return task;
   }
 
   async completeTask(

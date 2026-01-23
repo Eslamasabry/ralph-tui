@@ -309,7 +309,7 @@ export class ExecutionEngine {
     const trackerOptions = this.config.tracker.options as Record<string, unknown> | undefined;
     const workingDir = (trackerOptions?.workingDir as string) ?? this.config.cwd ?? process.cwd();
     const beadsDir = (trackerOptions?.beadsDir as string) ?? '.beads';
-    const dbPath = join(workingDir, beadsDir, 'db.sqlite');
+    const dbPath = join(workingDir, beadsDir, 'beads.db');
 
     this.trackerRealtimeWatcher = new BeadsRealtimeWatcher({
       dbPath,
