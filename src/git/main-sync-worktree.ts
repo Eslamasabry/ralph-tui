@@ -247,13 +247,32 @@ export class MainSyncWorktree {
     ]);
 
     if (mergeResult.exitCode !== 0) {
+      // Fast-forward failed - likely due to diverging branches. Reset to match ref.
+      console.warn('Fast-forward merge failed, resetting main-sync branch to match main');
+      const resetResult = await this.execGit([
+        '-C', worktreePath,
+        'reset',
+        '--hard',
+        ref,
+      ]);
+
+      if (resetResult.exitCode !== 0) {
+        return {
+          success: false,
+          updated: false,
+          previousCommit,
+          currentCommit: previousCommit,
+          error: `Failed to reset main-sync branch: ${resetResult.stderr}`,
+          code: 'FAST_FORWARD_FAILED',
+        };
+      }
+
+      const currentCommit = await this.getCurrentCommit();
       return {
-        success: false,
-        updated: false,
+        success: true,
+        updated: currentCommit !== previousCommit,
         previousCommit,
-        currentCommit: previousCommit,
-        error: `Fast-forward merge failed: ${mergeResult.stderr}`,
-        code: 'FAST_FORWARD_FAILED',
+        currentCommit,
       };
     }
 
