@@ -1,6 +1,7 @@
 /**
  * ABOUTME: Task cards row component displaying all tasks in a scrollable horizontal grid.
- * Shows task ID, title, status, blocker info, and worker/slot label with visual hierarchy.
+ * Shows task ID, title, status, blocker info, and worker/slot label with improved visual hierarchy.
+ * Redesigned with better status indicators, colors, and responsive layout for better readability.
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -28,7 +29,7 @@ export interface TaskCardsRowProps {
 }
 
 /**
- * Truncate text to fit within a maximum width
+ * Truncate text to fit within a maximum width with smart ellipsis
  */
 function truncateText(text: string, maxWidth: number): string {
   if (text.length <= maxWidth) return text;
@@ -37,13 +38,13 @@ function truncateText(text: string, maxWidth: number): string {
 }
 
 /**
- * Get worker/slot label for display
+ * Get worker/slot label for display with enhanced styling
  * Uses workerId from parallel execution for stable slot assignment
  * Falls back to index-based label if workerId not available
  */
 function getWorkerLabel(workerId: string | undefined, index: number): string {
   if (workerId) {
-    // Extract slot number from workerId (e.g., "worker-2" -> "Slot 2")
+    // Extract slot number from workerId (e.g., "worker-2" -> "2")
     const match = workerId.match(/worker-(\d+)/);
     if (match) {
       return `Slot ${match[1]}`;
@@ -72,7 +73,7 @@ function getDurationDisplay(timing: IterationTimingInfo | undefined, nowMs: numb
 }
 
 /**
- * Get card background color based on task status and selection
+ * Get enhanced card background color based on task status and selection
  */
 function getCardBackgroundColor(
   status: TaskItem['status'],
@@ -95,7 +96,7 @@ function getCardBackgroundColor(
 }
 
 /**
- * Get card border color based on status and selection
+ * Get enhanced card border color based on status and selection
  */
 function getCardBorderColor(
   status: TaskItem['status'],
@@ -129,7 +130,7 @@ function getCardBorderColor(
 }
 
 /**
- * Get status label for display
+ * Get enhanced status label for display with better formatting
  */
 function getStatusLabel(status: TaskItem['status'], blockedByTasks?: BlockerInfo[]): string {
   switch (status) {
@@ -157,7 +158,50 @@ function getStatusLabel(status: TaskItem['status'], blockedByTasks?: BlockerInfo
 }
 
 /**
- * Single task card component with improved visual hierarchy
+ * Get priority display with icon and color
+ */
+function getPriorityDisplay(priority?: number): { icon: string; color: string } {
+  if (priority === undefined) {
+    return { icon: '', color: colors.fg.muted };
+  }
+  const colors_pri = ['#f7768e', '#ff9e64', '#e0af68', '#9ece6a', '#565f89'];
+  const index = Math.min(Math.max(0, priority), 4);
+  return {
+    icon: `P${priority}`,
+    color: colors_pri[index],
+  };
+}
+
+/**
+ * Calculate responsive card dimensions based on terminal width
+ */
+function getCardDimensions(terminalWidth: number): {
+  columns: number;
+  cardWidth: number;
+  titleMaxWidth: number;
+} {
+  // Very narrow terminals (< 70 columns)
+  if (terminalWidth < 70) {
+    return { columns: 2, cardWidth: 22, titleMaxWidth: 18 };
+  }
+  // Narrow terminals (70-99 columns)
+  if (terminalWidth < 100) {
+    return { columns: 3, cardWidth: 26, titleMaxWidth: 22 };
+  }
+  // Standard terminals (100-139 columns)
+  if (terminalWidth < 140) {
+    return { columns: 4, cardWidth: 28, titleMaxWidth: 24 };
+  }
+  // Wide terminals (140-179 columns)
+  if (terminalWidth < 180) {
+    return { columns: 5, cardWidth: 30, titleMaxWidth: 26 };
+  }
+  // Very wide terminals (180+ columns)
+  return { columns: 6, cardWidth: 32, titleMaxWidth: 28 };
+}
+
+/**
+ * Enhanced single task card component with improved visual hierarchy
  */
 function TaskCard({
   task,
@@ -182,33 +226,39 @@ function TaskCard({
   const backgroundColor = getCardBackgroundColor(task.status, isSelected);
   const borderColor = getCardBorderColor(task.status, isSelected, isFocused, pulseOn);
 
-  const { width } = useTerminalDimensions();
-  const columns = width >= 160 ? 5 : width >= 120 ? 4 : width >= 90 ? 3 : 2;
-  const gap = 1;
-  const availableWidth = Math.max(20, width - 4);
-  const cardWidth = Math.max(
-    18,
-    Math.min(32, Math.floor((availableWidth - gap * (columns - 1)) / columns))
-  );
-  const titleMaxWidth = cardWidth - 4;
+  const { width: terminalWidth } = useTerminalDimensions();
+  const { cardWidth, titleMaxWidth } = getCardDimensions(terminalWidth);
 
   const isRunning = task.status === 'active';
   const statusLabel = getStatusLabel(task.status, task.blockedByTasks);
   const durationDisplay = useMemo(() => getDurationDisplay(timing, nowMs), [timing, nowMs]);
   const startedDisplay = timing?.startedAt ? formatTimestamp(timing.startedAt) : '—';
   const endedDisplay = timing?.endedAt ? formatTimestamp(timing.endedAt) : '—';
+  const priorityDisplay = getPriorityDisplay(task.priority);
 
   // Truncate status label if too long (for blocked by info)
-  const maxStatusLen = cardWidth - 6;
-  const displayStatusLabel = statusLabel.length > maxStatusLen 
+  const maxStatusLen = cardWidth - 8;
+  const displayStatusLabel = statusLabel.length > maxStatusLen
     ? truncateText(statusLabel, maxStatusLen)
     : statusLabel;
+
+  // Calculate title with emphasis for selected/running
+  const displayTitle = truncateText(task.title, titleMaxWidth);
+  const titleColor = isSelected
+    ? colors.fg.primary
+    : isRunning
+      ? colors.task.active
+      : task.status === 'blocked'
+        ? colors.task.blocked
+        : task.status === 'done' || task.status === 'closed'
+          ? colors.fg.muted
+          : colors.fg.secondary;
 
   return (
     <box
       style={{
         width: cardWidth,
-        minWidth: 18,
+        minWidth: 20,
         flexGrow: 0,
         flexShrink: 0,
         flexDirection: 'column',
@@ -223,7 +273,7 @@ function TaskCard({
         gap: 0,
       }}
     >
-      {/* Worker label (if assigned) and status in header row */}
+      {/* Header row: Worker/slot label and status indicator */}
       <box
         style={{
           flexDirection: 'row',
@@ -236,35 +286,18 @@ function TaskCard({
           {workerLabel || '—'}
         </text>
         <text fg={statusColor}>
-          <span>{statusIndicator}</span>
-          <span> {isRunning ? 'Active' : ''}</span>
+          {statusIndicator}
         </text>
       </box>
 
-      {/* Task title (truncated) - prominent for selected task */}
+      {/* Task title - prominent with visual hierarchy */}
       <box style={{ marginTop: 0 }}>
-        <text
-          fg={
-            isSelected
-              ? colors.fg.primary
-              : isRunning
-                ? colors.task.active
-                : task.status === 'blocked'
-                  ? colors.task.blocked
-                  : task.status === 'done'
-                    ? colors.fg.muted
-                    : colors.fg.secondary
-          }
-        >
-          {isRunning ? (
-            <strong>{truncateText(task.title, titleMaxWidth)}</strong>
-          ) : (
-            truncateText(task.title, titleMaxWidth)
-          )}
+        <text fg={titleColor}>
+          {displayTitle}
         </text>
       </box>
 
-      {/* Status label (shows "Blocked by xxx" for blocked tasks) */}
+      {/* Status label with enhanced visibility */}
       {task.status !== 'active' && (
         <box style={{ marginTop: 0 }}>
           <text fg={statusColor}>
@@ -273,28 +306,41 @@ function TaskCard({
         </box>
       )}
 
-      {/* Timing info for active/completed tasks */}
+      {/* Enhanced timing info section */}
       {timing && (timing.startedAt || timing.endedAt || timing.durationMs !== undefined) && (
-        <box style={{ marginTop: 0, flexDirection: 'row', gap: 2 }}>
+        <box
+          style={{
+            marginTop: 0,
+            flexDirection: 'row',
+            gap: 1,
+            justifyContent: 'space-between',
+          }}
+        >
           {isRunning ? (
             <>
-              <text fg={colors.fg.muted}>Start</text>
-              <text fg={colors.fg.secondary}>{startedDisplay}</text>
-              <text fg={colors.fg.muted}>Dur</text>
-              <text fg={colors.status.info}>{durationDisplay}</text>
+              <box style={{ flexDirection: 'row', gap: 1 }}>
+                <text fg={colors.fg.muted}>Start</text>
+                <text fg={colors.fg.secondary}>{startedDisplay}</text>
+              </box>
+              <text fg={colors.status.info}>
+                {durationDisplay}
+              </text>
             </>
           ) : (
             <>
-              <text fg={colors.fg.muted}>End</text>
-              <text fg={colors.fg.secondary}>{endedDisplay}</text>
-              <text fg={colors.fg.muted}>Dur</text>
-              <text fg={colors.accent.primary}>{durationDisplay}</text>
+              <box style={{ flexDirection: 'row', gap: 1 }}>
+                <text fg={colors.fg.muted}>End</text>
+                <text fg={colors.fg.secondary}>{endedDisplay}</text>
+              </box>
+              <text fg={colors.accent.primary}>
+                {durationDisplay}
+              </text>
             </>
           )}
         </box>
       )}
 
-      {/* Task ID and priority/label info (compact) */}
+      {/* Footer row: Task ID, priority, and labels */}
       <box
         style={{
           marginTop: 0,
@@ -303,12 +349,17 @@ function TaskCard({
           alignItems: 'center',
         }}
       >
-        <text fg={colors.fg.muted}>
-          {task.id}
-        </text>
+        <box style={{ flexDirection: 'row', gap: 1, alignItems: 'center' }}>
+          <text fg={colors.fg.muted}>{task.id}</text>
+          {task.labels && task.labels.length > 0 && (
+            <text fg={colors.accent.tertiary}>
+              {task.labels.slice(0, 2).map(l => `#${l}`).join(' ')}
+            </text>
+          )}
+        </box>
         {task.priority !== undefined && (
-          <text fg={colors.accent.tertiary}>
-            P{task.priority}
+          <text fg={priorityDisplay.color}>
+            {priorityDisplay.icon}
           </text>
         )}
       </box>
@@ -317,60 +368,87 @@ function TaskCard({
 }
 
 /**
- * Summary stats component showing task counts by status
+ * Enhanced summary stats component with better visual hierarchy
  */
 function TaskSummary({ tasks }: { tasks: TaskItem[] }): ReactNode {
   const stats = useMemo(() => {
     const active = tasks.filter(t => t.status === 'active').length;
-    const queued = tasks.filter(t => t.status === 'actionable' || t.status === 'pending').length;
+    const queued = tasks.filter(t => t.status === 'actionable').length;
+    const pending = tasks.filter(t => t.status === 'pending').length;
     const blocked = tasks.filter(t => t.status === 'blocked').length;
-    const done = tasks.filter(t => t.status === 'done' || t.status === 'closed').length;
+    const done = tasks.filter(t => t.status === 'done').length;
+    const closed = tasks.filter(t => t.status === 'closed').length;
     const failed = tasks.filter(t => t.status === 'error').length;
-    
+
     // Find unique blockers for blocked tasks
     const blockerIds = new Set<string>();
     tasks.filter(t => t.status === 'blocked' && t.blockedByTasks).forEach(t => {
       t.blockedByTasks?.forEach(b => blockerIds.add(b.id));
     });
-    
-    return { active, queued, blocked, done, failed, blockerIds: Array.from(blockerIds) };
+
+    return {
+      active,
+      queued,
+      pending,
+      blocked,
+      done,
+      closed,
+      failed,
+      blockerIds: Array.from(blockerIds),
+      total: tasks.length,
+      completed: done + closed,
+    };
   }, [tasks]);
 
-  const parts: string[] = [];
-  if (stats.active > 0) parts.push(`${stats.active} active`);
-  if (stats.queued > 0) parts.push(`${stats.queued} queued`);
-  if (stats.blocked > 0) {
-    const blockerInfo = stats.blockerIds.length > 0 
-      ? ` by ${stats.blockerIds.slice(0, 2).join(', ')}${stats.blockerIds.length > 2 ? '...' : ''}`
-      : '';
-    parts.push(`${stats.blocked} blocked${blockerInfo}`);
-  }
-  if (stats.done > 0) parts.push(`${stats.done} done`);
-  if (stats.failed > 0) parts.push(`${stats.failed} failed`);
+  const progressPercent = stats.total > 0
+    ? Math.round((stats.completed / stats.total) * 100)
+    : 0;
 
   return (
-    <box style={{ flexDirection: 'row', gap: 2, flexWrap: 'wrap' }}>
+    <box style={{ flexDirection: 'row', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+      {/* Progress bar */}
+      <box style={{ flexDirection: 'row', gap: 0, alignItems: 'center' }}>
+        <text fg={colors.fg.muted}>[</text>
+        <text fg={colors.status.success}>
+          {'▓'.repeat(Math.floor(progressPercent / 10))}
+        </text>
+        <text fg={colors.fg.dim}>
+          {'░'.repeat(10 - Math.floor(progressPercent / 10))}
+        </text>
+        <text fg={colors.fg.muted}>]</text>
+        <text fg={colors.fg.secondary}> {progressPercent}%</text>
+      </box>
+
+      {/* Status counts with color coding */}
       <text>
-        <span fg={colors.fg.muted}>Tasks:</span>{' '}
-        <span fg={colors.task.active}>{stats.active} active</span>
-        <span fg={colors.fg.muted}>,</span>{' '}
-        <span fg={colors.status.warning}>{stats.queued} queued</span>
-        <span fg={colors.fg.muted}>,</span>{' '}
-        <span fg={colors.task.blocked}>{stats.blocked} blocked</span>
+        <span fg={colors.task.active}>●{stats.active}</span>
+        <span fg={colors.fg.muted}> </span>
+        <span fg={colors.task.actionable}>▶{stats.queued}</span>
+        <span fg={colors.fg.muted}> </span>
+        <span fg={colors.status.warning}>○{stats.pending}</span>
+        <span fg={colors.fg.muted}> </span>
+        <span fg={colors.task.blocked}>⊘{stats.blocked}</span>
         {stats.blockerIds.length > 0 && (
           <>
             <span fg={colors.fg.muted}> by </span>
             <span fg={colors.task.blocked}>
-              {stats.blockerIds.slice(0, 2).join(', ')}{stats.blockerIds.length > 2 ? '...' : ''}
+              {stats.blockerIds.slice(0, 2).join(', ')}
+              {stats.blockerIds.length > 2 ? '...' : ''}
             </span>
           </>
         )}
-        <span fg={colors.fg.muted}>,</span>{' '}
-        <span fg={colors.status.success}>{stats.done} done</span>
+        <span fg={colors.fg.muted}> </span>
+        <span fg={colors.status.success}>✓{stats.done}</span>
+        {stats.closed > 0 && (
+          <>
+            <span fg={colors.fg.muted}>/</span>
+            <span fg={colors.fg.dim}>✓{stats.closed}</span>
+          </>
+        )}
         {stats.failed > 0 && (
           <>
-            <span fg={colors.fg.muted}>,</span>{' '}
-            <span fg={colors.status.error}>{stats.failed} failed</span>
+            <span fg={colors.fg.muted}> </span>
+            <span fg={colors.status.error}>✗{stats.failed}</span>
           </>
         )}
       </text>
