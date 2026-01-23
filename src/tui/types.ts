@@ -238,3 +238,20 @@ export interface TaskDetailViewProps {
   /** Callback when Esc is pressed to return to list view */
   onBack?: () => void;
 }
+
+/**
+ * Props for the Footer component.
+ * Displays keyboard shortcuts, system information, and mode indicators.
+ */
+export interface FooterProps {
+  /** Current Ralph version (e.g., "0.3.0") */
+  version?: string;
+  /** Sandbox mode display string (e.g., "sandbox", "sandbox (no-net)") */
+  sandboxMode?: string | null;
+  /** Remote instance alias when viewing remote (e.g., "prod") */
+  remoteAlias?: string | null;
+  /** Connection status for remote instance */
+  remoteConnectionStatus?: ConnectionStatus;
+  /** Auto-commit enabled indicator */
+  autoCommitEnabled?: boolean;
+}

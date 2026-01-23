@@ -6,7 +6,7 @@
 import { useKeyboard, useTerminalDimensions } from '@opentui/react';
 import type { ReactNode } from 'react';
 import { useState, useCallback, useEffect } from 'react';
-import { colors, layout } from '../theme.js';
+import { getColors, layout } from '../theme.js';
 import type { AppState, TaskItem } from '../types.js';
 import { Header } from './Header.js';
 import { Footer } from './Footer.js';
@@ -128,6 +128,9 @@ export function App({ initialState, onQuit }: AppProps): ReactNode {
 
   // Determine if we should use a compact layout for narrow terminals
   const isCompact = width < 80;
+
+  // Get current theme colors
+  const colors = getColors();
 
   return (
     <box

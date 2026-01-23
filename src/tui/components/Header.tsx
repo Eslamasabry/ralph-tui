@@ -81,7 +81,7 @@ function getAvailableWidth(terminalWidth: number): {
   };
 }
 
-<<<<<<< HEAD
+// OURS:
 <<<<<<< HEAD
 /** Version indicator icon */
 const VERSION_ICON = '◆';
@@ -96,14 +96,13 @@ const TIMER_ICON = '⏱';
 /**
  * Truncate text to fit within a given width, adding ellipsis if needed.
  * Handles edge cases for very small widths. (feat: ralph-tui-5no.1 - US-001: Header Component Facelift)
-=======
+// THEIRS:
 /** Timer icon */
 const TIMER_ICON = '⏱';
 
 /**
  * Truncate text to fit within a given width, adding ellipsis if needed.
- * Smart truncation that preserves the end of the string if possible.
->>>>>>> e351128 (feat: ralph-tui-5no.1 - US-001: Header Component Facelift)
+ * Smart truncation that preserves the end of the string if possible. (feat: ralph-tui-5no.1 - US-001: Header Component Facelift)
 =======
  * Truncate text to fit within a given width, adding ellipsis if needed
 >>>>>>> c33fffd (fix: ralph-tui-5no.1 - US-001: Header Component Facelift fixes)
@@ -240,6 +239,7 @@ function CompactProgressBar({
   total: number;
   width: number;
 }): ReactNode {
+  const colors = getColors();
   const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
   const filledWidth = Math.floor((percentage / 100) * width);
   const emptyWidth = width - filledWidth;
@@ -335,6 +335,7 @@ function getAgentDisplay(
 <<<<<<< HEAD
 <<<<<<< HEAD
 ): { displayName: string; color: string; showRateLimitIcon: boolean; statusLine: string | null } {
+<<<<<<< HEAD
 =======
 ): {
   displayName: string;
@@ -347,6 +348,9 @@ function getAgentDisplay(
 =======
 ): AgentDisplayInfo {
 >>>>>>> f77e912 (ralph-tui-5no.2: US-002: Footer Component Facelift)
+=======
+  const colors = getColors();
+>>>>>>> 6ad0c87 (ralph-tui-5no.1: US-001: Header Component Facelift)
   const activeAgent = activeAgentState?.plugin ?? agentName;
   const isOnFallback = activeAgentState?.reason === 'fallback';
   const isPrimaryRateLimited = rateLimitState?.limitedAt !== undefined;
@@ -847,6 +851,9 @@ export function Header({
 
   // Calculate progress percentage for display
   const progressPercentage = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+
+  // Get current theme colors
+  const colors = getColors();
 
   return (
     <box
