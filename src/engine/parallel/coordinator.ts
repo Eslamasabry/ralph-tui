@@ -1065,13 +1065,17 @@ export class ParallelCoordinator {
           continue;
         }
 
-        // Strategy 2: Check if the conflict is simple (e.g., only additions/deletions)
+        // Strategy 2: Check if the conflict is simple and can be auto-merged
         const content = await Bun.file(filePath).text();
         if (this.isSimpleConflict(content)) {
           const resolvedContent = this.resolveSimpleConflict(content);
-          await Bun.write(filePath, resolvedContent);
-          console.log(`[ParallelCoordinator] Auto-resolved simple conflict in ${file}`);
-          continue;
+          if (resolvedContent !== null) {
+            await Bun.write(filePath, resolvedContent);
+            console.log(`[ParallelCoordinator] Auto-resolved simple conflict in ${file}`);
+            continue;
+          }
+          // If resolveSimpleConflict returns null, the conflict couldn't be cleanly
+          // resolved - fall through to LLM fallback below
         }
 
         // Strategy 3: Try to accept incoming changes (theirs) or current changes (ours)
@@ -1112,30 +1116,31 @@ export class ParallelCoordinator {
     return conflictMarkers.some(regex => regex.test(content));
   }
 
-  private resolveSimpleConflict(content: string): string {
+  private resolveSimpleConflict(content: string): string | null {
     // For simple conflicts, try to automatically merge by:
     // 1. Removing conflict markers
-    // 2. Keeping both sets of changes with clear separators
-    // 3. Or trying to detect which version to keep
-    
+    // 2. Keeping the worker's changes (theirs) when similar
+    // 3. Returning null when conflicts can't be cleanly resolved (fall back to LLM)
+
     // First, detect the conflict pattern
     const conflictPattern = /<<<<<<< HEAD\n(.*?)\n=======\n(.*?)\n>>>>>>> [0-9a-f]+/s;
     const match = content.match(conflictPattern);
-    
-    if (match) {
-      const ours = match[1];
-      const theirs = match[2];
-      
-      // If changes are similar, keep theirs (worker's changes)
-      if (this.areChangesSimilar(ours, theirs)) {
-        return content.replace(conflictPattern, theirs);
-      }
-      
-      // If changes are different, keep both with comments
-      return content.replace(conflictPattern, `// OURS:\n${ours}\n// THEIRS:\n${theirs}`);
+
+    if (!match) {
+      return null;
     }
-    
-    return content;
+
+    const ours = match[1];
+    const theirs = match[2];
+
+    // If changes are similar, keep theirs (worker's changes)
+    if (this.areChangesSimilar(ours, theirs)) {
+      return content.replace(conflictPattern, theirs);
+    }
+
+    // If changes are different and can't be cleanly merged, return null
+    // to fall back to LLM resolution. Do NOT produce conflict markers.
+    return null;
   }
 
   private areChangesSimilar(ours: string, theirs: string): boolean {
