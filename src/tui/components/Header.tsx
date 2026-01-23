@@ -1,6 +1,7 @@
 /**
 // OURS:
 // OURS:
+// OURS:
  * ABOUTME: Modern header component for the Ralph TUI.
  * Displays status indicator, current task (if running), progress (X/Y), elapsed time.
  * Also shows active agent name with fallback indicator and rate limit status.
@@ -14,6 +15,11 @@
  * Displays status indicator, current task info, agent/tracker configuration,
  * progress, and elapsed time with improved visual hierarchy and spacing.
  * Designed for clarity and quick status scanning at a glance. (feat: ralph-tui-5no.1 - US-001: Header Component Facelift)
+// THEIRS:
+ * ABOUTME: Modern header component for the Ralph TUI.
+ * Displays status indicator, current task (if running), progress (X/Y), elapsed time.
+ * Also shows active agent name with fallback indicator and rate limit status.
+ * Designed with improved visual hierarchy, better spacing, and responsive truncation. (feat: ralph-tui-5no.1 - US-001: Header Component Facelift)
  */
 
 import type { ReactNode } from 'react';
@@ -31,6 +37,7 @@ const SANDBOX_ICON = '🔒';
 const REMOTE_ICON = '🌐';
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 /** Version indicator icon */
 const VERSION_ICON = '◆';
 
@@ -45,6 +52,14 @@ const TIMER_ICON = '⏱';
  * Truncate text to fit within a given width, adding ellipsis if needed.
  * Handles edge cases for very small widths.
 >>>>>>> 92824a0 (feat: ralph-tui-5no.1 - US-001: Header Component Facelift)
+=======
+/** Timer icon */
+const TIMER_ICON = '⏱';
+
+/**
+ * Truncate text to fit within a given width, adding ellipsis if needed.
+ * Smart truncation that preserves the end of the string if possible.
+>>>>>>> e351128 (feat: ralph-tui-5no.1 - US-001: Header Component Facelift)
  */
 function truncateText(text: string, maxWidth: number): string {
   if (!text) return '';
@@ -57,6 +72,7 @@ function truncateText(text: string, maxWidth: number): string {
 <<<<<<< HEAD
 <<<<<<< HEAD
  * Get compact status display for the current Ralph status.
+<<<<<<< HEAD
  * Returns a short, scannable label optimized for the header with clear color coding.
 =======
  * Get styled status display for the current Ralph status.
@@ -68,6 +84,11 @@ function truncateText(text: string, maxWidth: number): string {
 >>>>>>> 92824a0 (feat: ralph-tui-5no.1 - US-001: Header Component Facelift)
  */
 function getStatusDisplay(status: RalphStatus): { indicator: string; color: string; label: string; bracketColor: string } {
+=======
+ * Returns a styled badge with indicator for improved visibility.
+ */
+function getStatusBadge(status: RalphStatus): { indicator: string; color: string; label: string } {
+>>>>>>> e351128 (feat: ralph-tui-5no.1 - US-001: Header Component Facelift)
   switch (status) {
     case 'ready':
       return {
@@ -145,6 +166,7 @@ function getStatusDisplay(status: RalphStatus): { indicator: string; color: stri
 /**
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Mini progress bar with improved visual clarity.
  * Shows completed vs total with distinct filled/empty sections.
 =======
@@ -187,6 +209,8 @@ function CompactProgressBar({
  * Get display information for the active agent with enhanced styling.
  * Shows fallback indicator with distinctive treatment when applicable.
 =======
+=======
+>>>>>>> e351128 (feat: ralph-tui-5no.1 - US-001: Header Component Facelift)
  * Get the display name and styling for the active agent.
  * Shows fallback indicator when on fallback agent with appropriate coloring.
 >>>>>>> 92824a0 (feat: ralph-tui-5no.1 - US-001: Header Component Facelift)
@@ -270,6 +294,7 @@ function getSandboxDisplay(sandboxConfig: HeaderProps['sandboxConfig']): string 
 /**
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Calculate responsive truncation widths based on terminal width.
  * Ensures content is properly truncated on narrow terminals.
  */
@@ -327,6 +352,53 @@ function getTruncationWidths(terminalWidth: number): {
  * - Progress (X/Y tasks) with compact progress bar
  * - Iteration counter and elapsed time
 >>>>>>> 92824a0 (feat: ralph-tui-5no.1 - US-001: Header Component Facelift)
+=======
+ * Compact progress bar component for header display with improved visuals.
+ */
+function MiniProgressBar({
+  completed,
+  total,
+  width,
+}: {
+  completed: number;
+  total: number;
+  width: number;
+}): ReactNode {
+  const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
+  const filledWidth = Math.floor((percentage / 100) * width);
+  const emptyWidth = width - filledWidth;
+
+  const filledBar = '▓'.repeat(filledWidth);
+  const emptyBar = '░'.repeat(emptyWidth);
+
+  return (
+    <text>
+      <span fg={colors.status.success}>{filledBar}</span>
+      <span fg={colors.fg.dim}>{emptyBar}</span>
+    </text>
+  );
+}
+
+/**
+ * Separator component for visual division.
+ */
+function Separator(): ReactNode {
+  return <text fg={colors.fg.dim}> │ </text>;
+}
+
+/**
+ * Modern header component showing essential information with improved visual hierarchy:
+ * - Status badge with indicator and label (left side)
+ * - Current task (when executing)
+ * - Agent and tracker plugin names (for configuration visibility)
+ * - Model being used (provider/model format with logo)
+ * - Sandbox status when enabled (mode + network status)
+ * - Fallback indicator when using fallback agent
+ * - Rate limit icon when primary agent is limited
+ * - Status line when primary agent is rate limited (explains fallback)
+ * - Progress (X/Y tasks) with progress bar
+ * - Elapsed time
+>>>>>>> e351128 (feat: ralph-tui-5no.1 - US-001: Header Component Facelift)
  */
 export function Header({
   status,
@@ -346,9 +418,13 @@ export function Header({
   remoteInfo,
   trackerRealtimeStatus,
 }: HeaderProps): ReactNode {
+<<<<<<< HEAD
   const { width: terminalWidth } = useTerminalDimensions();
   const truncationWidths = getTruncationWidths(terminalWidth);
   const statusDisplay = getStatusDisplay(status);
+=======
+  const statusBadge = getStatusBadge(status);
+>>>>>>> e351128 (feat: ralph-tui-5no.1 - US-001: Header Component Facelift)
   const formattedTime = formatElapsedTime(elapsedTime);
   const agentDisplay = getAgentDisplay(agentName, activeAgentState, rateLimitState);
 
@@ -370,7 +446,11 @@ export function Header({
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   // Show abbreviated task title when executing, with terminal-aware truncation
+=======
+  // Show abbreviated task title when executing (adaptive truncation based on importance)
+>>>>>>> e351128 (feat: ralph-tui-5no.1 - US-001: Header Component Facelift)
   const isActive = status === 'executing' || status === 'running';
   const taskDisplay = isActive
     ? currentTaskTitle
@@ -423,6 +503,7 @@ export function Header({
           paddingRight: 1,
         }}
       >
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
         {/* Left section: Remote indicator + Status indicator + label + optional current task */}
@@ -530,6 +611,48 @@ export function Header({
         <box style={{ flexDirection: 'row', alignItems: 'center', flexShrink: 0 }}>
           {/* Agent, model, tracker, and sandbox indicators - compact layout */}
 >>>>>>> 92824a0 (feat: ralph-tui-5no.1 - US-001: Header Component Facelift)
+=======
+        {/* Left section: Status badge with remote indicator + optional current task */}
+        <box style={{ flexDirection: 'row', gap: 1, flexShrink: 1, alignItems: 'center' }}>
+          {/* Remote indicator (if viewing remote) */}
+          {remoteInfo && (
+            <>
+              <text fg={colors.accent.primary}>{REMOTE_ICON}</text>
+              <text fg={colors.fg.secondary}>{remoteInfo.name}</text>
+              <Separator />
+            </>
+          )}
+
+          {/* Status badge with indicator */}
+          <text>
+            <span fg={statusBadge.color}>{statusBadge.indicator}</span>
+            <span fg={statusBadge.color}> {statusBadge.label}</span>
+          </text>
+
+          {/* Tracker stale indicator */}
+          {trackerRealtimeStatus === 'stale' && (
+            <>
+              <Separator />
+              <text fg={colors.status.warning}>{statusIndicators.paused} Stale</text>
+            </>
+          )}
+
+          {/* Current task display */}
+          {taskDisplay && (
+            <>
+              <Separator />
+              <text>
+                <span fg={colors.fg.muted}>→ </span>
+                <span fg={colors.accent.tertiary}>{taskDisplay}</span>
+              </text>
+            </>
+          )}
+        </box>
+
+        {/* Right section: Agent/Tracker + Model + Sandbox + Progress + Time */}
+        <box style={{ flexDirection: 'row', gap: 2, alignItems: 'center' }}>
+          {/* Agent, model, tracker, and sandbox indicators */}
+>>>>>>> e351128 (feat: ralph-tui-5no.1 - US-001: Header Component Facelift)
           {(agentDisplay.displayName || trackerName || modelDisplay || sandboxDisplay) && (
             <text fg={colors.fg.secondary}>
               {/* Rate limit warning */}
@@ -539,12 +662,20 @@ export function Header({
           {/* Agent, model, tracker, and sandbox section */}
           {(agentDisplay.displayName || modelDisplay || trackerName || sandboxDisplay) && (
             <text fg={colors.fg.muted}>
+<<<<<<< HEAD
 >>>>>>> d2818d9 (feat: ralph-tui-5no.1 - US-001: Header Component Facelift)
+=======
+              {/* Rate limit indicator */}
+>>>>>>> e351128 (feat: ralph-tui-5no.1 - US-001: Header Component Facelift)
               {agentDisplay.showRateLimitIcon && (
                 <span fg={colors.status.warning}>{RATE_LIMIT_ICON} </span>
               )}
 
+<<<<<<< HEAD
               {/* Agent name with fallback styling */}
+=======
+              {/* Agent name */}
+>>>>>>> e351128 (feat: ralph-tui-5no.1 - US-001: Header Component Facelift)
               {agentDisplay.displayName && (
                 <span fg={agentDisplay.color}>{truncateText(agentDisplay.displayName, truncationWidths.agentName)}</span>
               )}
@@ -571,6 +702,7 @@ export function Header({
               {agentDisplay.displayName && (trackerName || modelDisplay || sandboxDisplay) && (
                 <span fg={colors.fg.dim}> | </span>
               )}
+<<<<<<< HEAD
               {modelDisplay && (
                 <span fg={colors.accent.primary}>{modelDisplay.display}</span>
               )}
@@ -586,16 +718,37 @@ export function Header({
                   <span fg={colors.status.info}>{SANDBOX_ICON}</span>
                   <span fg={colors.status.info}> {sandboxDisplay}</span>
                 </>
+=======
+
+              {/* Model */}
+              {agentDisplay.displayName && (trackerName || modelDisplay || sandboxDisplay) && <Separator />}
+              {modelDisplay && <span fg={colors.accent.primary}>{modelDisplay.display}</span>}
+
+              {/* Tracker */}
+              {(agentDisplay.displayName || modelDisplay) && (trackerName || sandboxDisplay) && <Separator />}
+              {trackerName && <span fg={colors.accent.tertiary}>{trackerName}</span>}
+
+              {/* Sandbox */}
+              {trackerName && sandboxDisplay && <Separator />}
+              {sandboxDisplay && (
+                <span fg={colors.status.info}>
+                  {SANDBOX_ICON} {sandboxDisplay}
+                </span>
+>>>>>>> e351128 (feat: ralph-tui-5no.1 - US-001: Header Component Facelift)
               )}
             </text>
           )}
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
           {/* Progress section with mini bar and percentage */}
 =======
           {/* Progress bar with percentage */}
 >>>>>>> d2818d9 (feat: ralph-tui-5no.1 - US-001: Header Component Facelift)
+=======
+          {/* Progress bar and count */}
+>>>>>>> e351128 (feat: ralph-tui-5no.1 - US-001: Header Component Facelift)
           <box style={{ flexDirection: 'row', gap: 1, alignItems: 'center' }}>
             <span fg={colors.fg.dim}>|</span>
             <EnhancedProgressBar completed={completedTasks} total={totalTasks} width={8} />
@@ -608,6 +761,9 @@ export function Header({
           </box>
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> e351128 (feat: ralph-tui-5no.1 - US-001: Header Component Facelift)
           {/* Iteration counter - show current/max or current/∞ for unlimited */}
           {currentIteration !== undefined && maxIterations !== undefined && (
             <text fg={colors.fg.muted}>
@@ -634,6 +790,7 @@ export function Header({
             </text>
           )}
 
+<<<<<<< HEAD
           {/* Elapsed time with icon */}
 <<<<<<< HEAD
           <box style={{ flexDirection: 'row', gap: 0, alignItems: 'center' }}>
@@ -665,6 +822,10 @@ export function Header({
           <text fg={colors.fg.muted}>
             {' '}{TIMER_ICON}{' '}
           </text>
+=======
+          {/* Elapsed time */}
+          <text fg={colors.fg.muted}>{TIMER_ICON}</text>
+>>>>>>> e351128 (feat: ralph-tui-5no.1 - US-001: Header Component Facelift)
           <text fg={colors.fg.secondary}>{formattedTime}</text>
 >>>>>>> 92824a0 (feat: ralph-tui-5no.1 - US-001: Header Component Facelift)
         </box>
