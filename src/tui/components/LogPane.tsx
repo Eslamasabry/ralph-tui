@@ -337,12 +337,14 @@ function LogPaneHeader({
           <box style={{ flexDirection: 'row', gap: 2, marginTop: 0 }}>
             {agentName && (
               <text fg={colors.fg.muted}>
-                Agent: <text fg={colors.accent.tertiary}>{agentName}</text>
+                <span fg={colors.fg.muted}>Agent: </span>
+                <span fg={colors.accent.tertiary}>{agentName}</span>
               </text>
             )}
             {currentIteration > 0 && (
               <text fg={colors.fg.muted}>
-                Iter: <text fg={colors.accent.secondary}>{String(currentIteration)}</text>
+                <span fg={colors.fg.muted}>Iter: </span>
+                <span fg={colors.accent.secondary}>{String(currentIteration)}</span>
               </text>
             )}
           </box>
@@ -490,7 +492,8 @@ export function LogPane({
       {currentIteration > 0 && (
         <box style={{ marginTop: 1, flexDirection: 'row', justifyContent: 'flex-end' }}>
           <text fg={colors.fg.muted}>
-            Iteration <text fg={colors.accent.primary}>{String(currentIteration)}</text>
+            <span fg={colors.fg.muted}>Iteration </span>
+            <span fg={colors.accent.primary}>{String(currentIteration)}</span>
           </text>
         </box>
       )}
