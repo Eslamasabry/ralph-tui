@@ -1,61 +1,137 @@
 /**
  * ABOUTME: Theme constants and types for the Ralph TUI application.
- * Provides consistent styling across all TUI components with a modern dark theme.
+ * Provides consistent styling across all TUI components with modern dark and light themes.
  */
 
 /**
- * Color palette for the Ralph TUI
+ * Color schemes for light and dark themes
  */
-export const colors = {
-  // Background colors
-  bg: {
-    primary: '#1a1b26',
-    secondary: '#24283b',
-    tertiary: '#2f3449',
-    highlight: '#3d4259',
+export const colorSchemes = {
+  dark: {
+    // Background colors
+    bg: {
+      primary: '#1a1b26',
+      secondary: '#24283b',
+      tertiary: '#2f3449',
+      highlight: '#3d4259',
+    },
+    // Foreground (text) colors
+    fg: {
+      primary: '#c0caf5',
+      secondary: '#a9b1d6',
+      muted: '#565f89',
+      dim: '#414868',
+    },
+    // Status colors
+    status: {
+      success: '#9ece6a',
+      warning: '#e0af68',
+      error: '#f7768e',
+      info: '#7aa2f7',
+    },
+    // Task status colors
+    task: {
+      done: '#9ece6a',
+      active: '#7aa2f7',
+      actionable: '#9ece6a',
+      pending: '#565f89',
+      blocked: '#f7768e',
+      error: '#f7768e',
+      closed: '#414868',
+    },
+    // Accent colors
+    accent: {
+      primary: '#7aa2f7',
+      secondary: '#bb9af7',
+      tertiary: '#7dcfff',
+    },
+    // Border colors
+    border: {
+      normal: '#3d4259',
+      active: '#7aa2f7',
+      muted: '#2f3449',
+    },
   },
-
-  // Foreground (text) colors
-  fg: {
-    primary: '#c0caf5',
-    secondary: '#a9b1d6',
-    muted: '#565f89',
-    dim: '#414868',
-  },
-
-  // Status colors
-  status: {
-    success: '#9ece6a',
-    warning: '#e0af68',
-    error: '#f7768e',
-    info: '#7aa2f7',
-  },
-
-  // Task status colors
-  task: {
-    done: '#9ece6a',
-    active: '#7aa2f7',
-    actionable: '#9ece6a', // Green - ready to work on
-    pending: '#565f89',
-    blocked: '#f7768e',
-    error: '#f7768e', // Same as blocked - red for errors
-    closed: '#414868', // Greyed out for completed/closed tasks
-  },
-
-  // Accent colors
-  accent: {
-    primary: '#7aa2f7',
-    secondary: '#bb9af7',
-    tertiary: '#7dcfff',
-  },
-
-  // Border colors
-  border: {
-    normal: '#3d4259',
-    active: '#7aa2f7',
-    muted: '#2f3449',
+  light: {
+    // Background colors - softer, lighter palette
+    bg: {
+      primary: '#fafafa',
+      secondary: '#ffffff',
+      tertiary: '#f0f0f0',
+      highlight: '#e0e0e0',
+    },
+    // Foreground (text) colors - darker for contrast on light backgrounds
+    fg: {
+      primary: '#1a1a2e',
+      secondary: '#4a4a68',
+      muted: '#8888a0',
+      dim: '#b0b0c0',
+    },
+    // Status colors - slightly muted for light theme
+    status: {
+      success: '#2d8a3e',
+      warning: '#b8860b',
+      error: '#c41e3a',
+      info: '#2563eb',
+    },
+    // Task status colors
+    task: {
+      done: '#2d8a3e',
+      active: '#2563eb',
+      actionable: '#2d8a3e',
+      pending: '#8888a0',
+      blocked: '#c41e3a',
+      error: '#c41e3a',
+      closed: '#b0b0c0',
+    },
+    // Accent colors
+    accent: {
+      primary: '#2563eb',
+      secondary: '#7c3aed',
+      tertiary: '#0891b2',
+    },
+    // Border colors
+    border: {
+      normal: '#d0d0e0',
+      active: '#2563eb',
+      muted: '#e8e8f0',
+    },
   },
 } as const;
+
+/**
+ * Current color scheme (defaults to dark)
+ * Can be changed via setColorScheme('light') or setColorScheme('dark')
+ */
+let currentColorScheme: keyof typeof colorSchemes = 'dark';
+
+/**
+ * Set the current color scheme
+ */
+export function setColorScheme(scheme: 'light' | 'dark'): void {
+  if (scheme in colorSchemes) {
+    currentColorScheme = scheme;
+  }
+}
+
+/**
+ * Get the current color scheme name
+ */
+export function getColorScheme(): 'light' | 'dark' {
+  return currentColorScheme;
+}
+
+/**
+ * Get colors for the current color scheme
+ */
+export function getColors() {
+  return colorSchemes[currentColorScheme];
+}
+
+/**
+ * Active color scheme colors (convenience export for current theme)
+ */
+export const colors = colorSchemes.dark;
 
 /**
  * Status indicator symbols
