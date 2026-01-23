@@ -7,7 +7,7 @@
 
 import type { ReactNode } from 'react';
 import { useMemo } from 'react';
-import { colors, statusIndicators, formatElapsedTime } from '../theme.js';
+import { colors, formatElapsedTime } from '../theme.js';
 import type { IterationResult, IterationStatus, EngineSubagentStatus } from '../../engine/types.js';
 import type { SubagentTreeNode } from '../../engine/types.js';
 import type { SubagentTraceStats } from '../../logs/types.js';
@@ -373,9 +373,7 @@ function ActivityMetricsHeader({
   metrics: ActivityMetrics;
 }): ReactNode {
   const hasErrors = metrics.errorCount > 0;
-  const hasWarnings = metrics.warningCount > 0;
   const hasSubagents = metrics.totalSubagents > 0;
-  const hasIterations = metrics.completedIterations > 0 || metrics.failedIterations > 0;
 
   return (
     <box
@@ -400,7 +398,7 @@ function ActivityMetricsHeader({
 
       {/* Right side: Progress and subagents */}
       <box style={{ flexDirection: 'row', gap: 2 }}>
-        {hasIterations && (
+        {metrics.completedIterations > 0 && (
           <MetricItem icon="✓" label="Done" value={metrics.completedIterations} color={colors.status.success} showWhenZero />
         )}
         {metrics.failedIterations > 0 && (
