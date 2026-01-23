@@ -558,35 +558,35 @@ function PromptPreviewView({
           {promptPreview ? (
             <box style={{ flexDirection: 'column' }}>
               {promptPreview.split('\n').map((line, i) => {
-                // Highlight markdown headers
+                // Always wrap in box to ensure consistent structure
                 if (line.match(/^#+\s/)) {
                   return (
-                    <text key={i} fg={colors.accent.primary}>
-                      {line}
-                    </text>
+                    <box key={i} style={{ flexDirection: 'row' }}>
+                      <text fg={colors.accent.primary}>{line}</text>
+                    </box>
                   );
                 }
                 // Highlight bullet points
                 if (line.match(/^\s*[-*]\s/)) {
                   return (
-                    <text key={i} fg={colors.fg.secondary}>
-                      {line}
-                    </text>
+                    <box key={i} style={{ flexDirection: 'row' }}>
+                      <text fg={colors.fg.secondary}>{line}</text>
+                    </box>
                   );
                 }
                 // Highlight code fences
                 if (line.match(/^```/)) {
                   return (
-                    <text key={i} fg={colors.accent.tertiary}>
-                      {line}
-                    </text>
+                    <box key={i} style={{ flexDirection: 'row' }}>
+                      <text fg={colors.accent.tertiary}>{line}</text>
+                    </box>
                   );
                 }
                 // Regular text
                 return (
-                  <text key={i} fg={colors.fg.secondary}>
-                    {line}
-                  </text>
+                  <box key={i} style={{ flexDirection: 'row' }}>
+                    <text fg={colors.fg.secondary}>{line}</text>
+                  </box>
                 );
               })}
             </box>
@@ -728,9 +728,9 @@ function CliOutputView({
           {displayOutput !== undefined && displayOutput.length > 0 ? (
             <box style={{ flexDirection: 'column', gap: 0 }}>
               {displayOutput.split('\n').map((line, i) => (
-                <text key={i} fg={colors.fg.secondary}>
-                  {line}
-                </text>
+                <box key={i} style={{ flexDirection: 'row' }}>
+                  <text fg={colors.fg.secondary}>{line}</text>
+                </box>
               ))}
             </box>
           ) : displayOutput === '' ? (
