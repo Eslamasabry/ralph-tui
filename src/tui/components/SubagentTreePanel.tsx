@@ -154,7 +154,7 @@ function SubagentTreeRow({
         <span fg={statusColor}>{statusIcon}</span>
         <span fg={colors.accent.tertiary}> {typeDisplay}</span>
         <span fg={textColor}> {truncatedDescription}</span>
-        {durationStr && <span fg={colors.fg.muted}>{durationStr}</span>}
+        <span fg={colors.fg.muted}>{durationStr || ''}</span>
       </text>
     </box>
   );

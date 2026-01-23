@@ -473,7 +473,7 @@ function SubagentTreeRowExpandable({
           <span fg={statusColor}> {statusIcon}</span>
           <span fg={colors.accent.tertiary}> {agentType}</span>
           <span fg={colors.fg.secondary}> {state.description}</span>
-          {duration && <span fg={colors.fg.dim}>{duration}</span>}
+          <span fg={colors.fg.dim}>{duration || ''}</span>
         </text>
       </box>
       {/* Render children if expanded */}

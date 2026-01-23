@@ -78,12 +78,10 @@ function TaskRow({
       <text>
         <span fg={colors.fg.dim}>{indent}</span>
         <span fg={displayColor}>{displayIndicator}</span>
-        {isPendingMain && <span fg={colors.status.warning}>⟳</span>}
+        <span fg={colors.status.warning}>{isPendingMain ? '⟳' : ''}</span>
         <span fg={idColor}> {idDisplay}</span>
         <span fg={titleColor}> {truncatedTitle}</span>
-        {isPendingMain && (
-          <span fg={colors.status.warning}> [pending-main]</span>
-        )}
+        <span fg={colors.status.warning}>{isPendingMain ? ' [pending-main]' : ''}</span>
       </text>
     </box>
   );

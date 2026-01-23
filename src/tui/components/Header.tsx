@@ -360,11 +360,9 @@ function AgentInfoSection({
       {(agentDisplay.displayName || modelDisplay) && (trackerName || sandboxDisplay) && (
         <span fg={colors.fg.dim}> {SEPARATOR} </span>
       )}
-      {trackerName && <span fg={colors.accent.tertiary}>{trackerName}</span>}
-      {trackerName && sandboxDisplay && <span fg={colors.fg.dim}> {SEPARATOR} </span>}
-      {sandboxDisplay && (
-        <span fg={colors.status.info}>{SANDBOX_ICON} {sandboxDisplay}</span>
-      )}
+      <span fg={colors.accent.tertiary}>{trackerName || ''}</span>
+      <span fg={colors.fg.dim}>{(trackerName && sandboxDisplay) ? `${SEPARATOR} ` : ''}</span>
+      <span fg={colors.status.info}>{sandboxDisplay ? `${SANDBOX_ICON} ${sandboxDisplay}` : ''}</span>
     </text>
   );
 }

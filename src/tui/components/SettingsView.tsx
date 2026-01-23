@@ -591,7 +591,7 @@ export function SettingsView({
               {hasChanges ? (
                 <>
                   <span fg={colors.status.warning}>● Modified</span>
-                  {saving && <span fg={colors.status.info}> Saving...</span>}
+                  <span fg={colors.status.info}>{saving ? ' Saving...' : ''}</span>
                 </>
               ) : (
                 <span fg={colors.fg.muted}>● Unsaved changes</span>

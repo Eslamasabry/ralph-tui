@@ -278,7 +278,7 @@ export function SubagentEndMarker({
         <span fg={colors.fg.dim}>{indent}</span>
         <span fg={colors.accent.secondary}>└─</span>
         <span fg={statusColor}> {statusText}</span>
-        {durationStr && <span fg={colors.fg.muted}> ({durationStr})</span>}
+        <span fg={colors.fg.muted}>{durationStr ? ` (${durationStr})` : ''}</span>
       </text>
     </box>
   );
