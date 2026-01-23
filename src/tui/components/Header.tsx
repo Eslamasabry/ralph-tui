@@ -7,6 +7,7 @@
  * Displays status indicator, current task (if running), progress (X/Y), elapsed time.
  * Also shows active agent name with fallback indicator and rate limit status.
  * Designed with improved visual hierarchy, better spacing, and clearer status indicators.
+// OURS:
 // THEIRS:
  * ABOUTME: Modernized header component for Ralph TUI.
  * Features improved visual hierarchy, distinctive status styling, and better information density.
@@ -26,11 +27,13 @@
  * Displays essential info: status indicator, current task, progress, elapsed time.
  * Also shows active agent name, model, tracker, sandbox status, and rate limit indicators.
  * Designed for minimal vertical footprint while providing clear visibility into current state. (ralph-tui-5no.2: US-002: Footer Component Facelift)
+// THEIRS:
+ * Supports both light and dark themes via the color scheme system. (ralph-tui-5no.1: US-001: Header Component Facelift)
  */
 
 import type { ReactNode } from 'react';
 import { useTerminalDimensions } from '@opentui/react';
-import { colors, statusIndicators, formatElapsedTime, layout, type RalphStatus } from '../theme.js';
+import { getColors, statusIndicators, formatElapsedTime, layout, type RalphStatus } from '../theme.js';
 import type { HeaderProps } from '../types.js';
 
 // ============================================================================
@@ -128,12 +131,17 @@ function truncateText(text: string, maxWidth: number): string {
  * Returns a clear label with consistent color scheme optimized for visibility.
 >>>>>>> 92824a0 (feat: ralph-tui-5no.1 - US-001: Header Component Facelift)
  */
+<<<<<<< HEAD
 function getStatusDisplay(status: RalphStatus): { indicator: string; color: string; label: string; bracketColor: string } {
 =======
  * Returns a styled badge with indicator for improved visibility.
  */
 function getStatusBadge(status: RalphStatus): { indicator: string; color: string; label: string } {
 >>>>>>> e351128 (feat: ralph-tui-5no.1 - US-001: Header Component Facelift)
+=======
+function getStatusDisplay(status: RalphStatus): { indicator: string; color: string; label: string } {
+  const colors = getColors();
+>>>>>>> 606064d (ralph-tui-5no.1: US-001: Header Component Facelift)
   switch (status) {
     case 'ready':
       return {
