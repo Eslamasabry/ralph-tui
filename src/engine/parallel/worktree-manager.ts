@@ -25,6 +25,15 @@ export interface CreateWorktreeOptions {
   lockReason?: string;
 }
 
+export interface WorktreeValidationResult {
+  valid: boolean;
+  currentBranch?: string;
+  currentCommit?: string;
+  expectedBranch?: string;
+  expectedCommit?: string;
+  error?: string;
+}
+
 export class WorktreeManager {
   private repoRoot: string;
   private worktreesDir: string;
@@ -48,23 +57,38 @@ export class WorktreeManager {
 
     const worktreePath = this.getWorktreePath(workerId);
 
+    // Get the expected commit before cleanup
+    const expectedCommit = await this.resolveRef(baseRef);
+
     // Clean any stale worktree state before creating a new one
     await this.cleanupWorktree(workerId);
 
     const branchExists = await this.branchExists(branchName);
-    const args = branchExists
+    let args = branchExists
       ? ['-C', this.repoRoot, 'worktree', 'add', worktreePath, branchName]
       : ['-C', this.repoRoot, 'worktree', 'add', '-b', branchName, worktreePath, baseRef];
     let result = await this.execGit(args);
 
+    // Retry with force flags for stale state (e.g., locked worktree references)
     if (result.exitCode !== 0) {
-      // Attempt recovery for stale locked/missing worktrees
       await this.cleanupWorktree(workerId);
-      const retryArgs = ['-C', this.repoRoot, 'worktree', 'add', '-f', '-f', '-b', branchName, worktreePath, baseRef];
-      result = await this.execGit(retryArgs);
+      args = ['-C', this.repoRoot, 'worktree', 'add', '-f', '-b', branchName, worktreePath, baseRef];
+      result = await this.execGit(args);
       if (result.exitCode !== 0) {
-        throw new Error(`git worktree add failed: ${result.stderr}`);
+        // Final recovery: force remove any stale worktree and retry
+        await this.forceCleanupStaleWorktree(worktreePath);
+        args = ['-C', this.repoRoot, 'worktree', 'add', '-f', '-b', branchName, worktreePath, baseRef];
+        result = await this.execGit(args);
+        if (result.exitCode !== 0) {
+          throw new Error(`git worktree add failed after retries: ${result.stderr}`);
+        }
       }
+    }
+
+    // Validate the worktree is on the correct branch and commit
+    const validation = await this.validateWorktree(worktreePath, branchName, expectedCommit);
+    if (!validation.valid) {
+      throw new Error(`Worktree validation failed: ${validation.error ?? 'Unknown validation error'}`);
     }
 
     if (lockReason) {
@@ -126,6 +150,106 @@ export class WorktreeManager {
   private async branchExists(branchName: string): Promise<boolean> {
     const result = await this.execGit(['-C', this.repoRoot, 'rev-parse', '--verify', `refs/heads/${branchName}`]);
     return result.exitCode === 0;
+  }
+
+  private async resolveRef(ref: string): Promise<string> {
+    const result = await this.execGit(['-C', this.repoRoot, 'rev-parse', ref]);
+    if (result.exitCode !== 0) {
+      throw new Error(`Failed to resolve ref '${ref}': ${result.stderr}`);
+    }
+    return result.stdout.trim();
+  }
+
+  /**
+   * Get the current branch name in a worktree
+   */
+  private async getCurrentBranch(worktreePath: string): Promise<string> {
+    const result = await this.execGit(['-C', worktreePath, 'rev-parse', '--abbrev-ref', 'HEAD']);
+    if (result.exitCode !== 0) {
+      throw new Error(`Failed to get current branch: ${result.stderr}`);
+    }
+    return result.stdout.trim();
+  }
+
+  /**
+   * Get the current commit hash in a worktree
+   */
+  private async getCurrentCommit(worktreePath: string): Promise<string> {
+    const result = await this.execGit(['-C', worktreePath, 'rev-parse', 'HEAD']);
+    if (result.exitCode !== 0) {
+      throw new Error(`Failed to get current commit: ${result.stderr}`);
+    }
+    return result.stdout.trim();
+  }
+
+  /**
+   * Validate that a worktree is on the expected branch and commit
+   */
+  async validateWorktree(
+    worktreePath: string,
+    expectedBranch: string,
+    expectedCommit: string
+  ): Promise<WorktreeValidationResult> {
+    try {
+      const currentBranch = await this.getCurrentBranch(worktreePath);
+      const currentCommit = await this.getCurrentCommit(worktreePath);
+
+      if (currentBranch !== expectedBranch) {
+        return {
+          valid: false,
+          currentBranch,
+          currentCommit,
+          expectedBranch,
+          expectedCommit,
+          error: `Expected branch '${expectedBranch}', but worktree is on '${currentBranch}'`,
+        };
+      }
+
+      if (currentCommit !== expectedCommit) {
+        return {
+          valid: false,
+          currentBranch,
+          currentCommit,
+          expectedBranch,
+          expectedCommit,
+          error: `Expected commit '${expectedCommit.slice(0, 7)}', but worktree is at '${currentCommit.slice(0, 7)}'`,
+        };
+      }
+
+      return {
+        valid: true,
+        currentBranch,
+        currentCommit,
+        expectedBranch,
+        expectedCommit,
+      };
+    } catch (error) {
+      return {
+        valid: false,
+        error: error instanceof Error ? error.message : 'Unknown validation error',
+      };
+    }
+  }
+
+  /**
+   * Force cleanup stale worktree references that may be locked
+   */
+  private async forceCleanupStaleWorktree(worktreePath: string): Promise<void> {
+    // Try to unlock first (ignore failures)
+    await this.execGitAllowFailure(['-C', this.repoRoot, 'worktree', 'unlock', worktreePath]);
+
+    // Force remove via git
+    await this.execGitAllowFailure(['-C', this.repoRoot, 'worktree', 'remove', '--force', worktreePath]);
+
+    // Prune stale references
+    await this.execGitAllowFailure(['-C', this.repoRoot, 'worktree', 'prune']);
+
+    // Delete directory if exists
+    try {
+      await rm(worktreePath, { recursive: true, force: true });
+    } catch {
+      // Ignore if already deleted
+    }
   }
 
   private async cleanupWorktree(workerId: string): Promise<void> {
