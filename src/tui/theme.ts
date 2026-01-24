@@ -295,6 +295,7 @@ export const fullKeyboardShortcuts = [
   { key: ',', description: 'Switch to Settings view', category: 'General' },
   { key: 's', description: 'Start execution (when ready)', category: 'Execution' },
   { key: 'p', description: 'Pause / Resume execution', category: 'Execution' },
+  { key: 'Shift+P', description: 'Prune worktrees (local only)', category: 'Execution' },
   { key: '+', description: 'Add 10 iterations', category: 'Execution' },
   { key: '-', description: 'Remove 10 iterations', category: 'Execution' },
   { key: 'r', description: 'Refresh task list from tracker', category: 'Execution' },
@@ -315,6 +316,7 @@ export const fullKeyboardShortcuts = [
   { key: ']', description: 'Next instance tab', category: 'Instances' },
   { key: 'Ctrl+Tab', description: 'Next instance tab (alternate)', category: 'Instances' },
   { key: 'Ctrl+Shift+Tab', description: 'Previous instance tab (alternate)', category: 'Instances' },
+  { key: 'x', description: 'Delete remote (remote tabs)', category: 'Instances' },
   { key: 'Ctrl+C', description: 'Interrupt (with confirmation)', category: 'System' },
   { key: 'Ctrl+C ×2', description: 'Force quit immediately', category: 'System' },
 ] as const;

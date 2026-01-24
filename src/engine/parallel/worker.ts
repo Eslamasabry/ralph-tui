@@ -3,7 +3,7 @@
  */
 
 import type { AgentPlugin, AgentExecutionResult } from '../../plugins/agents/types.js';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import type { TrackerTask } from '../../plugins/trackers/types.js';
 import type { RalphConfig } from '../../config/types.js';
 import type { FormattedSegment } from '../../plugins/agents/output-formatting.js';
@@ -55,7 +55,7 @@ export class ParallelWorker {
     const shimPath = join(this.worktreePath, '.ralph-tui', 'bin');
     const env = {
       ...process.env,
-      PATH: `${shimPath}:${process.env.PATH ?? ''}`,
+      PATH: `${shimPath}${delimiter}${process.env.PATH ?? ''}`,
       RALPH_TUI_DISABLE_BD: '1',
     };
 

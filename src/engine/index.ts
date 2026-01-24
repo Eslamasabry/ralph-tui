@@ -974,401 +974,404 @@ export class ExecutionEngine {
 
     const startedAt = new Date();
 
-    while (true) {
-      const iteration = this.state.currentIteration;
+    try {
+      while (true) {
+        const iteration = this.state.currentIteration;
+        this.state.currentTask = task;
 
-      try {
-        this.emit({
-          type: 'iteration:started',
-          timestamp: new Date().toISOString(),
-          iteration,
-          task,
-        });
-
-        if (this.shouldLogTrackerEvents()) {
-          void appendTrackerEvent(this.config.cwd, {
+        try {
+          this.emit({
             type: 'iteration:started',
             timestamp: new Date().toISOString(),
-            tracker: this.config.tracker.plugin,
             iteration,
-            taskId: task.id,
-            taskTitle: task.title,
+            task,
           });
-        }
 
-        this.emit({
-          type: 'task:selected',
-          timestamp: new Date().toISOString(),
-          task,
-          iteration,
-        });
+          if (this.shouldLogTrackerEvents()) {
+            void appendTrackerEvent(this.config.cwd, {
+              type: 'iteration:started',
+              timestamp: new Date().toISOString(),
+              tracker: this.config.tracker.plugin,
+              iteration,
+              taskId: task.id,
+              taskTitle: task.title,
+            });
+          }
 
-        // Update task status to in_progress
-        await this.tracker!.updateTaskStatus(task.id, 'in_progress');
+          this.emit({
+            type: 'task:selected',
+            timestamp: new Date().toISOString(),
+            task,
+            iteration,
+          });
 
-        // Emit task:activated for crash recovery tracking
-        this.emit({
-          type: 'task:activated',
-          timestamp: new Date().toISOString(),
-          task,
-          iteration,
-        });
+          // Update task status to in_progress
+          await this.tracker!.updateTaskStatus(task.id, 'in_progress');
 
-        // Build prompt (includes recent progress context + tracker-owned template)
-        const prompt = await buildPrompt(task, this.config, this.tracker ?? undefined);
+          // Emit task:activated for crash recovery tracking
+          this.emit({
+            type: 'task:activated',
+            timestamp: new Date().toISOString(),
+            task,
+            iteration,
+          });
 
-        // Build agent flags
-        const flags: string[] = [];
-        if (this.config.model) {
-          flags.push('--model', this.config.model);
-        }
+          // Build prompt (includes recent progress context + tracker-owned template)
+          const prompt = await buildPrompt(task, this.config, this.tracker ?? undefined);
 
-        // Check if agent declares subagent tracing support
-        const supportsTracing = this.agent!.meta.supportsSubagentTracing;
+          // Build agent flags
+          const flags: string[] = [];
+          if (this.config.model) {
+            flags.push('--model', this.config.model);
+          }
 
-        const isDroidAgent = this.agent?.meta.id === 'droid';
-        const droidJsonlParser = isDroidAgent ? createDroidStreamingJsonlParser() : null;
+          // Check if agent declares subagent tracing support
+          const supportsTracing = this.agent!.meta.supportsSubagentTracing;
 
-        // Execute agent
-        const handle = this.agent!.execute(prompt, [], {
-          cwd: this.config.cwd,
-          flags,
-          sandbox: this.config.sandbox,
-          subagentTracing: supportsTracing,
-          onJsonlMessage: (message: Record<string, unknown>) => {
-            // OpenCode format detection
-            const part = message.part as Record<string, unknown> | undefined;
-            if (message.type === 'tool_use' && part?.tool) {
-              const openCodeMessage = {
-                source: 'opencode' as const,
-                type: message.type as string,
-                timestamp: message.timestamp as number | undefined,
-                sessionID: message.sessionID as string | undefined,
-                part: part as import('../plugins/agents/opencode/outputParser.js').OpenCodePart,
+          const isDroidAgent = this.agent?.meta.id === 'droid';
+          const droidJsonlParser = isDroidAgent ? createDroidStreamingJsonlParser() : null;
+
+          // Execute agent
+          const handle = this.agent!.execute(prompt, [], {
+            cwd: this.config.cwd,
+            flags,
+            sandbox: this.config.sandbox,
+            subagentTracing: supportsTracing,
+            onJsonlMessage: (message: Record<string, unknown>) => {
+              // OpenCode format detection
+              const part = message.part as Record<string, unknown> | undefined;
+              if (message.type === 'tool_use' && part?.tool) {
+                const openCodeMessage = {
+                  source: 'opencode' as const,
+                  type: message.type as string,
+                  timestamp: message.timestamp as number | undefined,
+                  sessionID: message.sessionID as string | undefined,
+                  part: part as import('../plugins/agents/opencode/outputParser.js').OpenCodePart,
+                  raw: message,
+                };
+                if (isOpenCodeTaskTool(openCodeMessage)) {
+                  for (const claudeMessage of openCodeTaskToClaudeMessages(openCodeMessage)) {
+                    this.subagentParser.processMessage(claudeMessage);
+                  }
+                }
+                return;
+              }
+
+              // Claude format
+              const claudeMessage: ClaudeJsonlMessage = {
+                type: message.type as string | undefined,
+                message: message.message as string | undefined,
+                tool: message.tool as { name?: string; input?: Record<string, unknown> } | undefined,
+                result: message.result,
+                cost: message.cost as { inputTokens?: number; outputTokens?: number; totalUSD?: number } | undefined,
+                sessionId: message.sessionId as string | undefined,
                 raw: message,
               };
-              if (isOpenCodeTaskTool(openCodeMessage)) {
-                for (const claudeMessage of openCodeTaskToClaudeMessages(openCodeMessage)) {
-                  this.subagentParser.processMessage(claudeMessage);
-                }
-              }
-              return;
-            }
+              this.subagentParser.processMessage(claudeMessage);
+            },
+            onStdout: (data) => {
+              this.state.currentOutput += data;
+              this.emit({
+                type: 'agent:output',
+                timestamp: new Date().toISOString(),
+                stream: 'stdout',
+                data,
+                iteration,
+              });
 
-            // Claude format
-            const claudeMessage: ClaudeJsonlMessage = {
-              type: message.type as string | undefined,
-              message: message.message as string | undefined,
-              tool: message.tool as { name?: string; input?: Record<string, unknown> } | undefined,
-              result: message.result,
-              cost: message.cost as { inputTokens?: number; outputTokens?: number; totalUSD?: number } | undefined,
-              sessionId: message.sessionId as string | undefined,
-              raw: message,
-            };
-            this.subagentParser.processMessage(claudeMessage);
-          },
-          onStdout: (data) => {
-            this.state.currentOutput += data;
-            this.emit({
-              type: 'agent:output',
-              timestamp: new Date().toISOString(),
-              stream: 'stdout',
-              data,
-              iteration,
-            });
-
-            if (droidJsonlParser && isDroidAgent) {
-              const results = droidJsonlParser.push(data);
-              for (const result of results) {
-                if (result.success) {
-                  if (isDroidJsonlMessage(result.message)) {
-                    for (const normalized of toClaudeJsonlMessages(result.message)) {
-                      this.subagentParser.processMessage(normalized);
+              if (droidJsonlParser && isDroidAgent) {
+                const results = droidJsonlParser.push(data);
+                for (const result of results) {
+                  if (result.success) {
+                    if (isDroidJsonlMessage(result.message)) {
+                      for (const normalized of toClaudeJsonlMessages(result.message)) {
+                        this.subagentParser.processMessage(normalized);
+                      }
+                    } else {
+                      this.subagentParser.processMessage(result.message);
                     }
-                  } else {
-                    this.subagentParser.processMessage(result.message);
                   }
                 }
               }
-            }
-          },
-          onStderr: (data) => {
-            this.state.currentStderr += data;
-            this.emit({
-              type: 'agent:output',
-              timestamp: new Date().toISOString(),
-              stream: 'stderr',
-              data,
-              iteration,
-            });
-          },
-        });
+            },
+            onStderr: (data) => {
+              this.state.currentStderr += data;
+              this.emit({
+                type: 'agent:output',
+                timestamp: new Date().toISOString(),
+                stream: 'stderr',
+                data,
+                iteration,
+              });
+            },
+          });
 
-        this.currentExecution = handle;
-        const agentResult = await handle.promise;
-        this.currentExecution = null;
+          this.currentExecution = handle;
+          const agentResult = await handle.promise;
+          this.currentExecution = null;
 
-        if (droidJsonlParser && isDroidAgent) {
-          const remaining = droidJsonlParser.flush();
-          for (const result of remaining) {
-            if (result.success) {
-              if (isDroidJsonlMessage(result.message)) {
-                for (const normalized of toClaudeJsonlMessages(result.message)) {
-                  this.subagentParser.processMessage(normalized);
+          if (droidJsonlParser && isDroidAgent) {
+            const remaining = droidJsonlParser.flush();
+            for (const result of remaining) {
+              if (result.success) {
+                if (isDroidJsonlMessage(result.message)) {
+                  for (const normalized of toClaudeJsonlMessages(result.message)) {
+                    this.subagentParser.processMessage(normalized);
+                  }
+                } else {
+                  this.subagentParser.processMessage(result.message);
                 }
-              } else {
-                this.subagentParser.processMessage(result.message);
               }
             }
           }
-        }
 
-        // Check for rate limit
-        const rateLimitResult = this.checkForRateLimit(
-          agentResult.stdout,
-          agentResult.stderr,
-          agentResult.exitCode
-        );
+          // Check for rate limit
+          const rateLimitResult = this.checkForRateLimit(
+            agentResult.stdout,
+            agentResult.stderr,
+            agentResult.exitCode
+          );
 
-        if (rateLimitResult.isRateLimit) {
-          const shouldRetry = await this.handleRateLimitWithBackoff(task, rateLimitResult, iteration);
+          if (rateLimitResult.isRateLimit) {
+            const shouldRetry = await this.handleRateLimitWithBackoff(task, rateLimitResult, iteration);
 
-          if (shouldRetry && !this.shouldStop) {
-            // Increment iteration for the retry
-            this.state.currentIteration++;
-            continue;
-          }
+            if (shouldRetry && !this.shouldStop) {
+              // Increment iteration for the retry
+              this.state.currentIteration++;
+              continue;
+            }
 
-          // Try fallback agent
-          const currentAgentPlugin = this.state.activeAgent?.plugin ?? this.config.agent.plugin;
-          this.rateLimitedAgents.add(currentAgentPlugin);
+            // Try fallback agent
+            const currentAgentPlugin = this.state.activeAgent?.plugin ?? this.config.agent.plugin;
+            this.rateLimitedAgents.add(currentAgentPlugin);
 
-          const fallbackResult = await this.tryFallbackAgent(task, iteration, startedAt);
-          if (fallbackResult.switched && !this.shouldStop) {
-            // Increment iteration for the retry with fallback
-            this.state.currentIteration++;
-            continue;
-          }
+            const fallbackResult = await this.tryFallbackAgent(task, iteration, startedAt);
+            if (fallbackResult.switched && !this.shouldStop) {
+              // Increment iteration for the retry with fallback
+              this.state.currentIteration++;
+              continue;
+            }
 
-          if (fallbackResult.allAgentsLimited) {
-            this.emit({
-              type: 'agent:all-limited',
-              timestamp: new Date().toISOString(),
+            if (fallbackResult.allAgentsLimited) {
+              this.emit({
+                type: 'agent:all-limited',
+                timestamp: new Date().toISOString(),
+                task,
+                triedAgents: Array.from(this.rateLimitedAgents),
+                rateLimitState: this.state.rateLimitState!,
+              });
+              this.pause();
+            }
+
+            const endedAt = new Date();
+            return {
+              iteration,
+              status: 'failed',
               task,
-              triedAgents: Array.from(this.rateLimitedAgents),
-              rateLimitState: this.state.rateLimitState!,
-            });
-            this.pause();
+              taskCompleted: false,
+              promiseComplete: false,
+              durationMs: endedAt.getTime() - startedAt.getTime(),
+              error: `Rate limit exceeded after ${this.rateLimitConfig.maxRetries} retries: ${rateLimitResult.message}`,
+              startedAt: startedAt.toISOString(),
+              endedAt: endedAt.toISOString(),
+            };
           }
+
+          // Success (not rate limited)
+          this.clearRateLimitedAgents();
+          this.clearRateLimitRetryCount(task.id);
 
           const endedAt = new Date();
-          return {
+          const durationMs = endedAt.getTime() - startedAt.getTime();
+          const promiseComplete = PROMISE_COMPLETE_PATTERN.test(agentResult.stdout);
+
+          // Check if commit recovery is needed (repo is dirty after completion signal)
+          let recoveryNeeded = false;
+          let recoveryResult: { success: boolean; recoveryCount: number; reason?: string } | null = null;
+
+          if (promiseComplete) {
+            recoveryNeeded = await this.needsCommitRecovery(task, agentResult.stdout);
+
+            if (recoveryNeeded) {
+              // Run commit recovery loop
+              recoveryResult = await this.runCommitRecovery(task, iteration, agentResult.stdout, prompt);
+
+              if (!recoveryResult.success) {
+                // Recovery failed - task will be blocked, not completed
+                console.log(`[commit-recovery] Task ${task.id} blocked: ${recoveryResult.reason}`);
+
+                // Explicitly update tracker and emit event to match Option A (Block) semantics
+                await this.tracker!.updateTaskStatus(task.id, 'blocked');
+                this.emit({
+                  type: 'task:blocked',
+                  timestamp: new Date().toISOString(),
+                  task,
+                  reason: `Commit recovery failed after ${recoveryResult.recoveryCount} attempts: ${recoveryResult.reason}`,
+                  recoveryAttemptCount: recoveryResult.recoveryCount,
+                });
+              }
+            }
+          }
+
+          // Determine if task was completed (only if no pending recovery or recovery succeeded)
+          // Fix 4: Strict completion logic - require explicit <promise>COMPLETE</promise> signal
+          const taskCompleted =
+            promiseComplete &&
+            (!recoveryNeeded || (recoveryResult?.success ?? false));
+
+          // Update tracker if task completed (gated on main sync success)
+          if (taskCompleted) {
+            // Try to sync with main branch before completing
+            const syncResult = await this.syncMainBranch();
+
+            if (syncResult.success) {
+              // Main sync succeeded - complete the task
+              await this.tracker!.completeTask(task.id, 'Completed by agent');
+              this.emit({
+                type: 'task:completed',
+                timestamp: new Date().toISOString(),
+                task,
+                iteration,
+              });
+
+              // Clear rate-limited agents tracking on task completion
+              // This allows agents to be retried for the next task
+              this.clearRateLimitedAgents();
+            } else {
+              // Main sync failed or was skipped - block the task pending main sync
+              console.log(`[main-sync] Task ${task.id} blocked: ${syncResult.reason}`);
+
+              // Get pending commits to mark in tracker
+              const pendingInfo = await this.getPendingMainCommits();
+
+              // Add to pending main sync tasks
+              this.pendingMainSyncTasks.set(task.id, { task, workerId: 'main' });
+
+              // Mark task as blocked in tracker
+              await this.tracker!.updateTaskStatus(task.id, 'blocked');
+
+              // Mark as pending-main in tracker (if supported)
+              if (this.tracker && 'markTaskPendingMain' in this.tracker && typeof this.tracker.markTaskPendingMain === 'function') {
+                await this.tracker.markTaskPendingMain(task.id, pendingInfo.count, pendingInfo.commits);
+              }
+
+              // Emit task blocked event
+              this.emit({
+                type: 'task:blocked',
+                timestamp: new Date().toISOString(),
+                task,
+                reason: `Main sync required: ${syncResult.reason}`,
+              });
+            }
+          }
+
+          // Determine iteration status
+          let status: IterationStatus;
+          if (agentResult.interrupted) {
+            status = 'interrupted';
+          } else if (agentResult.status === 'failed') {
+            status = 'failed';
+          } else if (recoveryNeeded && !recoveryResult?.success) {
+            // Recovery was needed but failed - mark as failed, not completed
+            status = 'failed';
+          } else {
+            status = 'completed';
+          }
+
+          const result: IterationResult = {
+            iteration,
+            status,
+            task,
+            agentResult,
+            taskCompleted,
+            promiseComplete,
+            durationMs,
+            startedAt: startedAt.toISOString(),
+            endedAt: endedAt.toISOString(),
+          };
+
+          // Save iteration output to .ralph-tui/iterations/ directory
+          // Include subagent trace if any subagents were spawned
+          const events = this.subagentParser.getEvents();
+          const states = this.subagentParser.getAllSubagents();
+          const subagentTrace =
+            events.length > 0 ? buildSubagentTrace(events, states) : undefined;
+
+          // Build completion summary if agent switches occurred
+          const completionSummary = this.buildCompletionSummary(result);
+
+          await saveIterationLog(this.config.cwd, result, agentResult.stdout, agentResult.stderr ?? this.state.currentStderr, {
+            config: this.config,
+            subagentTrace,
+            agentSwitches: this.currentIterationAgentSwitches.length > 0 ? [...this.currentIterationAgentSwitches] : undefined,
+            completionSummary,
+            sandboxConfig: this.config.sandbox,
+          });
+
+          // Append progress entry for cross-iteration context
+          // This provides agents with history of what's been done
+          try {
+            const progressEntry = createProgressEntry(result);
+            await appendProgress(this.config.cwd, progressEntry);
+          } catch {
+            // Don't fail iteration if progress append fails
+          }
+
+          this.emit({
+            type: 'iteration:completed',
+            timestamp: endedAt.toISOString(),
+            result,
+          });
+
+          if (this.shouldLogTrackerEvents()) {
+            void appendTrackerEvent(this.config.cwd, {
+              type: 'iteration:completed',
+              timestamp: endedAt.toISOString(),
+              tracker: this.config.tracker.plugin,
+              iteration,
+              taskId: task.id,
+              taskTitle: task.title,
+              status: result.status,
+              durationMs,
+              taskCompleted,
+            });
+          }
+
+          return result;
+        } catch (error) {
+          const endedAt = new Date();
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
+
+          // Note: We don't emit iteration:failed here anymore - it's handled
+          // by runIterationWithErrorHandling which determines the action.
+          // This keeps the error handling logic centralized.
+
+          const failedResult: IterationResult = {
             iteration,
             status: 'failed',
             task,
             taskCompleted: false,
             promiseComplete: false,
             durationMs: endedAt.getTime() - startedAt.getTime(),
-            error: `Rate limit exceeded after ${this.rateLimitConfig.maxRetries} retries: ${rateLimitResult.message}`,
+            error: errorMessage,
             startedAt: startedAt.toISOString(),
             endedAt: endedAt.toISOString(),
           };
-        }
 
-        // Success (not rate limited)
-        this.clearRateLimitedAgents();
-        this.clearRateLimitRetryCount(task.id);
-
-        const endedAt = new Date();
-        const durationMs = endedAt.getTime() - startedAt.getTime();
-        const promiseComplete = PROMISE_COMPLETE_PATTERN.test(agentResult.stdout);
-
-        // Check if commit recovery is needed (repo is dirty after completion signal)
-        let recoveryNeeded = false;
-        let recoveryResult: { success: boolean; recoveryCount: number; reason?: string } | null = null;
-
-        if (promiseComplete) {
-          recoveryNeeded = await this.needsCommitRecovery(task, agentResult.stdout);
-
-          if (recoveryNeeded) {
-            // Run commit recovery loop
-            recoveryResult = await this.runCommitRecovery(task, iteration, agentResult.stdout, prompt);
-
-            if (!recoveryResult.success) {
-              // Recovery failed - task will be blocked, not completed
-              console.log(`[commit-recovery] Task ${task.id} blocked: ${recoveryResult.reason}`);
-
-              // Explicitly update tracker and emit event to match Option A (Block) semantics
-              await this.tracker!.updateTaskStatus(task.id, 'blocked');
-              this.emit({
-                type: 'task:blocked',
-                timestamp: new Date().toISOString(),
-                task,
-                reason: `Commit recovery failed after ${recoveryResult.recoveryCount} attempts: ${recoveryResult.reason}`,
-                recoveryAttemptCount: recoveryResult.recoveryCount,
-              });
-            }
+          // Append progress entry for failed iterations too
+          try {
+            const progressEntry = createProgressEntry(failedResult);
+            await appendProgress(this.config.cwd, progressEntry);
+          } catch {
+            // Don't fail iteration if progress append fails
           }
+
+          return failedResult;
         }
-
-        // Determine if task was completed (only if no pending recovery or recovery succeeded)
-        // Fix 4: Strict completion logic - require explicit <promise>COMPLETE</promise> signal
-        const taskCompleted =
-          promiseComplete &&
-          (!recoveryNeeded || (recoveryResult?.success ?? false));
-
-        // Update tracker if task completed (gated on main sync success)
-        if (taskCompleted) {
-          // Try to sync with main branch before completing
-          const syncResult = await this.syncMainBranch();
-
-          if (syncResult.success) {
-            // Main sync succeeded - complete the task
-            await this.tracker!.completeTask(task.id, 'Completed by agent');
-            this.emit({
-              type: 'task:completed',
-              timestamp: new Date().toISOString(),
-              task,
-              iteration,
-            });
-
-            // Clear rate-limited agents tracking on task completion
-            // This allows agents to be retried for the next task
-            this.clearRateLimitedAgents();
-          } else {
-            // Main sync failed or was skipped - block the task pending main sync
-            console.log(`[main-sync] Task ${task.id} blocked: ${syncResult.reason}`);
-
-            // Get pending commits to mark in tracker
-            const pendingInfo = await this.getPendingMainCommits();
-
-            // Add to pending main sync tasks
-            this.pendingMainSyncTasks.set(task.id, { task, workerId: 'main' });
-
-            // Mark task as blocked in tracker
-            await this.tracker!.updateTaskStatus(task.id, 'blocked');
-
-            // Mark as pending-main in tracker (if supported)
-            if (this.tracker && 'markTaskPendingMain' in this.tracker && typeof this.tracker.markTaskPendingMain === 'function') {
-              await this.tracker.markTaskPendingMain(task.id, pendingInfo.count, pendingInfo.commits);
-            }
-
-            // Emit task blocked event
-            this.emit({
-              type: 'task:blocked',
-              timestamp: new Date().toISOString(),
-              task,
-              reason: `Main sync required: ${syncResult.reason}`,
-            });
-          }
-        }
-
-        // Determine iteration status
-        let status: IterationStatus;
-        if (agentResult.interrupted) {
-          status = 'interrupted';
-        } else if (agentResult.status === 'failed') {
-          status = 'failed';
-        } else if (recoveryNeeded && !recoveryResult?.success) {
-          // Recovery was needed but failed - mark as failed, not completed
-          status = 'failed';
-        } else {
-          status = 'completed';
-        }
-
-        const result: IterationResult = {
-          iteration,
-          status,
-          task,
-          agentResult,
-          taskCompleted,
-          promiseComplete,
-          durationMs,
-          startedAt: startedAt.toISOString(),
-          endedAt: endedAt.toISOString(),
-        };
-
-        // Save iteration output to .ralph-tui/iterations/ directory
-        // Include subagent trace if any subagents were spawned
-        const events = this.subagentParser.getEvents();
-        const states = this.subagentParser.getAllSubagents();
-        const subagentTrace =
-          events.length > 0 ? buildSubagentTrace(events, states) : undefined;
-
-        // Build completion summary if agent switches occurred
-        const completionSummary = this.buildCompletionSummary(result);
-
-        await saveIterationLog(this.config.cwd, result, agentResult.stdout, agentResult.stderr ?? this.state.currentStderr, {
-          config: this.config,
-          subagentTrace,
-          agentSwitches: this.currentIterationAgentSwitches.length > 0 ? [...this.currentIterationAgentSwitches] : undefined,
-          completionSummary,
-          sandboxConfig: this.config.sandbox,
-        });
-
-        // Append progress entry for cross-iteration context
-        // This provides agents with history of what's been done
-        try {
-          const progressEntry = createProgressEntry(result);
-          await appendProgress(this.config.cwd, progressEntry);
-        } catch {
-          // Don't fail iteration if progress append fails
-        }
-
-        this.emit({
-          type: 'iteration:completed',
-          timestamp: endedAt.toISOString(),
-          result,
-        });
-
-        if (this.shouldLogTrackerEvents()) {
-          void appendTrackerEvent(this.config.cwd, {
-            type: 'iteration:completed',
-            timestamp: endedAt.toISOString(),
-            tracker: this.config.tracker.plugin,
-            iteration,
-            taskId: task.id,
-            taskTitle: task.title,
-            status: result.status,
-            durationMs,
-            taskCompleted,
-          });
-        }
-
-        return result;
-      } catch (error) {
-        const endedAt = new Date();
-        const errorMessage =
-          error instanceof Error ? error.message : String(error);
-
-        // Note: We don't emit iteration:failed here anymore - it's handled
-        // by runIterationWithErrorHandling which determines the action.
-        // This keeps the error handling logic centralized.
-
-        const failedResult: IterationResult = {
-          iteration,
-          status: 'failed',
-          task,
-          taskCompleted: false,
-          promiseComplete: false,
-          durationMs: endedAt.getTime() - startedAt.getTime(),
-          error: errorMessage,
-          startedAt: startedAt.toISOString(),
-          endedAt: endedAt.toISOString(),
-        };
-
-        // Append progress entry for failed iterations too
-        try {
-          const progressEntry = createProgressEntry(failedResult);
-          await appendProgress(this.config.cwd, progressEntry);
-        } catch {
-          // Don't fail iteration if progress append fails
-        }
-
-        return failedResult;
-      } finally {
-        this.state.currentTask = null;
       }
+    } finally {
+      this.state.currentTask = null;
     }
   }
 
@@ -1805,6 +1808,7 @@ export class ExecutionEngine {
   private switchAgent(newAgentPlugin: string, reason: ActiveAgentReason): void {
     const previousAgent = this.state.activeAgent?.plugin ?? this.config.agent.plugin;
     const now = new Date().toISOString();
+    const previousLimitedAt = this.state.rateLimitState?.limitedAt;
 
     // Update active agent state
     this.state.activeAgent = {
@@ -1845,8 +1849,8 @@ export class ExecutionEngine {
     } else {
       // Calculate duration on fallback for recovery logging
       let durationOnFallback = '';
-      if (this.state.rateLimitState?.limitedAt) {
-        const limitedAt = new Date(this.state.rateLimitState.limitedAt);
+      if (previousLimitedAt) {
+        const limitedAt = new Date(previousLimitedAt);
         const durationMs = Date.now() - limitedAt.getTime();
         const durationSecs = Math.round(durationMs / 1000);
         if (durationSecs >= 60) {
@@ -2360,18 +2364,8 @@ export class ExecutionEngine {
 
     // Check if we've exceeded max recovery attempts
     if (currentAttempts >= COMMIT_RECOVERY_MAX_RETRIES) {
-      // Max attempts exceeded - block the task
       const reason = `Max commit recovery attempts (${COMMIT_RECOVERY_MAX_RETRIES}) exceeded. Repository still has uncommitted changes.`;
       console.log(`[commit-recovery] ${reason}`);
-
-      // Emit task blocked event
-      this.emit({
-        type: 'task:blocked',
-        timestamp: new Date().toISOString(),
-        task,
-        reason,
-        recoveryAttemptCount: currentAttempts,
-      });
 
       // Clear recovery tracking for this task
       this.commitRecoveryAttempts.delete(task.id);
@@ -2426,24 +2420,10 @@ export class ExecutionEngine {
       return { success: true, recoveryCount: attemptNumber };
     }
 
-    // Still dirty - check if we should retry
-    if (currentAttempts < COMMIT_RECOVERY_MAX_RETRIES) {
-      // Will retry on next call
-      return { success: false, recoveryCount: attemptNumber };
-    }
-
-    // Max attempts exceeded - block the task
-    const finalReason = `Max commit recovery attempts (${COMMIT_RECOVERY_MAX_RETRIES}) exceeded. Repository still has uncommitted changes.`;
+    const finalReason =
+      `Commit recovery did not clean the working tree after attempt ${attemptNumber}/` +
+      `${COMMIT_RECOVERY_MAX_RETRIES}. Uncommitted changes remain.`;
     console.log(`[commit-recovery] ${finalReason}`);
-
-    // Emit task blocked event
-    this.emit({
-      type: 'task:blocked',
-      timestamp: new Date().toISOString(),
-      task,
-      reason: finalReason,
-      recoveryAttemptCount: attemptNumber,
-    });
 
     // Clear recovery tracking for this task
     this.commitRecoveryAttempts.delete(task.id);

@@ -184,6 +184,10 @@ export class ParallelCoordinator {
         const busyWorkers = this.workers.some((worker) => worker.isBusy());
         if (!busyWorkers) {
           await this.trySyncPendingMainTasks();
+          if (this.mergeQueue.length > 0 || this.pendingMergeCounts.size > 0) {
+            await this.delay(150);
+            continue;
+          }
           const resetCount = await this.resetStaleInProgressTasks();
           if (resetCount > 0) {
             await this.delay(100);
@@ -754,21 +758,51 @@ export class ParallelCoordinator {
    * Falls back to basic info if full metadata unavailable.
    */
   private async getCommitMetadata(commit: string, repoPath: string): Promise<CommitMetadata> {
-    // Use git log with format strings for detailed commit info
-    const formatArgs = [
-      commit,
-      '--format=',
-      '%H%n%h%n%s%n%B%n%an%n%ae%n%ad%n%cn%n%ce%n%cd%n%P%n%T',
-    ];
+    if (commit === 'none') {
+      return {
+        hash: 'none',
+        shortHash: 'none',
+        message: '',
+        fullMessage: '',
+        authorName: '',
+        authorEmail: '',
+        authorDate: '',
+        committerName: '',
+        committerEmail: '',
+        committerDate: '',
+        filesChanged: 0,
+        insertions: 0,
+        deletions: 0,
+        fileNames: [],
+        parents: [],
+        treeHash: '',
+      };
+    }
 
-    const result = await this.execGitIn(repoPath, ['log', ...formatArgs]);
+    const format = [
+      '%H',
+      '%h',
+      '%s',
+      '%B',
+      '%an',
+      '%ae',
+      '%ad',
+      '%cn',
+      '%ce',
+      '%cd',
+      '%P',
+      '%T',
+    ].join('%x00');
 
-    if (result.exitCode !== 0 || !result.stdout.trim()) {
-      // Fallback: return basic info from diff-tree
+    const meta = await this.execGitIn(repoPath, ['show', '-s', `--format=${format}`, commit]);
+
+    if (meta.exitCode !== 0 || !meta.stdout) {
       const filesResult = await this.execGitIn(repoPath, ['diff-tree', '--no-commit-id', '-r', '--stat', commit]);
       const fileNames = await this.getCommitFiles(commit, repoPath);
 
-      const statMatch = filesResult.stdout.match(/(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?/);
+      const statMatch = filesResult.stdout.match(
+        /(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?/
+      );
       const filesChanged = statMatch ? parseInt(statMatch[1] || '0', 10) : fileNames.length;
       const insertions = statMatch ? parseInt(statMatch[2] || '0', 10) : 0;
       const deletions = statMatch ? parseInt(statMatch[3] || '0', 10) : 0;
@@ -793,53 +827,33 @@ export class ParallelCoordinator {
       };
     }
 
-    const lines = result.stdout.split('\n').filter((line) => line.trim() !== '');
+    const raw = meta.stdout.endsWith('\n') ? meta.stdout.slice(0, -1) : meta.stdout;
+    const parts = raw.split('\0');
 
-    // Parse the output based on the format:
-    // Line 0: full hash
-    // Line 1: short hash
-    // Line 2: subject (first line of message)
-    // Line 3+: body (full message)
-    // Then: author name, author email, author date, committer name, committer email, committer date, parents, tree hash
-
-    let idx = 0;
-    const fullHash = lines[idx++] || commit;
-    const shortHash = lines[idx++] || commit.slice(0, 7);
-
-    // Collect full message (subject + body)
-    const messageLines: string[] = [];
-    while (idx < lines.length && !lines[idx].includes('@')) {
-      messageLines.push(lines[idx]);
-      idx++;
+    if (parts.length < 12) {
+      const fileNames = await this.getCommitFiles(commit, repoPath);
+      return {
+        hash: commit,
+        shortHash: commit.slice(0, 7),
+        message: '',
+        fullMessage: '',
+        authorName: '',
+        authorEmail: '',
+        authorDate: '',
+        committerName: '',
+        committerEmail: '',
+        committerDate: '',
+        filesChanged: fileNames.length,
+        insertions: 0,
+        deletions: 0,
+        fileNames,
+        parents: [],
+        treeHash: '',
+      };
     }
 
-    const fullMessage = messageLines.join('\n').trim();
-    const message = messageLines[0] || '';
-
-    const authorName = lines[idx++] || '';
-    const authorEmail = lines[idx++] || '';
-    const authorDate = lines[idx++] || '';
-    const committerName = lines[idx++] || '';
-    const committerEmail = lines[idx++] || '';
-    const committerDate = lines[idx++] || '';
-
-    // Parents and tree hash (may be empty)
-    const parents = idx < lines.length && lines[idx] ? lines[idx].split(' ') : [];
-    idx++;
-    const treeHash = idx < lines.length && lines[idx] ? lines[idx] : '';
-
-    // Get file statistics
-    const statResult = await this.execGitIn(repoPath, ['diff-tree', '--no-commit-id', '-r', '--stat', commit]);
-    const statMatch = statResult.stdout.match(/(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?/);
-    const filesChanged = statMatch ? parseInt(statMatch[1] || '0', 10) : 0;
-    const insertions = statMatch ? parseInt(statMatch[2] || '0', 10) : 0;
-    const deletions = statMatch ? parseInt(statMatch[3] || '0', 10) : 0;
-
-    // Get file names
-    const fileNames = await this.getCommitFiles(commit, repoPath);
-
-    return {
-      hash: fullHash,
+    const [
+      hash,
       shortHash,
       message,
       fullMessage,
@@ -849,7 +863,34 @@ export class ParallelCoordinator {
       committerName,
       committerEmail,
       committerDate,
-      filesChanged,
+      parentsRaw,
+      treeHash,
+    ] = parts;
+
+    const parents = parentsRaw.trim() ? parentsRaw.trim().split(/\s+/) : [];
+
+    const statResult = await this.execGitIn(repoPath, ['diff-tree', '--no-commit-id', '-r', '--stat', commit]);
+    const statMatch = statResult.stdout.match(
+      /(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?/
+    );
+    const filesChanged = statMatch ? parseInt(statMatch[1] || '0', 10) : 0;
+    const insertions = statMatch ? parseInt(statMatch[2] || '0', 10) : 0;
+    const deletions = statMatch ? parseInt(statMatch[3] || '0', 10) : 0;
+
+    const fileNames = await this.getCommitFiles(commit, repoPath);
+
+    return {
+      hash,
+      shortHash,
+      message,
+      fullMessage: fullMessage.trimEnd(),
+      authorName,
+      authorEmail,
+      authorDate,
+      committerName,
+      committerEmail,
+      committerDate,
+      filesChanged: filesChanged || fileNames.length,
       insertions,
       deletions,
       fileNames,
@@ -1172,14 +1213,9 @@ export class ParallelCoordinator {
   }
 
   private isSimpleConflict(content: string): boolean {
-    // Simple conflict: contains both <<<<<<< and ======= and >>>>>>> markers
-    // and doesn't have nested conflicts
-    const conflictMarkers = [
-      /<<<<<<< HEAD.*=======.*>>>>>>> [0-9a-f]+/s,
-      /<<<<<<< HEAD.*=======.*>>>>>>> [0-9a-f]+/s
-    ];
-    
-    return conflictMarkers.some(regex => regex.test(content));
+    const openCount = content.match(/<<<<<<<[^\n]*\n/g)?.length ?? 0;
+    if (openCount !== 1) return false;
+    return content.includes('\n=======\n') && content.includes('\n>>>>>>>');
   }
 
   private resolveSimpleConflict(content: string): string | null {
@@ -1189,7 +1225,7 @@ export class ParallelCoordinator {
     // 3. Returning null when conflicts can't be cleanly resolved (fall back to LLM)
 
     // First, detect the conflict pattern
-    const conflictPattern = /<<<<<<< HEAD\n(.*?)\n=======\n(.*?)\n>>>>>>> [0-9a-f]+/s;
+    const conflictPattern = /<<<<<<<[^\n]*\n([\s\S]*?)\n=======\n([\s\S]*?)\n>>>>>>>[^\n]*\n?/;
     const match = content.match(conflictPattern);
 
     if (!match) {
@@ -1210,31 +1246,8 @@ export class ParallelCoordinator {
   }
 
   private areChangesSimilar(ours: string, theirs: string): boolean {
-    // Simple similarity check: remove whitespace and compare
-    const normalize = (str: string) => str.replace(/\s+/g, '').toLowerCase();
-    const ourNormalized = normalize(ours);
-    const theirNormalized = normalize(theirs);
-    
-    // Consider changes similar if 80% or more characters match
-    const commonChars = this.countCommonCharacters(ourNormalized, theirNormalized);
-    const maxLength = Math.max(ourNormalized.length, theirNormalized.length);
-    const similarity = maxLength > 0 ? commonChars / maxLength : 0;
-    
-    return similarity >= 0.8;
-  }
-
-  private countCommonCharacters(str1: string, str2: string): number {
-    const set1 = new Set(str1);
-    const set2 = new Set(str2);
-    let count = 0;
-    
-    for (const char of set1) {
-      if (set2.has(char)) {
-        count++;
-      }
-    }
-    
-    return count;
+    const normalize = (str: string) => str.replace(/\s+/g, '');
+    return normalize(ours) === normalize(theirs);
   }
 
   private buildMergePrompt(task: TrackerTask, commit: string, conflictFiles: string): string {
@@ -1393,7 +1406,7 @@ export class ParallelCoordinator {
   private filterStatusLines(statusOutput: string): string[] {
     return statusOutput
       .split('\n')
-      .map((line) => line.trim())
+      .map((line) => line.replace(/\r$/, ''))
       .filter(Boolean)
       .filter((line) => {
         const path = line.slice(3).trim();

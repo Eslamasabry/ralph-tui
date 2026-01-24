@@ -899,6 +899,13 @@ export function RunApp({
   const displayCurrentTaskId = isViewingRemote ? remoteCurrentTaskId : currentTaskId;
   const displayCurrentTaskTitle = isViewingRemote ? remoteCurrentTaskTitle : currentTaskTitle;
   const displayTrackerRealtimeStatus = isViewingRemote ? remoteTrackerRealtimeStatus : trackerRealtimeStatus;
+  const displayTasks = isViewingRemote ? remoteTasks : tasks;
+
+  const headerCounts = useMemo(() => {
+    const total = displayTasks.length;
+    const completed = displayTasks.filter((t) => t.status === 'done' || t.status === 'closed').length;
+    return { total, completed };
+  }, [displayTasks]);
 
   // Compute display agent name - prefer active agent from engine state, fallback to config
   // For remote viewing, use remote active agent state, then remote config, then local config
@@ -957,14 +964,9 @@ export function RunApp({
   // Sort order: active tasks first (sorted by workerId), then queued, blocked, done
   const allTasksForCards = useMemo(() => {
     // Enrich all tasks with their assigned workerId for stable slot display
-    // Only treat tasks as 'active' when they are assigned to a worker
     const enriched = displayedTasks.map((task) => {
       const workerId = workerTaskMap.get(task.id);
-      const displayStatus: TaskStatus = workerId
-        ? 'active'
-        : task.status === 'active'
-          ? 'actionable'
-          : task.status;
+      const displayStatus: TaskStatus = workerId ? 'active' : task.status;
       return {
         ...task,
         status: displayStatus,
@@ -1124,6 +1126,21 @@ export function RunApp({
           setCurrentTaskId(event.task.id);
           setCurrentTaskTitle(event.task.title);
           setStatus('executing');
+          // Add task if not present (edge case when selection precedes list update)
+          setTasks((prev) => {
+            const exists = prev.some((t) => t.id === event.task.id);
+            if (exists) return prev;
+            return [
+              ...prev,
+              {
+                id: event.task.id,
+                title: event.task.title,
+                status: 'pending' as TaskStatus,
+                description: event.task.description,
+                iteration: event.iteration,
+              },
+            ];
+          });
           break;
 
         case 'iteration:started':
@@ -1233,24 +1250,6 @@ export function RunApp({
               iteration: event.iteration,
             },
           ]);
-          break;
-
-        case 'task:selected':
-          // Add task if not present
-          setTasks((prev) => {
-            const exists = prev.some((t) => t.id === event.task.id);
-            if (exists) return prev;
-            return [
-              ...prev,
-              {
-                id: event.task.id,
-                title: event.task.title,
-                status: 'pending' as TaskStatus,
-                description: event.task.description,
-                iteration: event.iteration,
-              },
-            ];
-          });
           break;
 
         case 'task:completed':
@@ -1971,6 +1970,19 @@ export function RunApp({
           break;
 
         case 'p':
+          if (key.sequence === 'P') {
+            if (isViewingRemote) {
+              setInfoFeedback('Worktree pruning is local-only (not available on remote tabs).');
+              break;
+            }
+            const canPrune = worktreeHealthSummary.stale > 0 || worktreeHealthSummary.prunable > 0;
+            if (!canPrune) {
+              setInfoFeedback('No stale/prunable worktrees detected.');
+              break;
+            }
+            handlePruneWorktrees();
+            break;
+          }
           // Toggle pause/resume
           // When running/executing/selecting, pause will transition to pausing, then to paused
           // When pausing, pressing p again will cancel the pause request
@@ -1981,12 +1993,8 @@ export function RunApp({
               // Set status to 'pausing' immediately for feedback
               setRemoteStatus('pausing');
               instanceManager.sendRemoteCommand('pause');
-            } else if (displayStatus === 'pausing') {
-              // Cancel pause request - set back to running
-              setRemoteStatus('running');
-              instanceManager.sendRemoteCommand('resume');
-            } else if (displayStatus === 'paused') {
-              // Resume from paused - set to selecting
+            } else if (displayStatus === 'pausing' || displayStatus === 'paused') {
+              // Resume from pausing/paused - set to selecting
               setRemoteStatus('selecting');
               instanceManager.sendRemoteCommand('resume');
             }
@@ -2016,9 +2024,31 @@ export function RunApp({
           break;
 
         case 'x':
-          // Manual prune - only when dashboard is visible
-          if (showDashboard) {
-            handlePruneWorktrees();
+          // Delete remote (remote tabs only)
+          if (!isViewingRemote) {
+            setInfoFeedback('Tip: Use Shift+P to prune worktrees.');
+            break;
+          }
+          if (instanceTabs && selectedTabIndex > 0) {
+            const tab = instanceTabs[selectedTabIndex];
+            if (tab?.alias) {
+              // Load remote data for delete confirmation
+              getRemote(tab.alias).then((config) => {
+                if (config) {
+                  setEditingRemote({
+                    alias: tab.alias!,
+                    host: config.host,
+                    port: config.port,
+                    token: config.token,
+                  });
+                  setRemoteManagementMode('delete');
+                  setShowRemoteManagement(true);
+                }
+              }).catch((err) => {
+                console.error('Failed to load remote config for deletion:', err);
+                setInfoFeedback('Failed to load remote configuration');
+              });
+            }
           }
           break;
 
@@ -2068,14 +2098,6 @@ export function RunApp({
             instanceManager.sendRemoteCommand('refreshTasks');
           } else {
             engine.refreshTasks();
-          }
-          break;
-
-        case 'p':
-          // Handle lowercase 'p' for prune worktrees (uppercase is handled separately)
-          // Note: 'P' (uppercase) would have key.sequence === 'P', but we use 'p' for case-insensitive
-          if (key.sequence === 'p' && !isViewingRemote && (worktreeHealthSummary.stale > 0 || worktreeHealthSummary.prunable > 0)) {
-            handlePruneWorktrees();
           }
           break;
 
@@ -2353,33 +2375,9 @@ export function RunApp({
           }
           break;
 
-        // Remote management: 'x' to delete current remote (only when viewing a remote tab)
-        case 'x':
-          if (isViewingRemote && instanceTabs && selectedTabIndex > 0) {
-            const tab = instanceTabs[selectedTabIndex];
-            if (tab?.alias) {
-              // Load remote data for delete confirmation
-              getRemote(tab.alias).then((config) => {
-                if (config) {
-                  setEditingRemote({
-                    alias: tab.alias!,
-                    host: config.host,
-                    port: config.port,
-                    token: config.token,
-                  });
-                  setRemoteManagementMode('delete');
-                  setShowRemoteManagement(true);
-                }
-              }).catch((err) => {
-                console.error('Failed to load remote config for deletion:', err);
-                setInfoFeedback('Failed to load remote configuration');
-              });
-            }
-          }
-          break;
       }
     },
-    [displayedTasks, selectedIndex, status, engine, onQuit, viewMode, iterations, iterationSelectedIndex, iterationHistoryLength, onIterationDrillDown, showInterruptDialog, onInterruptConfirm, onInterruptCancel, showHelp, showQuitDialog, showEpicLoader, showRemoteManagement, onStart, storedConfig, onSaveSettings, onLoadEpics, subagentDetailLevel, onSubagentPanelVisibilityChange, currentIteration, maxIterations, renderer, detailsViewMode, subagentPanelVisible, focusedPane, navigateSubagentTree, instanceTabs, selectedTabIndex, onSelectTab, isViewingRemote, displayStatus, instanceManager]
+    [displayedTasks, selectedIndex, status, engine, onQuit, viewMode, iterations, iterationSelectedIndex, iterationHistoryLength, onIterationDrillDown, showInterruptDialog, onInterruptConfirm, onInterruptCancel, showHelp, showQuitDialog, showEpicLoader, showRemoteManagement, onStart, storedConfig, onSaveSettings, onLoadEpics, handlePruneWorktrees, worktreeHealthSummary, subagentDetailLevel, onSubagentPanelVisibilityChange, currentIteration, maxIterations, renderer, detailsViewMode, subagentPanelVisible, focusedPane, navigateSubagentTree, instanceTabs, selectedTabIndex, onSelectTab, isViewingRemote, displayStatus, instanceManager]
   );
 
   useKeyboard(handleKeyboard);
@@ -2398,12 +2396,13 @@ export function RunApp({
   const maxTopHeight = Math.max(minTopHeight, contentHeight - minBottomHeight);
   const topSectionHeight = Math.max(minTopHeight, Math.min(preferredTopHeight, maxTopHeight));
 
-  // Calculate completed tasks (counting both 'done' and 'closed' as completed)
-  // 'done' = completed in current session, 'closed' = historically completed
-  const completedTasks = tasks.filter(
-    (t) => t.status === 'done' || t.status === 'closed'
-  ).length;
-  const totalTasks = tasks.length;
+  const displayElapsedTime = useMemo(() => {
+    if (!isViewingRemote) return elapsedTime;
+    if (!remoteCurrentTaskId) return 0;
+    const cached = remoteIterationCache.get(remoteCurrentTaskId);
+    if (!cached?.durationMs) return 0;
+    return Math.floor(cached.durationMs / 1000);
+  }, [elapsedTime, isViewingRemote, remoteCurrentTaskId, remoteIterationCache]);
 
   // Get selected task from filtered list (used for display in tasks view)
   const selectedTask = allTasksForCards[selectedIndex] ?? null;
@@ -2946,11 +2945,11 @@ export function RunApp({
       {/* Header - compact design showing essential info + agent/tracker + fallback status */}
       <Header
         status={displayStatus}
-        elapsedTime={elapsedTime}
+        elapsedTime={displayElapsedTime}
         currentTaskId={displayCurrentTaskId}
         currentTaskTitle={displayCurrentTaskTitle}
-        completedTasks={completedTasks}
-        totalTasks={totalTasks}
+        completedTasks={headerCounts.completed}
+        totalTasks={headerCounts.total}
         agentName={displayAgentName}
         trackerName={displayTrackerName}
         activeAgentState={isViewingRemote ? remoteActiveAgent : activeAgentState}
@@ -3177,42 +3176,59 @@ export function RunApp({
               />
             </box>
 
-            {/* Bottom half: RightPanel (log viewer) */}
             <box
               style={{
                 flexGrow: 1,
+                flexDirection: !isCompact && subagentPanelVisible ? 'row' : 'column',
               }}
             >
-              <RightPanel
-                selectedTask={selectedTask}
-                currentIteration={selectedTaskIteration.iteration}
-                iterationOutput={displayIterationOutput}
-                iterationSegments={selectedTaskIteration.segments}
-                cliOutput={displayCliOutput}
-                viewMode={detailsViewMode}
-                iterationTiming={selectedTaskIteration.timing}
-                agentName={displayAgentInfo.agent}
-                currentModel={displayAgentInfo.model}
-                isViewingRemote={isViewingRemote}
-                remoteConnectionStatus={instanceTabs?.[selectedTabIndex]?.status}
-                remoteAlias={instanceTabs?.[selectedTabIndex]?.alias}
-              />
-            </box>
+              <box style={{ flexGrow: 1 }}>
+                <RightPanel
+                  selectedTask={selectedTask}
+                  currentIteration={selectedTaskIteration.iteration}
+                  iterationOutput={displayIterationOutput}
+                  iterationSegments={selectedTaskIteration.segments}
+                  cliOutput={displayCliOutput}
+                  viewMode={detailsViewMode}
+                  iterationTiming={selectedTaskIteration.timing}
+                  agentName={displayAgentInfo.agent}
+                  currentModel={displayAgentInfo.model}
+                  isViewingRemote={isViewingRemote}
+                  remoteConnectionStatus={instanceTabs?.[selectedTabIndex]?.status}
+                  remoteAlias={instanceTabs?.[selectedTabIndex]?.alias}
+                />
+              </box>
 
-            {/* Subagent Tree Panel - shown on right side when toggled with 'T' key */}
-            {subagentPanelVisible && (
-              <SubagentTreePanel
-                tree={isViewingRemote ? remoteSubagentTree : subagentTree}
-                activeSubagentId={focusedSubagentId}
-                width={45}
-                currentTaskId={displayCurrentTaskId}
-                currentTaskTitle={displayCurrentTaskTitle}
-                currentTaskStatus={displayStatus === 'executing' ? 'running' : displayStatus === 'complete' ? 'completed' : displayStatus === 'error' ? 'error' : 'idle'}
-                selectedId={selectedSubagentId}
-                onSelect={setSelectedSubagentId}
-                isFocused={focusedPane === 'subagentTree'}
-              />
-            )}
+              {subagentPanelVisible && !isCompact && (
+                <SubagentTreePanel
+                  tree={isViewingRemote ? remoteSubagentTree : subagentTree}
+                  activeSubagentId={focusedSubagentId}
+                  width={45}
+                  currentTaskId={displayCurrentTaskId}
+                  currentTaskTitle={displayCurrentTaskTitle}
+                  currentTaskStatus={displayStatus === 'executing' ? 'running' : displayStatus === 'complete' ? 'completed' : displayStatus === 'error' ? 'error' : 'idle'}
+                  selectedId={selectedSubagentId}
+                  onSelect={setSelectedSubagentId}
+                  isFocused={focusedPane === 'subagentTree'}
+                />
+              )}
+
+              {subagentPanelVisible && isCompact && (
+                <box style={{ marginTop: 1 }}>
+                  <SubagentTreePanel
+                    tree={isViewingRemote ? remoteSubagentTree : subagentTree}
+                    activeSubagentId={focusedSubagentId}
+                    width={Math.max(30, Math.min(45, width - 4))}
+                    currentTaskId={displayCurrentTaskId}
+                    currentTaskTitle={displayCurrentTaskTitle}
+                    currentTaskStatus={displayStatus === 'executing' ? 'running' : displayStatus === 'complete' ? 'completed' : displayStatus === 'error' ? 'error' : 'idle'}
+                    selectedId={selectedSubagentId}
+                    onSelect={setSelectedSubagentId}
+                    isFocused={focusedPane === 'subagentTree'}
+                  />
+                </box>
+              )}
+            </box>
           </>
         ) : (
           <>
