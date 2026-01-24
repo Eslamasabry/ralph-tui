@@ -127,6 +127,30 @@ export const DEFAULT_SANDBOX_CONFIG: Required<
 };
 
 /**
+ * Backup configuration for worktree snapshots.
+ */
+export interface BackupConfig {
+  /** Whether periodic snapshots are enabled (default: true) */
+  enabled?: boolean;
+  /** How often to create snapshots in minutes (default: 5) */
+  intervalMinutes?: number;
+  /** Maximum number of snapshots to keep (default: 10) */
+  maxSnapshots?: number;
+  /** Directory for backup files (default: .ralph-tui/backups) */
+  dir?: string;
+}
+
+/**
+ * Default backup configuration.
+ */
+export const DEFAULT_BACKUP_CONFIG: Required<BackupConfig> = {
+  enabled: true,
+  intervalMinutes: 5,
+  maxSnapshots: 10,
+  dir: '.ralph-tui/backups',
+};
+
+/**
  * Runtime options that can be passed via CLI flags
  */
 export interface RuntimeOptions {
@@ -282,6 +306,9 @@ export interface StoredConfig {
 
   /** Timeout in minutes after which a lock is considered stale (default: 30) */
   staleLockTimeoutMinutes?: number;
+
+  /** Backup configuration for worktree snapshots */
+  backup?: BackupConfig;
 }
 
 /**
@@ -331,6 +358,9 @@ export interface RalphConfig {
 
   /** Timeout in minutes after which a lock is considered stale (default: 30) */
   staleLockTimeoutMinutes?: number;
+
+  /** Backup configuration for worktree snapshots */
+  backup?: BackupConfig;
 
   /** Custom prompt template path (resolved) */
   promptTemplate?: string;

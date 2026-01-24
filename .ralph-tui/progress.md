@@ -199,19 +199,34 @@ sessionID":"ses_410f4ecc4ffeY18FRfbWhok2V9","part":{"id":"prt_bef0c8953001pS2NCg
 
 ---
 
-## 2026-01-24 - US-008
-- **What was implemented**: Added worktree prunable count to DashboardBanner UI. The banner was missing the `worktreePrunable` prop and display. Added the prop to `DashboardBannerProps`, updated the component to accept and display it, and updated `RunApp.tsx` to pass the prunable count from `worktreeHealthSummary`.
-- **Files changed**: `src/tui/components/DashboardBanner.tsx`, `src/tui/components/RunApp.tsx`
+## 2026-01-24 - US-009
+- **What was implemented**: Created snapshot backup system for worktree recovery. Implemented periodic snapshots of worktree metadata with rotation, restore workflow, and comprehensive logging.
+- **Files changed**: `src/snapshot/index.ts`, `src/snapshot/index.test.ts`, `src/config/schema.ts`, `src/config/types.ts`, `src/config/index.ts`
 - **Acceptance Criteria Verified:**
-  - ✅ Dashboard banner now shows active, locked, stale, and prunable counts
-  - ✅ Progress dashboard already shows prune status and health summary (stale/prunable counts)
-  - ✅ Activity log uses consistent merge failure formatting (verified in ActivityLog.tsx)
+  - ✅ Periodic snapshot of worktree metadata is created and rotated (`createSnapshot`, `rotateSnapshots`)
+  - ✅ Restore workflow can recreate a worktree from snapshot (`restoreFromSnapshot`)
+  - ✅ Backup operations are logged (`[backup] Created/Rotated/Deleted/Restored...`)
   - ✅ `bun run lint` - 0 errors (5 pre-existing warnings)
   - ✅ `bun run typecheck` - 0 errors
   - ✅ `bun run build` - Success
 - **Learnings:**
-  - **Gap filled**: DashboardBanner was missing `worktreePrunable` display (had Active, Locked, Stale but not Prunable)
-  - Worktree health summary from `WorktreeManager.getWorktreeHealthSummary()` already includes all counts: total, active, locked, stale, prunable
-  - ProgressDashboard already uses `worktreeHealth` prop with stale/prunable counts correctly
-  - ActivityLog.tsx merge failure formatting is already consistent: uses `formatMergeFailedDescription` with `| ` separators for task ID, commit, reason, and conflict files
-  - RunApp.tsx already maintains `worktreeHealthSummary` state with all counts, just wasn't passing `prunable` to DashboardBanner
+  - **Snapshot format**: Created JSON snapshots with header `ralph-snapshot-v1` for validation, containing worktree metadata, lock state, and timestamps
+  - **Date parsing**: ISO timestamps in filenames use `-` for `:`, requiring special parsing: `YYYY-MM-DDTHH-MM-SS-mmmZ` → `YYYY-MM-DDTHH:MM:SS.mmmZ`
+  - **Rotation behavior**: Rotation happens automatically after each snapshot creation when count exceeds `maxSnapshots`
+  - **Config integration**: Backup configuration added to schema with defaults: enabled=true, interval=5min, maxSnapshots=10, dir=.ralph-tui/backups
+  - **Snapshot contents**: Each snapshot includes version, createdAt, repoRoot, branch, commit, worktrees array, and locks array
+- **Patterns discovered:**
+  - Snapshot filename pattern: `snapshot-YYYY-MM-DDTHH-MM-SS-mmmZ.json`
+  - Backup logging format: `[backup] <action>: <path> (<count> worktrees, <count> locks)`
+  - Config merging pattern: deep merge for nested objects like `backup`
+---
+## ✓ Iteration 8 - US-008: Worktree health UI alignment
+*2026-01-24T08:17:18.765Z (288s)*
+
+**Status:** Completed
+
+**Notes:**
+sessionID":"ses_410f02601ffe2ebuUdMWNqkDYj","part":{"id":"prt_bef1429e1001e5NPbwdlB1YhC0","sessionID":"ses_410f02601ffe2ebuUdMWNqkDYj","messageID":"msg_bef141245001MhCfz5MMLMUcWU","type":"step-start","snapshot":"a6711cbe9bd390f4e3bcfb5788092f33a18ad168"}}
+{"type":"text","timestamp":1769242638647,"sessionID":"ses_410f02601ffe2ebuUdMWNqkDYj","part":{"id":"prt_bef1429e4001faovoNi6Wxs4cd","sessionID":"ses_410f02601ffe2ebuUdMWNqkDYj","messageID":"msg_bef141245001MhCfz5MMLMUcWU","type":"text","text":"
+
+---

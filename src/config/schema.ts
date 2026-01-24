@@ -204,6 +204,22 @@ export const StoredConfigSchema = z
 
     /** Timeout in minutes after which a lock is considered stale (default: 30) */
     staleLockTimeoutMinutes: z.number().int().min(1).max(1440).optional(),
+
+    /**
+     * Backup configuration for worktree snapshots
+     */
+    backup: z
+      .object({
+        /** Whether periodic snapshots are enabled (default: true) */
+        enabled: z.boolean().optional(),
+        /** How often to create snapshots in minutes (default: 5) */
+        intervalMinutes: z.number().int().min(1).max(1440).optional(),
+        /** Maximum number of snapshots to keep (default: 10) */
+        maxSnapshots: z.number().int().min(1).max(100).optional(),
+        /** Directory for backup files (default: .ralph-tui/backups) */
+        dir: z.string().optional(),
+      })
+      .optional(),
   })
   .strict();
 
