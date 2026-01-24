@@ -78,16 +78,21 @@ export class WorktreeManager {
           : ['-C', this.repoRoot, 'worktree', 'add', '-b', branchName, worktreePath, baseRef];
         let result = await this.execGit(args);
 
-        // Retry with force flags for stale state (e.g., locked worktree references)
+        // Deterministic retry sequence for handling transient worktree add failures
+        // Step 1: Regular add (already attempted above)
+        // Step 2: Cleanup stale state then force add
         if (result.exitCode !== 0) {
           await this.cleanupWorktree(workerId);
           args = ['-C', this.repoRoot, 'worktree', 'add', '-f', '-b', branchName, worktreePath, baseRef];
           result = await this.execGit(args);
+
+          // Step 3: Force cleanup stale worktree references then force add again
           if (result.exitCode !== 0) {
-            // Final recovery: force remove any stale worktree and retry
             await this.forceCleanupStaleWorktree(worktreePath);
             args = ['-C', this.repoRoot, 'worktree', 'add', '-f', '-b', branchName, worktreePath, baseRef];
             result = await this.execGit(args);
+
+            // Final failure - all retry attempts exhausted
             if (result.exitCode !== 0) {
               throw new Error(`git worktree add failed after retries: ${result.stderr}`);
             }

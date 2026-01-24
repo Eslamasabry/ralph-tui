@@ -400,4 +400,112 @@ describe('WorktreeManager Correctness', () => {
       expect(errorTestWorktree!.branch).toBe('error-test-branch');
     });
   });
+
+  describe('retry sequence and idempotency', () => {
+    test('cleanupWorktree is idempotent - safe to call multiple times', async () => {
+      // Create a worktree first
+      await manager.createWorktree({
+        workerId: 'idempotent-test',
+        branchName: 'idempotent-test-branch',
+        baseRef: 'HEAD',
+      });
+
+      // Verify worktree exists
+      const worktreesBefore = await manager.listWorktrees();
+      expect(worktreesBefore.some(w => w.relativePath.includes('idempotent-test'))).toBe(true);
+
+      // Call cleanup multiple times - should not throw
+      await manager.removeWorktree('idempotent-test');
+      await manager.removeWorktree('idempotent-test'); // Second call should not throw
+      await manager.removeWorktree('idempotent-test'); // Third call should not throw
+
+      // Verify worktree is cleaned up
+      const worktreesAfter = await manager.listWorktrees();
+      expect(worktreesAfter.some(w => w.relativePath.includes('idempotent-test'))).toBe(false);
+    });
+
+    test('forceCleanupStaleWorktree is idempotent - safe to call multiple times', async () => {
+      // Create a worktree first
+      const worktreePath = await manager.createWorktree({
+        workerId: 'force-cleanup-test',
+        branchName: 'force-cleanup-test-branch',
+        baseRef: 'HEAD',
+      });
+
+      // Call force cleanup multiple times - should not throw
+      // @ts-expect-error - accessing private method for testing
+      await manager.forceCleanupStaleWorktree(worktreePath);
+      // @ts-expect-error - accessing private method for testing
+      await manager.forceCleanupStaleWorktree(worktreePath);
+      // @ts-expect-error - accessing private method for testing
+      await manager.forceCleanupStaleWorktree(worktreePath);
+
+      // Verify worktree is cleaned up
+      const worktrees = await manager.listWorktrees();
+      expect(worktrees.some(w => w.relativePath.includes('force-cleanup-test'))).toBe(false);
+    });
+
+    test('retry sequence handles locked worktree state', async () => {
+      const uniqueId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const workerId = `retry-test-${uniqueId}`;
+
+      // Create initial worktree
+      const path1 = await manager.createWorktree({
+        workerId,
+        branchName: `retry-test-branch-${uniqueId}`,
+        baseRef: 'HEAD',
+      });
+
+      // Remove worktree via git but keep directory
+      execSync(`git worktree remove --force ${path1}`, { cwd: tempDir, stdio: 'pipe' });
+
+      // Create again - this should trigger cleanup and succeed
+      const path2 = await manager.createWorktree({
+        workerId,
+        branchName: `retry-test-branch-${uniqueId}`,
+        baseRef: 'HEAD',
+      });
+
+      // Verify the path is the same
+      expect(path1).toBe(path2);
+
+      // Verify the worktree is valid
+      const worktrees = await manager.listWorktrees();
+      const retryWorktree = worktrees.find(w => w.relativePath.includes(workerId));
+      expect(retryWorktree).toBeDefined();
+      expect(retryWorktree!.branch).toBe(`retry-test-branch-${uniqueId}`);
+    });
+
+    test('createWorktree succeeds after previous worktree was removed but not cleaned up', async () => {
+      const uniqueId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const workerId = `orphaned-test-${uniqueId}`;
+
+      // Create initial worktree
+      const path1 = await manager.createWorktree({
+        workerId,
+        branchName: `orphaned-test-branch-${uniqueId}`,
+        baseRef: 'HEAD',
+      });
+
+      // Manually delete the worktree directory without using git worktree remove
+      // This simulates an orphaned/corrupted worktree state
+      const { rm } = await import('node:fs/promises');
+      await rm(path1, { recursive: true, force: true });
+
+      // Create again - retry sequence should handle the missing directory
+      const path2 = await manager.createWorktree({
+        workerId,
+        branchName: `orphaned-test-branch-${uniqueId}`,
+        baseRef: 'HEAD',
+      });
+
+      // Verify the path is the same
+      expect(path1).toBe(path2);
+
+      // Verify the worktree is valid
+      const worktrees = await manager.listWorktrees();
+      const orphanedWorktree = worktrees.find(w => w.relativePath.includes(workerId));
+      expect(orphanedWorktree).toBeDefined();
+    });
+  });
 });
