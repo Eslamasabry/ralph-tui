@@ -308,7 +308,8 @@ export class WorktreeManager {
    */
   async getWorktreeHealthSummary(): Promise<WorktreeHealthSummary> {
     const worktrees = await this.listWorktrees();
-    const relevant = worktrees.filter((wt) => wt.relativePath !== '.');
+    // Exclude main repo (relativePath is '.' or '' for the repo root itself)
+    const relevant = worktrees.filter((wt) => wt.relativePath !== '.' && wt.relativePath !== '');
 
     const summary: WorktreeHealthSummary = {
       total: relevant.length,
