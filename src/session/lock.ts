@@ -272,9 +272,13 @@ export async function checkAndCleanStaleLock(
     result.cleanedPid = lockStatus.lock.pid;
     result.staleLock = lockStatus.lock;
 
+    // Calculate lock age for detailed logging
+    const acquiredAt = new Date(lockStatus.lock.acquiredAt);
+    const now = new Date();
+    const ageMinutes = Math.round((now.getTime() - acquiredAt.getTime()) / (1000 * 60));
+
     console.log(
-      `[session/lock] Cleaned stale lock (PID: ${lockStatus.lock.pid}, ` +
-        `processRunning: ${processRunning}, ageStale: ${isStaleByTimestamp})`
+      `[session/lock] Cleaned stale lock (PID: ${lockStatus.lock.pid}, age: ${ageMinutes} minutes, acquiredAt: ${lockStatus.lock.acquiredAt})`
     );
   }
 
