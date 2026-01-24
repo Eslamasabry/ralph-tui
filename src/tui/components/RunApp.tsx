@@ -3160,6 +3160,7 @@ export function RunApp({
                 worktreeActive={worktreeHealthSummary.active}
                 worktreeLocked={worktreeHealthSummary.locked}
                 worktreeStale={worktreeHealthSummary.stale}
+                worktreePrunable={worktreeHealthSummary.prunable}
                 mergesQueued={mergeStats.queued}
                 mergesSucceeded={mergeStats.merged}
                 mergesFailed={mergeStats.failed}

@@ -189,3 +189,29 @@ sessionID":"ses_410f4ecc4ffeY18FRfbWhok2V9","part":{"id":"prt_bef0c8953001pS2NCg
   - ✅ `bun run lint` - 0 errors (5 pre-existing warnings)
   - ✅ `bun run typecheck` - 0 errors
   - ✅ `bun run build` - Success
+## ✓ Iteration 7 - US-007: Merge conflict reliability
+*2026-01-24T08:12:29.398Z (213s)*
+
+**Status:** Completed
+
+**Notes:**
+\n01259|       '2. Understand what changes each version is trying to make',\n01260|       '3. Determine the correct resolution',\n01261|       '4. Remove the conflict markers',\n01262|       '5. Save the resolved file',\n01263|       '',\n01264|       '## After Resolving',\n01265|       '- Run: git add -A',\n01266|       '- Then run: git cherry-pick --continue',\n01267|       '- If cherry-pick already completed, ensure changes are committed.',\n01268|       '',\n01269|       'When done, output:
+
+---
+
+## 2026-01-24 - US-008
+- **What was implemented**: Added worktree prunable count to DashboardBanner UI. The banner was missing the `worktreePrunable` prop and display. Added the prop to `DashboardBannerProps`, updated the component to accept and display it, and updated `RunApp.tsx` to pass the prunable count from `worktreeHealthSummary`.
+- **Files changed**: `src/tui/components/DashboardBanner.tsx`, `src/tui/components/RunApp.tsx`
+- **Acceptance Criteria Verified:**
+  - ✅ Dashboard banner now shows active, locked, stale, and prunable counts
+  - ✅ Progress dashboard already shows prune status and health summary (stale/prunable counts)
+  - ✅ Activity log uses consistent merge failure formatting (verified in ActivityLog.tsx)
+  - ✅ `bun run lint` - 0 errors (5 pre-existing warnings)
+  - ✅ `bun run typecheck` - 0 errors
+  - ✅ `bun run build` - Success
+- **Learnings:**
+  - **Gap filled**: DashboardBanner was missing `worktreePrunable` display (had Active, Locked, Stale but not Prunable)
+  - Worktree health summary from `WorktreeManager.getWorktreeHealthSummary()` already includes all counts: total, active, locked, stale, prunable
+  - ProgressDashboard already uses `worktreeHealth` prop with stale/prunable counts correctly
+  - ActivityLog.tsx merge failure formatting is already consistent: uses `formatMergeFailedDescription` with `| ` separators for task ID, commit, reason, and conflict files
+  - RunApp.tsx already maintains `worktreeHealthSummary` state with all counts, just wasn't passing `prunable` to DashboardBanner
