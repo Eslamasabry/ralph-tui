@@ -61,8 +61,12 @@ export interface WorktreeStatus {
   locked: boolean;
   /** Lock reason if locked */
   lockReason?: string;
+  /** Prunable reason if prunable */
+  prunableReason?: string;
   /** Current health status */
   status: WorktreeHealthStatus;
+  /** Whether the worktree is bare */
+  bare?: boolean;
 }
 
 /**

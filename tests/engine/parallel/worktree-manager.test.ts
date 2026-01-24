@@ -29,7 +29,11 @@ describe('WorktreeManager Performance Benchmarks', () => {
   beforeEach(async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'ralph-worktree-bench-'));
     await initGitRepo(tempDir);
-    manager = new WorktreeManager({ repoRoot: tempDir });
+    manager = new WorktreeManager({
+      repoRoot: tempDir,
+      ephemeralBranchPrefixes: [''],
+      lockOnCreate: false,
+    });
   });
 
   afterEach(async () => {
@@ -209,7 +213,11 @@ describe('WorktreeManager Correctness', () => {
   beforeEach(async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'ralph-worktree-correct-'));
     await initGitRepo(tempDir);
-    manager = new WorktreeManager({ repoRoot: tempDir });
+    manager = new WorktreeManager({
+      repoRoot: tempDir,
+      ephemeralBranchPrefixes: [''],
+      lockOnCreate: false,
+    });
   });
 
   afterEach(async () => {
@@ -517,7 +525,11 @@ describe('WorktreeManager - listWorktrees and health summary', () => {
   beforeEach(async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'ralph-worktree-list-'));
     await initGitRepo(tempDir);
-    manager = new WorktreeManager({ repoRoot: tempDir });
+    manager = new WorktreeManager({
+      repoRoot: tempDir,
+      ephemeralBranchPrefixes: [''],
+      lockOnCreate: false,
+    });
   });
 
   afterEach(async () => {

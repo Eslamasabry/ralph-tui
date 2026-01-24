@@ -199,28 +199,24 @@ sessionID":"ses_410f4ecc4ffeY18FRfbWhok2V9","part":{"id":"prt_bef0c8953001pS2NCg
 
 ---
 
-## 2026-01-24 - US-009
-- **What was implemented**: Created snapshot backup system for worktree recovery. Implemented periodic snapshots of worktree metadata with rotation, restore workflow, and comprehensive logging.
-- **Files changed**: `src/snapshot/index.ts`, `src/snapshot/index.test.ts`, `src/config/schema.ts`, `src/config/types.ts`, `src/config/index.ts`
+## 2026-01-24 - US-010
+- **What was implemented**: Created comprehensive runbook documentation for recovery operations covering stale lock cleanup, prune, and restore from snapshot.
+- **Files changed**: `docs/runbook.md` (new file, 426 lines)
 - **Acceptance Criteria Verified:**
-  - ✅ Periodic snapshot of worktree metadata is created and rotated (`createSnapshot`, `rotateSnapshots`)
-  - ✅ Restore workflow can recreate a worktree from snapshot (`restoreFromSnapshot`)
-  - ✅ Backup operations are logged (`[backup] Created/Rotated/Deleted/Restored...`)
+  - ✅ Runbook documents stale lock cleanup, prune, and restore
+  - ✅ Recovery commands are explicit and documented
+  - ✅ Documentation references relevant config options
   - ✅ `bun run lint` - 0 errors (5 pre-existing warnings)
   - ✅ `bun run typecheck` - 0 errors
   - ✅ `bun run build` - Success
 - **Learnings:**
-  - **Snapshot format**: Created JSON snapshots with header `ralph-snapshot-v1` for validation, containing worktree metadata, lock state, and timestamps
-  - **Date parsing**: ISO timestamps in filenames use `-` for `:`, requiring special parsing: `YYYY-MM-DDTHH-MM-SS-mmmZ` → `YYYY-MM-DDTHH:MM:SS.mmmZ`
-  - **Rotation behavior**: Rotation happens automatically after each snapshot creation when count exceeds `maxSnapshots`
-  - **Config integration**: Backup configuration added to schema with defaults: enabled=true, interval=5min, maxSnapshots=10, dir=.ralph-tui/backups
-  - **Snapshot contents**: Each snapshot includes version, createdAt, repoRoot, branch, commit, worktrees array, and locks array
-- **Patterns discovered:**
-  - Snapshot filename pattern: `snapshot-YYYY-MM-DDTHH-MM-SS-mmmZ.json`
-  - Backup logging format: `[backup] <action>: <path> (<count> worktrees, <count> locks)`
-  - Config merging pattern: deep merge for nested objects like `backup`
----
-## ✓ Iteration 8 - US-008: Worktree health UI alignment
+  - **Lock file location**: `.ralph-tui/ralph.lock` with JSON format containing pid, sessionId, acquiredAt, cwd, hostname
+  - **Stale detection**: Dual mechanism - process existence check (`process.kill(pid, 0)`) AND timestamp-based (default 30 min timeout)
+  - **Cleanup mechanisms**: 3 methods - interactive prompt, non-interactive auto-clean, manual lock file removal
+  - **Prune types**: `git worktree prune` removes git references only (not directories); separate from worktree cleanup which deletes directories
+  - **Snapshot format**: JSON with header `ralph-snapshot-v1`, contains worktrees array and locks array with metadata
+  - **Config precedence**: CLI > project config > global config > defaults
+  - **Lock file corruption handling**: Backup corrupted file, remove it, then restart Ralph normally
 *2026-01-24T08:17:18.765Z (288s)*
 
 **Status:** Completed
@@ -237,5 +233,15 @@ sessionID":"ses_410f02601ffe2ebuUdMWNqkDYj","part":{"id":"prt_bef1429e1001e5NPbw
 
 **Notes:**
 ig` type and `DEFAULT_BACKUP_CONFIG`\n- `src/config/index.ts` - Added backup config merging and export\n- `.ralph-tui/progress.md` - Documented learnings\n\n**Acceptance Criteria Verified:**\n- ✅ Periodic snapshot of worktree metadata is created and rotated\n- ✅ Restore workflow can recreate a worktree from snapshot\n- ✅ Backup operations are logged with `[backup]` prefix\n- ✅ `bun run lint` - 0 errors (5 pre-existing warnings)\n- ✅ `bun run typecheck` - 0 errors\n- ✅ `bun run build` - Success\n
+
+---
+## ✓ Iteration 10 - US-010: Documentation and runbook
+*2026-01-24T08:36:31.583Z (190s)*
+
+**Status:** Completed
+
+**Notes:**
+sessionID":"ses_410dd0dafffez4l52a0j5yZYXt","part":{"id":"prt_bef25c292001H0H0lvxYFbRmr8","sessionID":"ses_410dd0dafffez4l52a0j5yZYXt","messageID":"msg_bef25ac76001Crl2AHRIjAl8J5","type":"step-start","snapshot":"e5da9f35cd5963cba2d4f16a796de25892135254"}}
+{"type":"text","timestamp":1769243791503,"sessionID":"ses_410dd0dafffez4l52a0j5yZYXt","part":{"id":"prt_bef25c297001FtO4ldh8Jj0Ty2","sessionID":"ses_410dd0dafffez4l52a0j5yZYXt","messageID":"msg_bef25ac76001Crl2AHRIjAl8J5","type":"text","text":"
 
 ---
