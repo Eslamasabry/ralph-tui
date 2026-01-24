@@ -1053,6 +1053,8 @@ export class ParallelCoordinator {
       lockReason: 'merge resolution',
     });
 
+    let conflictFiles: string[] = [];
+
     try {
       const cherryResult = await this.execGitIn(worktreePath, ['cherry-pick', entry.commit]);
       if (cherryResult.exitCode === 0) {
@@ -1061,7 +1063,7 @@ export class ParallelCoordinator {
       }
 
       const conflicts = await this.execGitIn(worktreePath, ['diff', '--name-only', '--diff-filter=U']);
-      const conflictFiles = conflicts.stdout.split('\n').map((line) => line.trim()).filter(Boolean);
+      conflictFiles = conflicts.stdout.split('\n').map((line) => line.trim()).filter(Boolean);
       
       // Attempt programmatic conflict resolution first
       const programmaticResolved = await this.attemptProgrammaticConflictResolution(worktreePath, conflictFiles);
@@ -1105,7 +1107,7 @@ export class ParallelCoordinator {
       const headCommit = await this.execGitIn(worktreePath, ['rev-parse', 'HEAD']);
       return { success: true, commit: headCommit.stdout.trim(), conflictFiles };
     } catch (error) {
-      return { success: false, reason: error instanceof Error ? error.message : 'Merge resolution failed', conflictFiles: [] };
+      return { success: false, reason: error instanceof Error ? error.message : 'Merge resolution failed', conflictFiles };
     } finally {
       await this.worktreeManager.removeWorktree(mergeWorkerId).catch((err) => {
         // Log worktree cleanup errors - orphaned worktrees can accumulate
