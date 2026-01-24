@@ -97,7 +97,26 @@ export class WorktreeManager {
         // Validate the worktree is on the correct branch and commit
         const validation = await this.validateWorktree(worktreePath, branchName, expectedCommit);
         if (!validation.valid) {
-          throw new Error(`Worktree validation failed: ${validation.error ?? 'Unknown validation error'}`);
+          // Log detailed failure information for actionable debugging
+          console.error(`[worktree] Validation failed for ${workerId}:`);
+          console.error(`  Expected branch: ${branchName}`);
+          console.error(`  Expected commit: ${expectedCommit.slice(0, 7)}`);
+          if (validation.currentBranch) {
+            console.error(`  Actual branch: ${validation.currentBranch}`);
+          }
+          if (validation.currentCommit) {
+            console.error(`  Actual commit: ${validation.currentCommit.slice(0, 7)}`);
+          }
+          console.error(`  Error: ${validation.error}`);
+
+          // Clean up invalid worktree before throwing
+          await this.forceCleanupStaleWorktree(worktreePath);
+
+          throw new Error(
+            `Worktree validation failed for ${workerId}: ${validation.error}. ` +
+            `Expected branch '${branchName}' at commit '${expectedCommit.slice(0, 7)}'. ` +
+            `Worktree has been cleaned up.`
+          );
         }
 
         if (lockReason) {

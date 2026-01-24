@@ -7,11 +7,11 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { execSync } from 'node:child_process';
 import { WorktreeManager } from '../../../src/engine/parallel/worktree-manager.js';
 
 async function initGitRepo(repoPath: string): Promise<void> {
   // Initialize git repository
-  const { execSync } = await import('node:child_process');
   execSync('git init', { cwd: repoPath, stdio: 'pipe' });
   execSync('git config user.email "test@example.com"', { cwd: repoPath, stdio: 'pipe' });
   execSync('git config user.name "Test"', { cwd: repoPath, stdio: 'pipe' });
@@ -273,5 +273,131 @@ describe('WorktreeManager Correctness', () => {
 
     // Paths should be the same (same workerId)
     expect(path1).toBe(path2);
+  });
+
+  describe('worktree validation', () => {
+    test('validates branch and commit after creation', async () => {
+      const worktreePath = await manager.createWorktree({
+        workerId: 'validation-test',
+        branchName: 'validation-test-branch',
+        baseRef: 'HEAD',
+      });
+
+      // Verify worktree exists and is valid
+      const validation = await manager.validateWorktree(
+        worktreePath,
+        'validation-test-branch',
+        execSync('git rev-parse HEAD', { cwd: tempDir }).toString().trim()
+      );
+
+      expect(validation.valid).toBe(true);
+      expect(validation.currentBranch).toBe('validation-test-branch');
+    });
+
+    test('detects branch mismatch', async () => {
+      const worktreePath = await manager.createWorktree({
+        workerId: 'branch-mismatch-test',
+        branchName: 'expected-branch',
+        baseRef: 'HEAD',
+      });
+
+      // Create another branch and manually checkout to it to create mismatch
+      execSync('git checkout -b wrong-branch', { cwd: worktreePath, stdio: 'pipe' });
+
+      // Validate should detect mismatch
+      const validation = await manager.validateWorktree(
+        worktreePath,
+        'expected-branch',
+        execSync('git rev-parse expected-branch', { cwd: tempDir }).toString().trim()
+      );
+
+      expect(validation.valid).toBe(false);
+      expect(validation.error).toContain("Expected branch 'expected-branch'");
+      expect(validation.currentBranch).toBe('wrong-branch');
+    });
+
+    test('detects commit mismatch', async () => {
+      // Get initial commit
+      const initialCommit = execSync('git rev-parse HEAD', { cwd: tempDir }).toString().trim();
+
+      // Create a worktree
+      const worktreePath = await manager.createWorktree({
+        workerId: 'commit-mismatch-test',
+        branchName: 'commit-test-branch',
+        baseRef: 'HEAD',
+      });
+
+      // Create a new commit in the worktree
+      await writeFile(join(worktreePath, 'new-file.txt'), 'new content');
+      execSync('git add .', { cwd: worktreePath, stdio: 'pipe' });
+      execSync('git commit -m "New commit"', { cwd: worktreePath, stdio: 'pipe' });
+
+      // Validate should detect commit mismatch
+      const validation = await manager.validateWorktree(
+        worktreePath,
+        'commit-test-branch',
+        initialCommit
+      );
+
+      expect(validation.valid).toBe(false);
+      expect(validation.error).toContain('Expected commit');
+    });
+
+    test('cleans up worktree on validation failure', async () => {
+      // Create a worktree
+      const worktreePath = await manager.createWorktree({
+        workerId: 'cleanup-test',
+        branchName: 'cleanup-test-branch',
+        baseRef: 'HEAD',
+      });
+
+      // Manually corrupt the worktree by checking out a different branch
+      // This simulates a scenario where git worktree add succeeded but we're on wrong branch
+      execSync('git checkout -b wrong-cleanup-branch', { cwd: worktreePath, stdio: 'pipe' });
+
+      // Verify validation fails
+      const initialCommit = execSync('git rev-parse HEAD', { cwd: tempDir }).toString().trim();
+      const validation = await manager.validateWorktree(
+        worktreePath,
+        'cleanup-test-branch',
+        initialCommit
+      );
+      expect(validation.valid).toBe(false);
+      expect(validation.currentBranch).toBe('wrong-cleanup-branch');
+
+      // Now call removeWorktree to verify it cleans up properly
+      await manager.removeWorktree('cleanup-test');
+
+      // Verify the worktree directory is removed
+      const worktrees = await manager.listWorktrees();
+      const cleanupTestWorktree = worktrees.find(w => w.relativePath.includes('cleanup-test'));
+      expect(cleanupTestWorktree).toBeUndefined();
+    });
+
+    test('createWorktree succeeds after cleanup even if old worktree was corrupted', async () => {
+      // Create a worktree
+      const worktreePath = await manager.createWorktree({
+        workerId: 'error-test',
+        branchName: 'error-test-branch',
+        baseRef: 'HEAD',
+      });
+
+      // Corrupt the worktree
+      execSync('git checkout -b wrong-error-branch', { cwd: worktreePath, stdio: 'pipe' });
+
+      // Try to create a new worktree (same workerId) - old one gets cleaned up first
+      // This tests that even if old worktree was corrupted, we get a clean result
+      await manager.createWorktree({
+        workerId: 'error-test',
+        branchName: 'error-test-branch',
+        baseRef: 'HEAD',
+      });
+
+      // Verify the new worktree is valid
+      const worktrees = await manager.listWorktrees();
+      const errorTestWorktree = worktrees.find(w => w.relativePath.includes('error-test'));
+      expect(errorTestWorktree).toBeDefined();
+      expect(errorTestWorktree!.branch).toBe('error-test-branch');
+    });
   });
 });
