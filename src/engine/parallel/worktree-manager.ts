@@ -19,21 +19,6 @@ export interface WorktreeManagerOptions {
   worktreesDir?: string;
 }
 
-export interface WorktreeInfo {
-  path: string;
-  branch: string;
-  commit: string;
-  isLocked: boolean;
-  lockReason?: string;
-}
-
-export interface WorktreeCounts {
-  total: number;
-  active: number;
-  locked: number;
-  stale: number;
-}
-
 export interface CreateWorktreeOptions {
   workerId: string;
   branchName: string;
@@ -80,72 +65,39 @@ export class WorktreeManager {
     // Clean up all worktrees in parallel first
     await Promise.all(options.map((opt) => this.cleanupWorktree(opt.workerId)));
 
-// OURS:
-    // Get the expected commit before cleanup
-    const expectedCommit = await this.resolveRef(baseRef);
-
-    // Clean any stale worktree state before creating a new one
-    await this.cleanupWorktree(workerId);
-
-    const branchExists = await this.branchExists(branchName);
-    let args = branchExists
-      ? ['-C', this.repoRoot, 'worktree', 'add', worktreePath, branchName]
-      : ['-C', this.repoRoot, 'worktree', 'add', '-b', branchName, worktreePath, baseRef];
-    let result = await this.execGit(args);
-
-    // Retry with force flags for stale state (e.g., locked worktree references)
-    if (result.exitCode !== 0) {
-      await this.cleanupWorktree(workerId);
-      args = ['-C', this.repoRoot, 'worktree', 'add', '-f', '-b', branchName, worktreePath, baseRef];
-      result = await this.execGit(args);
-      if (result.exitCode !== 0) {
-        // Final recovery: force remove any stale worktree and retry
-        await this.forceCleanupStaleWorktree(worktreePath);
-        args = ['-C', this.repoRoot, 'worktree', 'add', '-f', '-b', branchName, worktreePath, baseRef];
-        result = await this.execGit(args);
-        if (result.exitCode !== 0) {
-          throw new Error(`git worktree add failed after retries: ${result.stderr}`);
-        }
-      }
-    }
-
-    // Validate the worktree is on the correct branch and commit
-    const validation = await this.validateWorktree(worktreePath, branchName, expectedCommit);
-    if (!validation.valid) {
-      throw new Error(`Worktree validation failed: ${validation.error ?? 'Unknown validation error'}`);
-    }
-
-    if (lockReason) {
-      await this.lockWorktree(worktreePath, lockReason);
-    }
-// THEIRS:
     // Create all worktrees in parallel
     const results = await Promise.all(
       options.map(async (opt) => {
         const { workerId, branchName, baseRef = 'HEAD', lockReason } = opt;
         const worktreePath = this.getWorktreePath(workerId);
+        const expectedCommit = await this.resolveRef(baseRef);
+        const branchExists = await this.branchExists(branchName);
 
-        // Use -b flag directly - this creates a new branch if it doesn't exist
-        // and works if branch already exists (git will reuse existing branch)
-        const args = [
-          '-C', this.repoRoot,
-          'worktree',
-          'add',
-          '-b', branchName,
-          worktreePath,
-          baseRef,
-        ];
-
+        let args = branchExists
+          ? ['-C', this.repoRoot, 'worktree', 'add', worktreePath, branchName]
+          : ['-C', this.repoRoot, 'worktree', 'add', '-b', branchName, worktreePath, baseRef];
         let result = await this.execGit(args);
 
+        // Retry with force flags for stale state (e.g., locked worktree references)
         if (result.exitCode !== 0) {
-          // Recovery: cleanup stale state and retry
           await this.cleanupWorktree(workerId);
-          const retryArgs = ['-C', this.repoRoot, 'worktree', 'add', '-f', '-f', '-b', branchName, worktreePath, baseRef];
-          result = await this.execGit(retryArgs);
+          args = ['-C', this.repoRoot, 'worktree', 'add', '-f', '-b', branchName, worktreePath, baseRef];
+          result = await this.execGit(args);
           if (result.exitCode !== 0) {
-            throw new Error(`git worktree add failed: ${result.stderr}`);
+            // Final recovery: force remove any stale worktree and retry
+            await this.forceCleanupStaleWorktree(worktreePath);
+            args = ['-C', this.repoRoot, 'worktree', 'add', '-f', '-b', branchName, worktreePath, baseRef];
+            result = await this.execGit(args);
+            if (result.exitCode !== 0) {
+              throw new Error(`git worktree add failed after retries: ${result.stderr}`);
+            }
           }
+        }
+
+        // Validate the worktree is on the correct branch and commit
+        const validation = await this.validateWorktree(worktreePath, branchName, expectedCommit);
+        if (!validation.valid) {
+          throw new Error(`Worktree validation failed: ${validation.error ?? 'Unknown validation error'}`);
         }
 
         if (lockReason) {
@@ -165,7 +117,7 @@ export class WorktreeManager {
     }
 
     return worktreeMap;
-  } (feat: ralph-tui-wmr.7 - Optimize worktree creation < 500ms)
+  }
 
   /**
    * Create a single worktree with optimized operations.
@@ -223,45 +175,31 @@ export class WorktreeManager {
     }
   }
 
-// OURS:
-// OURS:
-<<<<<<< HEAD
-// THEIRS:
   /**
    * List all worktrees with their status information.
    * Parses `git worktree list --porcelain` output to determine health status.
    */
   async listWorktrees(): Promise<WorktreeStatus[]> {
     const { stdout, exitCode } = await this.execGit(['-C', this.repoRoot, 'worktree', 'list', '--porcelain']);
-
-// THEIRS:
-  async listWorktrees(): Promise<WorktreeInfo[]> {
-    const { stdout, exitCode } = await this.execGit(['-C', this.repoRoot, 'worktree', 'list', '--porcelain']); (feat: ralph-tui-wmr.5 - Add worktree health status to dashboard)
     if (exitCode !== 0) {
       return [];
     }
 
-<<<<<<< HEAD
     const worktrees: WorktreeStatus[] = [];
-    const lines = stdout.trim().split('\n').filter(Boolean);
+    const lines = stdout.split('\n');
+    let currentWorktree: (Partial<WorktreeStatus> & { prunable?: boolean }) | null = null;
 
-    // Parse porcelain output format:
-    // worktree <path>
-    // HEAD <commit>
-    // branch <ref>
-    // locked [<reason>]
-
-    let currentWorktree: Partial<WorktreeStatus> | null = null;
-
-    for (const line of lines) {
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line) {
+        continue;
+      }
       const [prefix, ...rest] = line.split(' ');
       const value = rest.join(' ');
 
       switch (prefix) {
         case 'worktree': {
-          // Start of a new worktree entry
           if (currentWorktree) {
-            // Push the previous worktree
             worktrees.push(await this.createWorktreeStatus(currentWorktree));
           }
           currentWorktree = {
@@ -279,7 +217,6 @@ export class WorktreeManager {
         }
         case 'branch': {
           if (currentWorktree) {
-            // Branch ref format: refs/heads/branch-name or just branch-name
             currentWorktree.branch = value.replace(/^refs\/heads\//, '');
           }
           break;
@@ -291,55 +228,40 @@ export class WorktreeManager {
           }
           break;
         }
+        case 'prunable': {
+          if (currentWorktree) {
+            currentWorktree.prunable = true;
+          }
+          break;
+        }
       }
     }
 
-    // Push the last worktree if exists
     if (currentWorktree) {
       worktrees.push(await this.createWorktreeStatus(currentWorktree));
-=======
-    const worktrees: WorktreeInfo[] = [];
-    const lines = stdout.trim().split('\n');
-    let currentWorktree: Partial<WorktreeInfo> = {};
-
-    for (const line of lines) {
-      if (line.startsWith('worktree ')) {
-        if (currentWorktree.path) {
-          worktrees.push(currentWorktree as WorktreeInfo);
-        }
-        currentWorktree = { path: line.substring('worktree '.length) };
-      } else if (line.startsWith('HEAD ')) {
-        currentWorktree.commit = line.substring('HEAD '.length);
-      } else if (line.startsWith('branch ')) {
-        currentWorktree.branch = line.substring('branch refs/heads/'.length);
-      } else if (line.startsWith('locked ')) {
-        currentWorktree.isLocked = true;
-        currentWorktree.lockReason = line.substring('locked '.length);
-      }
-    }
-
-    if (currentWorktree.path) {
-      worktrees.push(currentWorktree as WorktreeInfo);
->>>>>>> 1dbe439 (feat: ralph-tui-wmr.5 - Add worktree health status to dashboard)
     }
 
     return worktrees;
   }
 
-<<<<<<< HEAD
   /**
-    * Create a WorktreeStatus object with computed health status.
-    */
-  private async createWorktreeStatus(data: Partial<WorktreeStatus>): Promise<WorktreeStatus> {
-    const { path, relativePath, commit, branch, locked, lockReason } = data;
-
+   * Create a WorktreeStatus object with computed health status.
+   */
+  private async createWorktreeStatus(
+    data: Partial<WorktreeStatus> & { prunable?: boolean }
+  ): Promise<WorktreeStatus> {
+    const path = data.path ?? '';
+    const relativePath = data.relativePath ?? relative(this.repoRoot, path);
+    const locked = data.locked ?? false;
     let status: WorktreeHealthStatus;
 
-    if (locked) {
+    if (data.prunable) {
+      status = 'prunable';
+    } else if (locked) {
       status = 'locked';
     } else {
       try {
-        await access(path!);
+        await access(path);
         status = 'active';
       } catch {
         status = 'stale';
@@ -347,31 +269,32 @@ export class WorktreeManager {
     }
 
     return {
-      path: path!,
-      relativePath: relativePath!,
-      commit: commit!,
-      branch: branch ?? 'unknown',
-      locked: locked ?? false,
-      lockReason,
+      path,
+      relativePath,
+      commit: data.commit ?? '',
+      branch: data.branch ?? 'unknown',
+      locked,
+      lockReason: data.lockReason,
       status,
     };
   }
 
   /**
-    * Get a summary of worktree health counts.
-    */
+   * Get a summary of worktree health counts.
+   */
   async getWorktreeHealthSummary(): Promise<WorktreeHealthSummary> {
     const worktrees = await this.listWorktrees();
+    const relevant = worktrees.filter((wt) => wt.relativePath !== '.');
 
     const summary: WorktreeHealthSummary = {
-      total: worktrees.length,
+      total: relevant.length,
       active: 0,
       locked: 0,
       stale: 0,
       prunable: 0,
     };
 
-    for (const wt of worktrees) {
+    for (const wt of relevant) {
       switch (wt.status) {
         case 'active':
           summary.active++;
@@ -390,73 +313,6 @@ export class WorktreeManager {
 
     return summary;
   }
- (ralph-tui-wmr.5: task)
-=======
-  async getWorktreeCounts(): Promise<WorktreeCounts> {
-    const worktrees = await this.listWorktrees();
-
-    let active = 0;
-    let locked = 0;
-
-    for (const wt of worktrees) {
-      if (wt.path === this.repoRoot) {
-        continue;
-      }
-      active++;
-      if (wt.isLocked) {
-        locked++;
-      }
-    }
-
-    const stale = await this.getStaleWorktreeCount();
-
-    return {
-      total: active,
-      active,
-      locked,
-      stale,
-    };
-  }
-
-  private async getStaleWorktreeCount(): Promise<number> {
-    try {
-      const { stdout, exitCode } = await this.execGit(['-C', this.repoRoot, 'worktree', 'list', '--porcelain']);
-      if (exitCode !== 0) {
-        return 0;
-      }
-
-      let staleCount = 0;
-      const lines = stdout.trim().split('\n');
-      let currentPath = '';
-
-      for (const line of lines) {
-        if (line.startsWith('worktree ')) {
-          currentPath = line.substring('worktree '.length);
-        } else if (line.length === 0 && currentPath) {
-          try {
-            await access(currentPath);
-          } catch {
-            staleCount++;
-          }
-          currentPath = '';
-        }
-      }
-
-      if (currentPath) {
-        try {
-          await access(currentPath);
-        } catch {
-          staleCount++;
-        }
-      }
-
-      return staleCount;
-    } catch {
-      return 0;
-    }
-  }
-
->>>>>>> 1dbe439 (feat: ralph-tui-wmr.5 - Add worktree health status to dashboard)
   private async branchExists(branchName: string): Promise<boolean> {
     const result = await this.execGit(['-C', this.repoRoot, 'rev-parse', '--verify', `refs/heads/${branchName}`]);
     return result.exitCode === 0;
@@ -561,9 +417,6 @@ export class WorktreeManager {
       // Ignore if already deleted
     }
   }
-
-=======
->>>>>>> 0cffeba (feat: ralph-tui-wmr.7 - Optimize worktree creation < 500ms)
   private async cleanupWorktree(workerId: string): Promise<void> {
     const worktreePath = this.getWorktreePath(workerId);
 

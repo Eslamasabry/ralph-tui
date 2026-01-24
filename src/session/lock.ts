@@ -426,7 +426,12 @@ export async function releaseLock(cwd: string): Promise<void> {
  * @param cwd - Working directory
  * @returns Cleanup function to remove the handlers
  */
-export function registerLockCleanupHandlers(cwd: string): () => void {
+export function registerLockCleanupHandlers(
+  cwd: string,
+  options: { staleLockTimeoutMinutes?: number } = {}
+): () => void {
+  const timeoutMinutes = options.staleLockTimeoutMinutes ?? DEFAULT_STALE_LOCK_TIMEOUT_MINUTES;
+  const stopStaleLockCheck = startPeriodicStaleLockCheck(cwd, timeoutMinutes);
   // Synchronous cleanup for exit event
   const handleExit = (): void => {
     deleteLockFileSync(cwd);
@@ -461,6 +466,7 @@ export function registerLockCleanupHandlers(cwd: string): () => void {
 
   // Return cleanup function
   return () => {
+    stopStaleLockCheck();
     process.off('exit', handleExit);
     process.off('SIGTERM', handleTermination);
     process.off('uncaughtException', handleUncaughtError);

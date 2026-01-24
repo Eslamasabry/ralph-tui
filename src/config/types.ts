@@ -329,6 +329,9 @@ export interface RalphConfig {
   /** Cleanup configuration for post-run cleanup actions */
   cleanup?: CleanupConfig;
 
+  /** Timeout in minutes after which a lock is considered stale (default: 30) */
+  staleLockTimeoutMinutes?: number;
+
   /** Custom prompt template path (resolved) */
   promptTemplate?: string;
 }

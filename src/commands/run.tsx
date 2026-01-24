@@ -60,6 +60,7 @@ import type { NotificationSoundMode } from '../config/types.js';
 import { detectSandboxMode } from '../sandbox/index.js';
 import type { SandboxMode } from '../sandbox/index.js';
 import { getAppVersion } from '../utils/version.js';
+import { cleanupAllWorktrees } from '../worktree-cleanup/index.js';
 import {
   createRemoteServer,
   getOrCreateServerToken,
@@ -1053,6 +1054,10 @@ async function runWithTui(
     interruptHandler.dispose();
     // Note: don't dispose engine here - it may already be stopped
     renderer.destroy();
+    const cleanupResult = await cleanupAllWorktrees({ repoRoot: config.cwd });
+    if (!cleanupResult.success) {
+      console.warn(`Worktree cleanup errors: ${cleanupResult.errors.join('; ')}`);
+    }
   };
 
   // Graceful shutdown: reset active tasks, save state, clean up, and resolve the quit promise
@@ -1430,6 +1435,10 @@ async function runHeadless(
     }
 
     await engine.dispose();
+    const cleanupResult = await cleanupAllWorktrees({ repoRoot: config.cwd });
+    if (!cleanupResult.success) {
+      logger.warn('system', `Worktree cleanup errors: ${cleanupResult.errors.join('; ')}`);
+    }
     process.exit(0);
   };
 
@@ -1472,6 +1481,10 @@ async function runHeadless(
     }
 
     await engine.dispose();
+    const cleanupResult = await cleanupAllWorktrees({ repoRoot: config.cwd });
+    if (!cleanupResult.success) {
+      logger.warn('system', `Worktree cleanup errors: ${cleanupResult.errors.join('; ')}`);
+    }
     process.exit(0);
   };
 
@@ -1500,6 +1513,11 @@ async function runHeadless(
   }
 
   await engine.dispose();
+
+  const cleanupResult = await cleanupAllWorktrees({ repoRoot: config.cwd });
+  if (!cleanupResult.success) {
+    logger.warn('system', `Worktree cleanup errors: ${cleanupResult.errors.join('; ')}`);
+  }
 
   return currentState;
 }
@@ -1698,7 +1716,9 @@ export async function executeRunCommand(args: string[]): Promise<void> {
   }
 
   // Register cleanup handlers to release lock on exit/crash
-  const cleanupLockHandlers = registerLockCleanupHandlers(config.cwd);
+  const cleanupLockHandlers = registerLockCleanupHandlers(config.cwd, {
+    staleLockTimeoutMinutes: config.staleLockTimeoutMinutes,
+  });
 
   // Handle resume or new session
   let session;

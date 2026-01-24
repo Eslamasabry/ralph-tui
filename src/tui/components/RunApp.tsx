@@ -61,7 +61,6 @@ import { platform } from 'node:os';
 import { writeToClipboard } from '../../utils/index.js';
 import { StreamingOutputParser } from '../output-parser.js';
 import type { FormattedSegment } from '../../plugins/agents/output-formatting.js';
-import { WorktreeManager } from '../../engine/parallel/worktree-manager.js';
 import { pruneWorktrees as pruneWorktreesCleanup } from '../../cleanup/index.js';
 
 /**
@@ -412,7 +411,6 @@ export function RunApp({
     failed: 0,
     syncPending: 0,
   });
-// OURS:
   // Worktree health counts for pruning UI
   const [worktreeHealthSummary, setWorktreeHealthSummary] = useState<{
     total: number;
@@ -429,9 +427,6 @@ export function RunApp({
   });
   // Prune operation in progress
   const [pruning, setPruning] = useState(false);
-// THEIRS:
-  // Worktree health counts
-  const [worktreeCounts, setWorktreeCounts] = useState({ active: 0, locked: 0, stale: 0 }); (feat: ralph-tui-wmr.5 - Add worktree health status to dashboard)
   // Pending main sync count for delivery guarantee visibility
   const [pendingMainCount, setPendingMainCount] = useState(0);
   // List of failures for run summary (US-002)
@@ -611,52 +606,42 @@ export function RunApp({
     }, 150);
   }, []);
 
-  const fetchWorktreeCounts = useCallback(async () => {
+  const refreshWorktreeHealth = useCallback(async () => {
     try {
       const manager = new WorktreeManager({ repoRoot: cwd });
-      const counts = await manager.getWorktreeCounts();
-      setWorktreeCounts({ active: counts.active, locked: counts.locked, stale: counts.stale });
+      const health = await manager.getWorktreeHealthSummary();
+      setWorktreeHealthSummary({
+        total: health.total,
+        active: health.active,
+        locked: health.locked,
+        stale: health.stale,
+        prunable: health.prunable,
+      });
     } catch {
-      // Silently fail - worktree counting is not critical
+      // Ignore errors - worktree health is not critical
     }
   }, [cwd]);
 
-  const handleManualPrune = useCallback(async () => {
-    if (!showDashboard) {
-      return;
-    }
+  const handlePruneWorktrees = useCallback(async () => {
+    if (pruning) return;
+
+    setPruning(true);
+    setInfoFeedback('Pruning worktrees...');
 
     try {
-      const { pruneWorktrees } = await import('../../cleanup/index.js');
-      const result = await pruneWorktrees(cwd);
+      const result = await pruneWorktreesCleanup(cwd);
       if (result.success) {
-        appendActivityEvent({
-          category: 'system',
-          eventType: 'completed',
-          timestamp: new Date().toISOString(),
-          severity: 'info',
-          description: 'Worktrees pruned successfully',
-        });
+        setInfoFeedback('Worktrees pruned successfully');
+        await refreshWorktreeHealth();
       } else {
-        appendActivityEvent({
-          category: 'system',
-          eventType: 'failed',
-          timestamp: new Date().toISOString(),
-          severity: 'warning',
-          description: `Prune failed: ${result.error}`,
-        });
+        setInfoFeedback(`Prune failed: ${result.error ?? 'Unknown error'}`);
       }
-      await fetchWorktreeCounts();
     } catch (error) {
-      appendActivityEvent({
-        category: 'system',
-        eventType: 'failed',
-        timestamp: new Date().toISOString(),
-        severity: 'error',
-        description: `Prune error: ${error instanceof Error ? error.message : 'unknown error'}`,
-      });
+      setInfoFeedback(`Prune error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setPruning(false);
     }
-  }, [cwd, showDashboard, fetchWorktreeCounts, appendActivityEvent]);
+  }, [cwd, pruning, refreshWorktreeHealth]);
 
   useEffect(() => {
     return () => {
@@ -1703,17 +1688,6 @@ export function RunApp({
     return () => clearInterval(interval);
   }, [status]);
 
-  // Periodically refresh worktree counts when dashboard is visible
-  useEffect(() => {
-    if (!showDashboard) {
-      return;
-    }
-
-    fetchWorktreeCounts();
-    const interval = setInterval(fetchWorktreeCounts, 5000);
-    return () => clearInterval(interval);
-  }, [showDashboard, fetchWorktreeCounts]);
-
   // Get initial state from engine
   useEffect(() => {
     const state = engine.getState();
@@ -1833,53 +1807,13 @@ export function RunApp({
      }
     }, [engine, cwd]);
 
-   // Refresh worktree health counts periodically
-   const refreshWorktreeHealth = useCallback(async () => {
-     try {
-       const manager = new WorktreeManager({ repoRoot: cwd });
-       const health = await manager.getWorktreeHealthSummary();
-       setWorktreeHealthSummary({
-         total: health.total,
-         active: health.active,
-         locked: health.locked,
-         stale: health.stale,
-         prunable: health.prunable,
-       });
-     } catch {
-       // Ignore errors - worktree health is not critical
-     }
-   }, [cwd]);
-
-   // Handle manual prune worktrees action
-   const handlePruneWorktrees = useCallback(async () => {
-     if (pruning) return;
-
-     setPruning(true);
-     setInfoFeedback('Pruning worktrees...');
-
-     try {
-       const result = await pruneWorktreesCleanup(cwd);
-       if (result.success) {
-         setInfoFeedback('Worktrees pruned successfully');
-         // Refresh health counts after pruning
-         await refreshWorktreeHealth();
-       } else {
-         setInfoFeedback(`Prune failed: ${result.error ?? 'Unknown error'}`);
-       }
-     } catch (error) {
-       setInfoFeedback(`Prune error: ${error instanceof Error ? error.message : 'Unknown error'}`);
-     } finally {
-       setPruning(false);
-     }
-   }, [cwd, pruning, refreshWorktreeHealth]);
-
-   // Initial load and periodic refresh of worktree health
-   useEffect(() => {
-     refreshWorktreeHealth();
-     // Refresh every 30 seconds
-     const interval = setInterval(refreshWorktreeHealth, 30000);
-     return () => clearInterval(interval);
-   }, [refreshWorktreeHealth]);
+  // Initial load and periodic refresh of worktree health
+  useEffect(() => {
+    refreshWorktreeHealth();
+    // Refresh every 30 seconds
+    const interval = setInterval(refreshWorktreeHealth, 30000);
+    return () => clearInterval(interval);
+  }, [refreshWorktreeHealth]);
 
   // Handle keyboard navigation
   const handleKeyboard = useCallback(
@@ -2084,7 +2018,7 @@ export function RunApp({
         case 'x':
           // Manual prune - only when dashboard is visible
           if (showDashboard) {
-            handleManualPrune();
+            handlePruneWorktrees();
           }
           break;
 
@@ -3062,15 +2996,12 @@ export function RunApp({
           autoCommit={isViewingRemote ? remoteAutoCommit : storedConfig?.autoCommit}
           gitInfo={isViewingRemote ? remoteGitInfo : localGitInfo}
           pendingMainCount={pendingMainCount}
-<<<<<<< HEAD
           worktreeHealth={{
             stale: worktreeHealthSummary.stale,
             prunable: worktreeHealthSummary.prunable,
           }}
           pruning={pruning}
-=======
-          onManualPrune={handleManualPrune}
->>>>>>> 1dbe439 (feat: ralph-tui-wmr.5 - Add worktree health status to dashboard)
+          onManualPrune={handlePruneWorktrees}
         />
       )}
 
@@ -3226,15 +3157,9 @@ export function RunApp({
                 completedTasks={taskCounts.completed}
                 failedTasks={taskCounts.failed}
                 worktreeCount={mergeStats.worktrees}
-<<<<<<< HEAD
                 worktreeActive={worktreeHealthSummary.active}
                 worktreeLocked={worktreeHealthSummary.locked}
                 worktreeStale={worktreeHealthSummary.stale}
-=======
-                activeWorktrees={worktreeCounts.active}
-                lockedWorktrees={worktreeCounts.locked}
-                staleWorktrees={worktreeCounts.stale}
->>>>>>> 1dbe439 (feat: ralph-tui-wmr.5 - Add worktree health status to dashboard)
                 mergesQueued={mergeStats.queued}
                 mergesSucceeded={mergeStats.merged}
                 mergesFailed={mergeStats.failed}

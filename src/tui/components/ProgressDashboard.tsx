@@ -56,7 +56,6 @@ export interface ProgressDashboardProps {
   pendingMainCount?: number;
   /** Cleanup configuration (if cleanup is enabled) */
   cleanupConfig?: CleanupConfig;
-// OURS:
   /** Worktree health summary for prune button */
   worktreeHealth?: {
     stale: number;
@@ -64,9 +63,8 @@ export interface ProgressDashboardProps {
   };
   /** Whether a prune operation is in progress */
   pruning?: boolean;
-// THEIRS:
   /** Callback for manual prune action */
-  onManualPrune?: () => void; (feat: ralph-tui-wmr.5 - Add worktree health status to dashboard)
+  onManualPrune?: () => void;
 }
 
 /**
@@ -217,12 +215,9 @@ export function ProgressDashboard({
   gitInfo,
   pendingMainCount,
   cleanupConfig,
-<<<<<<< HEAD
   worktreeHealth,
   pruning,
-=======
   onManualPrune,
->>>>>>> 1dbe439 (feat: ralph-tui-wmr.5 - Add worktree health status to dashboard)
 }: ProgressDashboardProps): ReactNode {
   // Use terminal dimensions for responsive layout
   const { width } = useTerminalDimensions();

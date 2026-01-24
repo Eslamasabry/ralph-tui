@@ -24,20 +24,12 @@ export interface DashboardBannerProps {
   failedTasks: number;
   /** Total number of worktrees */
   worktreeCount: number;
-// OURS:
   /** Number of active worktrees (locked for parallel worker) */
   worktreeActive: number;
   /** Number of locked worktrees (locked for other reasons) */
   worktreeLocked: number;
   /** Number of stale worktrees (directory missing) */
   worktreeStale: number;
-// THEIRS:
-  /** Number of active worktrees */
-  activeWorktrees: number;
-  /** Number of locked worktrees */
-  lockedWorktrees: number;
-  /** Number of stale worktrees */
-  staleWorktrees: number; (feat: ralph-tui-wmr.5 - Add worktree health status to dashboard)
   /** Number of queued merges */
   mergesQueued: number;
   /** Number of successful merges */
@@ -83,15 +75,9 @@ export function DashboardBanner({
   completedTasks,
   failedTasks,
   worktreeCount,
-<<<<<<< HEAD
   worktreeActive,
   worktreeLocked,
   worktreeStale,
-=======
-  activeWorktrees,
-  lockedWorktrees,
-  staleWorktrees,
->>>>>>> 1dbe439 (feat: ralph-tui-wmr.5 - Add worktree health status to dashboard)
   mergesQueued,
   mergesSucceeded,
   mergesFailed,
@@ -167,15 +153,9 @@ export function DashboardBanner({
         }}
       >
         <StatItem label="Worktrees" value={worktreeCount} color={colors.accent.primary} />
-<<<<<<< HEAD
         {worktreeActive > 0 && <StatItem label="Active" value={worktreeActive} color={colors.status.success} />}
         {worktreeLocked > 0 && <StatItem label="Locked" value={worktreeLocked} color={colors.status.warning} />}
         {worktreeStale > 0 && <StatItem label="Stale" value={worktreeStale} color={colors.status.error} />}
-=======
-        <StatItem label="Active" value={activeWorktrees} color={colors.status.success} />
-        <StatItem label="Locked" value={lockedWorktrees} color={colors.status.warning} />
-        <StatItem label="Stale" value={staleWorktrees} color={colors.status.error} />
->>>>>>> 1dbe439 (feat: ralph-tui-wmr.5 - Add worktree health status to dashboard)
         <StatItem label="Merge Q" value={mergesQueued} color={colors.fg.muted} />
         <StatItem label="Merged" value={mergesSucceeded} color={colors.status.success} />
         <StatItem label="Merge Fail" value={mergesFailed} color={colors.status.error} />
