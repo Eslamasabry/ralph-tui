@@ -53,14 +53,8 @@ function getWorkerLabel(workerId: string | undefined, index: number): string {
   return `Slot ${index + 1}`;
 }
 
-function formatTimestamp(isoString?: string): string {
-  if (!isoString) return '—';
-  const date = new Date(isoString);
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-}
-
 function getDurationDisplay(timing: IterationTimingInfo | undefined, nowMs: number): string {
-  if (!timing) return '—';
+  if (!timing) return '--';
   if (timing.isRunning && timing.startedAt) {
     const durationSeconds = Math.floor((nowMs - new Date(timing.startedAt).getTime()) / 1000);
     return formatElapsedTime(durationSeconds);
@@ -69,64 +63,21 @@ function getDurationDisplay(timing: IterationTimingInfo | undefined, nowMs: numb
     const durationSeconds = Math.floor(timing.durationMs / 1000);
     return formatElapsedTime(durationSeconds);
   }
-  return '—';
+  return '--';
 }
 
 /**
  * Get enhanced card background color based on task status and selection
  */
-function getCardBackgroundColor(
-  status: TaskItem['status'],
-  isSelected: boolean
-): string {
-  if (isSelected) {
-    return colors.bg.highlight;
-  }
-  switch (status) {
-    case 'active':
-      return colors.bg.secondary;
-    case 'blocked':
-      return colors.bg.tertiary;
-    case 'done':
-    case 'closed':
-      return colors.bg.primary;
-    default:
-      return colors.bg.tertiary;
-  }
+function getCardBackgroundColor(isSelected: boolean): string {
+  return isSelected ? colors.bg.highlight : colors.bg.secondary;
 }
 
-/**
- * Get enhanced card border color based on status and selection
- */
-function getCardBorderColor(
-  status: TaskItem['status'],
-  isSelected: boolean,
-  isFocused: boolean,
-  pulseOn: boolean
-): string {
-  if (isSelected) {
+function getCardBorderColor(isSelected: boolean, isFocused: boolean): string {
+  if (isSelected && isFocused) {
     return colors.accent.primary;
   }
-  if (!isFocused) {
-    return colors.border.normal;
-  }
-  switch (status) {
-    case 'active':
-      return pulseOn ? colors.task.active : colors.accent.tertiary;
-    case 'actionable':
-      return colors.task.actionable;
-    case 'pending':
-      return colors.status.warning;
-    case 'blocked':
-      return colors.task.blocked;
-    case 'error':
-      return colors.task.error;
-    case 'done':
-    case 'closed':
-      return colors.task.closed;
-    default:
-      return colors.border.active;
-  }
+  return colors.border.muted;
 }
 
 /**
@@ -157,45 +108,6 @@ function getStatusLabel(status: TaskItem['status'], blockedByTasks?: BlockerInfo
   }
 }
 
-function getValidationBadge(status?: TaskItem['validationStatus']): { label: string; color: string } | null {
-  if (!status) return null;
-  switch (status) {
-    case 'passed':
-    case 'healed':
-      return { label: 'Validated ✓', color: colors.status.success };
-    case 'flaky':
-      return { label: 'Flaky ◐', color: colors.status.warning };
-    case 'fixing':
-    case 'running':
-      return { label: 'Validating…', color: colors.status.info };
-    case 'reverted':
-      return { label: 'Reverted ↩', color: colors.status.warning };
-    case 'blocked':
-    case 'failed':
-      return { label: 'Validation Failed', color: colors.status.error };
-    case 'queued':
-      return { label: 'Validation Queued', color: colors.fg.muted };
-    default:
-      return null;
-  }
-}
-
-function getMergeBadge(status?: TaskItem['mergeStatus']): { label: string; color: string } | null {
-  if (!status) return null;
-  switch (status) {
-    case 'queued':
-      return { label: 'Merge Queued', color: colors.fg.muted };
-    case 'merged':
-      return { label: 'Merged ✓', color: colors.status.success };
-    case 'resolved':
-      return { label: 'Resolved ↩', color: colors.status.info };
-    case 'failed':
-      return { label: 'Merge Failed', color: colors.status.error };
-    default:
-      return null;
-  }
-}
-
 /**
  * Get priority display with icon and color
  */
@@ -219,24 +131,10 @@ function getCardDimensions(terminalWidth: number): {
   cardWidth: number;
   titleMaxWidth: number;
 } {
-  // Very narrow terminals (< 70 columns)
-  if (terminalWidth < 70) {
-    return { columns: 2, cardWidth: 22, titleMaxWidth: 18 };
-  }
-  // Narrow terminals (70-99 columns)
-  if (terminalWidth < 100) {
-    return { columns: 3, cardWidth: 26, titleMaxWidth: 22 };
-  }
-  // Standard terminals (100-139 columns)
-  if (terminalWidth < 140) {
-    return { columns: 4, cardWidth: 28, titleMaxWidth: 24 };
-  }
-  // Wide terminals (140-179 columns)
-  if (terminalWidth < 180) {
-    return { columns: 5, cardWidth: 30, titleMaxWidth: 26 };
-  }
-  // Very wide terminals (180+ columns)
-  return { columns: 6, cardWidth: 32, titleMaxWidth: 28 };
+  const cardWidth = 28;
+  const titleMaxWidth = 20;
+  const columns = Math.max(1, Math.floor((terminalWidth - 6) / (cardWidth + 1)));
+  return { columns, cardWidth, titleMaxWidth };
 }
 
 /**
@@ -247,7 +145,6 @@ function TaskCard({
   index,
   isSelected,
   isFocused,
-  pulseOn,
   timing,
   nowMs,
 }: {
@@ -255,28 +152,21 @@ function TaskCard({
   index: number;
   isSelected: boolean;
   isFocused: boolean;
-  pulseOn: boolean;
   timing?: IterationTimingInfo;
   nowMs: number;
 }): ReactNode {
   const statusColor = getTaskStatusColor(task.status);
   const statusIndicator = getTaskStatusIndicator(task.status);
   const workerLabel = task.workerId ? getWorkerLabel(task.workerId, index) : null;
-  const backgroundColor = getCardBackgroundColor(task.status, isSelected);
-  const borderColor = getCardBorderColor(task.status, isSelected, isFocused, pulseOn);
+  const backgroundColor = getCardBackgroundColor(isSelected);
+  const borderColor = getCardBorderColor(isSelected, isFocused);
 
   const { width: terminalWidth } = useTerminalDimensions();
   const { cardWidth, titleMaxWidth } = getCardDimensions(terminalWidth);
-  const isCompact = terminalWidth < 80;
 
   const isRunning = task.status === 'active';
   const statusLabel = getStatusLabel(task.status, task.blockedByTasks);
-  const validationBadge = getValidationBadge(task.validationStatus);
-  const mergeBadge = getMergeBadge(task.mergeStatus);
-  const compactBadge = validationBadge ?? mergeBadge;
   const durationDisplay = useMemo(() => getDurationDisplay(timing, nowMs), [timing, nowMs]);
-  const startedDisplay = timing?.startedAt ? formatTimestamp(timing.startedAt) : '—';
-  const endedDisplay = timing?.endedAt ? formatTimestamp(timing.endedAt) : '—';
   const priorityDisplay = getPriorityDisplay(task.priority);
 
   // Truncate status label if too long (for blocked by info)
@@ -287,26 +177,19 @@ function TaskCard({
 
   // Calculate title with emphasis for selected/running
   const displayTitle = truncateText(task.title, titleMaxWidth);
-  const titleColor = isSelected
-    ? colors.fg.primary
-    : isRunning
-      ? colors.task.active
-      : task.status === 'blocked'
-        ? colors.task.blocked
-        : task.status === 'done' || task.status === 'closed'
-          ? colors.fg.muted
-          : colors.fg.secondary;
+  const titleColor = isSelected ? colors.fg.primary : colors.fg.secondary;
 
   return (
     <box
       style={{
         width: cardWidth,
-        minWidth: 20,
+        minWidth: 28,
+        height: 6,
         flexGrow: 0,
         flexShrink: 0,
-        flexDirection: 'column',
-        paddingLeft: 1,
-        paddingRight: 1,
+        flexDirection: 'row',
+        paddingLeft: 0,
+        paddingRight: 0,
         paddingTop: 0,
         paddingBottom: 0,
         backgroundColor,
@@ -316,113 +199,57 @@ function TaskCard({
         gap: 0,
       }}
     >
-      {/* Header row: Worker/slot label and status indicator */}
+      {/* Status stripe */}
+      <box style={{ width: 1, backgroundColor: statusColor }} />
+
+      {/* Content */}
       <box
         style={{
-          flexDirection: 'row',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 0,
+          flexGrow: 1,
+          flexDirection: 'column',
+          paddingLeft: 1,
+          paddingRight: 1,
+          paddingTop: 0,
+          paddingBottom: 0,
+          gap: 0,
         }}
       >
-        <text fg={colors.fg.muted}>
-          {workerLabel ? workerLabel : '—'}
-        </text>
-        <text fg={statusColor}>
-          {statusIndicator}
-        </text>
-      </box>
-
-      {/* Task title - prominent with visual hierarchy */}
-      <box style={{ marginTop: 0 }}>
-        <text fg={titleColor}>
-          {displayTitle}
-        </text>
-      </box>
-
-      {/* Status label with enhanced visibility */}
-      {task.status !== 'active' && (
-        <box style={{ marginTop: 0 }}>
+        {/* Header row: Status + ID + Priority */}
+        <box style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
           <text fg={statusColor}>
-            {displayStatusLabel}
+            {statusIndicator} {task.id}
           </text>
-        </box>
-      )}
-
-      {!isCompact && validationBadge && (
-        <box style={{ marginTop: 0 }}>
-          <text fg={validationBadge.color}>{validationBadge.label}</text>
-        </box>
-      )}
-
-      {!isCompact && mergeBadge && (
-        <box style={{ marginTop: 0 }}>
-          <text fg={mergeBadge.color}>{mergeBadge.label}</text>
-        </box>
-      )}
-
-      {isCompact && compactBadge && (
-        <box style={{ marginTop: 0 }}>
-          <text fg={compactBadge.color}>{compactBadge.label}</text>
-        </box>
-      )}
-
-      {/* Enhanced timing info section */}
-      {!isCompact && timing && (timing.startedAt || timing.endedAt || timing.durationMs !== undefined) && (
-        <box
-          style={{
-            marginTop: 0,
-            flexDirection: 'row',
-            gap: 1,
-            justifyContent: 'space-between',
-          }}
-        >
-          {isRunning ? (
-            <>
-              <box style={{ flexDirection: 'row', gap: 1 }}>
-                <text fg={colors.fg.muted}>Start</text>
-                <text fg={colors.fg.secondary}>{startedDisplay}</text>
-              </box>
-              <text fg={colors.status.info}>
-                {durationDisplay}
-              </text>
-            </>
-          ) : (
-            <>
-              <box style={{ flexDirection: 'row', gap: 1 }}>
-                <text fg={colors.fg.muted}>End</text>
-                <text fg={colors.fg.secondary}>{endedDisplay}</text>
-              </box>
-              <text fg={colors.accent.primary}>
-                {durationDisplay}
-              </text>
-            </>
+          {task.priority !== undefined && (
+            <text fg={priorityDisplay.color}>{priorityDisplay.icon}</text>
           )}
         </box>
-      )}
 
-      {/* Footer row: Task ID, priority, and labels */}
-      <box
-        style={{
-          marginTop: 0,
-          flexDirection: 'row',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-        }}
-      >
-        <box style={{ flexDirection: 'row', gap: 1, alignItems: 'center' }}>
-          <text fg={colors.fg.muted}>{task.id}</text>
-          {!isCompact && task.labels && task.labels.length > 0 && (
-            <text fg={colors.accent.tertiary}>
-              {task.labels.slice(0, 2).map(l => `#${l}`).join(' ')}
-            </text>
-          )}
+        {/* Task title */}
+        <box>
+          <text fg={titleColor}>{displayTitle}</text>
         </box>
-        {task.priority !== undefined && (
-          <text fg={priorityDisplay.color}>
-            {priorityDisplay.icon}
-          </text>
+
+        {/* Status label for non-active tasks */}
+        {!isRunning && (
+          <box>
+            <text fg={statusColor}>{displayStatusLabel}</text>
+          </box>
         )}
+
+        {/* Footer: Worker + Duration */}
+        <box style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+          {workerLabel ? (
+            <text fg={colors.accent.tertiary}>
+              [W-{workerLabel.split(' ').pop()}]
+            </text>
+          ) : (
+            <text fg={colors.fg.muted}>{statusLabel}</text>
+          )}
+          <text fg={isRunning ? colors.status.info : colors.fg.muted}>
+            {isRunning ? '⏱ ' : ''}
+            {durationDisplay}
+          </text>
+        </box>
       </box>
     </box>
   );
@@ -519,7 +346,6 @@ export function TaskCardsRow({
   scrollOffset = 0,
   onScrollChange,
 }: TaskCardsRowProps): ReactNode {
-  const [pulseOn, setPulseOn] = useState(true);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [internalScrollOffset, setInternalScrollOffset] = useState(scrollOffset);
   const hasActive = tasks.some((task) => task.status === 'active');
@@ -531,19 +357,6 @@ export function TaskCardsRow({
   useEffect(() => {
     setInternalScrollOffset(scrollOffset);
   }, [scrollOffset]);
-
-  useEffect(() => {
-    if (!hasActive) {
-      setPulseOn(true);
-      return;
-    }
-
-    const interval = setInterval(() => {
-      setPulseOn((prev) => !prev);
-    }, 650);
-
-    return () => clearInterval(interval);
-  }, [hasActive]);
 
   useEffect(() => {
     if (!hasActive) {
@@ -667,7 +480,6 @@ export function TaskCardsRow({
             index={originalIndex}
             isSelected={originalIndex === selectedIndex}
             isFocused={isFocused}
-            pulseOn={pulseOn}
             timing={timingByTaskId?.get(task.id)}
             nowMs={nowMs}
           />
