@@ -4,6 +4,7 @@
  */
 
 import type { ReactNode } from 'react';
+import { useTerminalDimensions } from '@opentui/react';
 import type { ValidationStatus } from '../../engine/types.js';
 import { colors } from '../theme.js';
 
@@ -97,6 +98,8 @@ export function DashboardBanner({
   lastValidationStatus,
   appVersion,
 }: DashboardBannerProps): ReactNode {
+  const { width } = useTerminalDimensions();
+  const isCompact = width < 90;
   const hasActive = activeTasks > 0;
   const hasQueued = queuedTasks > 0;
   const statusIndicator = hasActive ? '●' : hasQueued ? '◐' : '○';
@@ -179,16 +182,26 @@ export function DashboardBanner({
           justifyContent: 'space-between',
         }}
       >
-        <StatItem label="Worktrees" value={worktreeCount} color={colors.accent.primary} />
-        {worktreeActive > 0 && <StatItem label="Active" value={worktreeActive} color={colors.status.success} />}
-        {worktreeLocked > 0 && <StatItem label="Locked" value={worktreeLocked} color={colors.status.warning} />}
-        {worktreeStale > 0 && <StatItem label="Stale" value={worktreeStale} color={colors.status.error} />}
-        {worktreePrunable > 0 && <StatItem label="Prunable" value={worktreePrunable} color={colors.status.warning} />}
-        <StatItem label="Merge Q" value={mergesQueued} color={colors.fg.muted} />
+        {!isCompact && (
+          <StatItem label="Worktrees" value={worktreeCount} color={colors.accent.primary} />
+        )}
+        {!isCompact && worktreeActive > 0 && (
+          <StatItem label="Active" value={worktreeActive} color={colors.status.success} />
+        )}
+        {!isCompact && worktreeLocked > 0 && (
+          <StatItem label="Locked" value={worktreeLocked} color={colors.status.warning} />
+        )}
+        {!isCompact && worktreeStale > 0 && (
+          <StatItem label="Stale" value={worktreeStale} color={colors.status.error} />
+        )}
+        {!isCompact && worktreePrunable > 0 && (
+          <StatItem label="Prunable" value={worktreePrunable} color={colors.status.warning} />
+        )}
+        <StatItem label={isCompact ? 'Merge Q' : 'Merge Queue'} value={mergesQueued} color={colors.fg.muted} />
         <StatItem label="Merged" value={mergesSucceeded} color={colors.status.success} />
-        <StatItem label="Merge Fail" value={mergesFailed} color={colors.status.error} />
-        <StatItem label="Sync Pending" value={mainSyncPending} color={colors.status.warning} />
-        <StatItem label="Valid Q" value={validationsQueued} color={colors.fg.muted} />
+        <StatItem label={isCompact ? 'Merge Fail' : 'Merge Failed'} value={mergesFailed} color={colors.status.error} />
+        <StatItem label={isCompact ? 'Sync' : 'Sync Pending'} value={mainSyncPending} color={colors.status.warning} />
+        <StatItem label={isCompact ? 'Valid Q' : 'Validation Queue'} value={validationsQueued} color={colors.fg.muted} />
         <text>
           <span fg={colors.fg.muted}>Validation:</span>{' '}
           <span fg={validationColor}>{validationLabel}</span>
