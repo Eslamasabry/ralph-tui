@@ -209,6 +209,8 @@ export interface RightPanelProps {
   remoteConnectionStatus?: ConnectionStatus;
   /** Alias of the remote being viewed */
   remoteAlias?: string;
+  /** Whether the right panel is focused (for border highlighting) */
+  isFocused?: boolean;
 }
 
 /**

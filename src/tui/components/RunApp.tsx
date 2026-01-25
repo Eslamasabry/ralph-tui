@@ -2674,11 +2674,17 @@ export function RunApp({
     height - layout.header.height - layout.footer.height - dashboardHeight - tabBarHeight
   );
   const isCompact = width < 80;
-  const minTopHeight = 8;
   const minBottomHeight = 8;
   const preferredTopHeight = Math.floor(contentHeight * (isCompact ? 0.5 : 0.4));
-  const maxTopHeight = Math.max(minTopHeight, contentHeight - minBottomHeight);
-  const topSectionHeight = Math.max(minTopHeight, Math.min(preferredTopHeight, maxTopHeight));
+  const maxTopHeight = Math.max(8, contentHeight - minBottomHeight);
+  const headerRows = 2;
+  const bannerRows = 5;
+  const taskBoardRows = isCompact ? 7 : 8;
+  const topSectionFloor = Math.min(
+    maxTopHeight,
+    Math.max(10, headerRows + bannerRows + taskBoardRows + 3)
+  );
+  const topSectionHeight = Math.max(topSectionFloor, Math.min(preferredTopHeight, maxTopHeight));
 
   const displayElapsedTime = useMemo(() => {
     if (!isViewingRemote) return elapsedTime;
@@ -2687,6 +2693,10 @@ export function RunApp({
     if (!cached?.durationMs) return 0;
     return Math.floor(cached.durationMs / 1000);
   }, [elapsedTime, isViewingRemote, remoteCurrentTaskId, remoteIterationCache]);
+
+  const focusTargetLabel = subagentPanelVisible && focusedPane === 'subagentTree'
+    ? 'Subagents'
+    : 'Output';
 
   // Get selected task from filtered list (used for display in tasks view)
   const selectedTask = allTasksForCards[selectedIndex] ?? null;
@@ -3403,6 +3413,7 @@ export function RunApp({
                     isViewingRemote={isViewingRemote}
                     remoteConnectionStatus={instanceTabs?.[selectedTabIndex]?.status}
                     remoteAlias={instanceTabs?.[selectedTabIndex]?.alias}
+                    isFocused={!subagentPanelVisible || focusedPane === 'output'}
                   />
                 )}
               </box>
@@ -3442,6 +3453,7 @@ export function RunApp({
 
               {/* Dashboard Banner - shows task counts */}
               <DashboardBanner
+                executionMode={mergeStats.worktrees > 0 ? 'parallel' : 'sequential'}
                 totalTasks={taskCounts.total}
                 activeTasks={taskCounts.active}
                 queuedTasks={taskCounts.queued}
@@ -3490,6 +3502,8 @@ export function RunApp({
                   <text>
                     <span fg={colors.fg.secondary}>Task Focus</span>
                     <span fg={colors.fg.muted}> - Details, output, and CLI.</span>
+                    <span fg={colors.fg.muted}> Focus:</span>{' '}
+                    <span fg={colors.accent.primary}>{focusTargetLabel}</span>
                   </text>
                 </box>
                 <box style={{ flexGrow: 1 }}>
@@ -3506,6 +3520,7 @@ export function RunApp({
                     isViewingRemote={isViewingRemote}
                     remoteConnectionStatus={instanceTabs?.[selectedTabIndex]?.status}
                     remoteAlias={instanceTabs?.[selectedTabIndex]?.alias}
+                    isFocused={!subagentPanelVisible || focusedPane === 'output'}
                   />
                 </box>
               </box>

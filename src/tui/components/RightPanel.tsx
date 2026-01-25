@@ -830,6 +830,7 @@ export function RightPanel({
   isViewingRemote = false,
   remoteConnectionStatus,
   remoteAlias,
+  isFocused = true,
 }: RightPanelProps): ReactNode {
   // Build title with view mode indicator
   const modeIndicators: Record<typeof viewMode, string> = {
@@ -851,7 +852,7 @@ export function RightPanel({
         flexDirection: 'column',
         backgroundColor: colors.bg.primary,
         border: true,
-        borderColor: colors.border.normal,
+        borderColor: isFocused ? colors.accent.primary : colors.border.normal,
       }}
     >
       {selectedTask ? (

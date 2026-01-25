@@ -12,6 +12,8 @@ import { colors } from '../theme.js';
  * Props for DashboardBanner component
  */
 export interface DashboardBannerProps {
+  /** Execution mode label */
+  executionMode: 'parallel' | 'sequential';
   /** Total number of tasks */
   totalTasks: number;
   /** Number of currently active tasks (status: active) */
@@ -78,6 +80,7 @@ function StatItem({
  * Displays status indicator based on active tasks count.
  */
 export function DashboardBanner({
+  executionMode,
   totalTasks,
   activeTasks,
   queuedTasks,
@@ -147,7 +150,10 @@ export function DashboardBanner({
         }}
       >
         <text fg={colors.fg.primary}>
-          <span fg={colors.fg.primary}>Parallel Command Center</span>
+          <span fg={colors.fg.primary}>Run Command Center</span>
+          <span fg={executionMode === 'parallel' ? colors.status.info : colors.fg.muted}>
+            {executionMode === 'parallel' ? ' [Parallel]' : ' [Sequential]'}
+          </span>
           <span fg={colors.fg.muted}>{appVersion && appVersion !== 'unknown' ? ` ${appVersion}` : ''}</span>
         </text>
         <text>

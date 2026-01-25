@@ -267,11 +267,13 @@ function TaskCard({
 
   const { width: terminalWidth } = useTerminalDimensions();
   const { cardWidth, titleMaxWidth } = getCardDimensions(terminalWidth);
+  const isCompact = terminalWidth < 80;
 
   const isRunning = task.status === 'active';
   const statusLabel = getStatusLabel(task.status, task.blockedByTasks);
   const validationBadge = getValidationBadge(task.validationStatus);
   const mergeBadge = getMergeBadge(task.mergeStatus);
+  const compactBadge = validationBadge ?? mergeBadge;
   const durationDisplay = useMemo(() => getDurationDisplay(timing, nowMs), [timing, nowMs]);
   const startedDisplay = timing?.startedAt ? formatTimestamp(timing.startedAt) : '—';
   const endedDisplay = timing?.endedAt ? formatTimestamp(timing.endedAt) : '—';
@@ -347,20 +349,26 @@ function TaskCard({
         </box>
       )}
 
-      {validationBadge && (
+      {!isCompact && validationBadge && (
         <box style={{ marginTop: 0 }}>
           <text fg={validationBadge.color}>{validationBadge.label}</text>
         </box>
       )}
 
-      {mergeBadge && (
+      {!isCompact && mergeBadge && (
         <box style={{ marginTop: 0 }}>
           <text fg={mergeBadge.color}>{mergeBadge.label}</text>
         </box>
       )}
 
+      {isCompact && compactBadge && (
+        <box style={{ marginTop: 0 }}>
+          <text fg={compactBadge.color}>{compactBadge.label}</text>
+        </box>
+      )}
+
       {/* Enhanced timing info section */}
-      {timing && (timing.startedAt || timing.endedAt || timing.durationMs !== undefined) && (
+      {!isCompact && timing && (timing.startedAt || timing.endedAt || timing.durationMs !== undefined) && (
         <box
           style={{
             marginTop: 0,
@@ -404,7 +412,7 @@ function TaskCard({
       >
         <box style={{ flexDirection: 'row', gap: 1, alignItems: 'center' }}>
           <text fg={colors.fg.muted}>{task.id}</text>
-          {task.labels && task.labels.length > 0 && (
+          {!isCompact && task.labels && task.labels.length > 0 && (
             <text fg={colors.accent.tertiary}>
               {task.labels.slice(0, 2).map(l => `#${l}`).join(' ')}
             </text>
@@ -515,6 +523,9 @@ export function TaskCardsRow({
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [internalScrollOffset, setInternalScrollOffset] = useState(scrollOffset);
   const hasActive = tasks.some((task) => task.status === 'active');
+  const { width } = useTerminalDimensions();
+  const isCompact = width < 80;
+  const panelMinHeight = isCompact ? 7 : 8;
 
   // Sync internal scroll offset with prop
   useEffect(() => {
@@ -547,7 +558,6 @@ export function TaskCardsRow({
   }, [hasActive]);
 
   // Auto-scroll to keep selected task visible
-  const { width } = useTerminalDimensions();
   const { cardWidth } = getCardDimensions(width);
   const cardSlot = cardWidth + 1; // card width + gap
   const visibleCards = Math.max(1, Math.floor((width - 6) / cardSlot));
@@ -605,7 +615,7 @@ export function TaskCardsRow({
       style={{
         width: '100%',
         flexGrow: 1,
-        minHeight: 8,
+        minHeight: panelMinHeight,
         flexDirection: 'column',
         backgroundColor: colors.bg.primary,
         border: true,
