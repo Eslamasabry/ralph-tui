@@ -997,13 +997,26 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
 
     // Read template from co-located file
     const templatePath = join(__dirname, 'template.hbs');
+    const distFallbackPath = join(
+      __dirname,
+      'plugins',
+      'trackers',
+      'builtin',
+      'beads',
+      'template.hbs'
+    );
     try {
       templateCache = readFileSync(templatePath, 'utf-8');
       return templateCache;
     } catch (err) {
-      console.error(`Failed to read template from ${templatePath}:`, err);
-      // Return a minimal fallback template
-      return `## Task: {{taskTitle}}
+      try {
+        templateCache = readFileSync(distFallbackPath, 'utf-8');
+        return templateCache;
+      } catch (fallbackErr) {
+        console.error(`Failed to read template from ${templatePath}:`, err);
+        console.error(`Failed to read template from ${distFallbackPath}:`, fallbackErr);
+        // Return a minimal fallback template
+        return `## Task: {{taskTitle}}
 {{#if taskDescription}}
 {{taskDescription}}
 {{/if}}
@@ -1011,6 +1024,7 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
 When finished, signal completion with:
 <promise>COMPLETE</promise>
 `;
+      }
     }
   }
 
