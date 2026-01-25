@@ -738,7 +738,17 @@ export function ActivityView({
                 );
               })
             ) : (
-              <text fg={colors.fg.muted}>No activity yet - waiting for iteration to start</text>
+              <box style={{ alignItems: 'center', justifyContent: 'center', padding: 2, flexDirection: 'column' }}>
+                <text fg={colors.fg.muted}>
+                  (  )   (   )  )
+                   ) (   )  (  (
+                  ( )  (    ) )
+                  _____________
+                 {'<'}_____________{'>'}
+                </text>
+                <text fg={colors.fg.secondary}>Agent Idle</text>
+                <text fg={colors.fg.dim}>Press 's' to start execution</text>
+              </box>
             )}
           </box>
         </box>

@@ -259,6 +259,7 @@ function StaleSection(): ReactNode {
     <text>
       <span fg={colors.fg.dim}> {SEPARATOR} </span>
       <span fg={colors.status.warning}>{STALE_ICON} Stale</span>
+      <span fg={colors.fg.dim}> (R)</span>
     </text>
   );
 }

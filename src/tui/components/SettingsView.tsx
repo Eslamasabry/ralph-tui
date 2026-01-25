@@ -254,12 +254,14 @@ function CategoryHeader({ category }: { category: CategoryInfo }): ReactNode {
         marginBottom: 0,
         paddingLeft: 1,
         paddingRight: 1,
+        border: true,
+        borderColor: colors.border.muted,
       }}
     >
       <text>
-        <span fg={colors.accent.primary}>{category.icon}</span>
+        <span fg={colors.accent.tertiary}>{category.icon}</span>
         <span fg={colors.fg.muted}> </span>
-        <span fg={colors.accent.primary}>{category.title}</span>
+        <span fg={colors.accent.tertiary}>{category.title}</span>
         <span fg={colors.fg.muted}> </span>
         <span fg={colors.fg.dim}>—</span>
         <span fg={colors.fg.muted}> </span>

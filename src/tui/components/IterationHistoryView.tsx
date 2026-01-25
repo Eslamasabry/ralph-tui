@@ -221,14 +221,19 @@ function IterationCard({
 
   // Background based on selection
   const bgColor = isSelected ? colors.bg.highlight : colors.bg.secondary;
+  const labelColor = isSelected ? colors.fg.primary : colors.fg.secondary;
+  const valueColor = isSelected ? colors.fg.secondary : colors.fg.dim;
 
   return (
     <box
       style={{
         width: '100%',
         flexDirection: 'column',
-        padding: 1,
-        marginBottom: 1,
+        paddingLeft: 1,
+        paddingRight: 1,
+        paddingTop: 0,
+        paddingBottom: 0,
+        marginBottom: 0,
         backgroundColor: bgColor,
         border: true,
         borderColor: borderColor,
@@ -245,23 +250,13 @@ function IterationCard({
       >
         <StatusBadge status={effectiveStatus} isSelected={isSelected} />
         <text>
-          <span fg={isSelected ? colors.fg.primary : colors.fg.secondary}>{iterationLabel}</span>
+          <span fg={labelColor}>{iterationLabel}</span>
         </text>
         <text>
-          <span fg={colors.fg.muted}>Duration: </span>
-          <span fg={colors.accent.tertiary}>{duration}</span>
+          <span fg={colors.fg.muted}>Dur </span>
+          <span fg={valueColor}>{duration}</span>
         </text>
       </box>
-
-      {/* Separator line */}
-      <box
-        style={{
-          border: true,
-          borderColor: colors.border.muted,
-          marginTop: 0,
-          marginBottom: 0,
-        }}
-      />
 
       {/* Task info row */}
       <box
@@ -272,10 +267,10 @@ function IterationCard({
         }}
       >
         <text>
-          <span fg={colors.fg.muted}>Task: </span>
-          <span fg={colors.accent.primary}>{truncatedTaskId}</span>
+          <span fg={labelColor}>Task: </span>
+          <span fg={colors.accent.tertiary}>{truncatedTaskId}</span>
           <span fg={colors.fg.dim}>{taskTitle ? ' - ' : ''}</span>
-          <span fg={colors.fg.secondary}>{taskTitle ? truncatedTitle : ''}</span>
+          <span fg={valueColor}>{taskTitle ? truncatedTitle : 'Waiting for assignment...'}</span>
         </text>
       </box>
 
@@ -323,8 +318,11 @@ function PendingIterationCard({
       style={{
         width: '100%',
         flexDirection: 'column',
-        padding: 1,
-        marginBottom: 1,
+        paddingLeft: 1,
+        paddingRight: 1,
+        paddingTop: 0,
+        paddingBottom: 0,
+        marginBottom: 0,
         backgroundColor: isSelected ? colors.bg.highlight : colors.bg.secondary,
         border: true,
         borderColor: isSelected ? colors.border.active : colors.border.muted,
@@ -380,8 +378,8 @@ function PendingIterationCard({
         }}
       >
         <text>
-          <span fg={colors.fg.muted}>Task: </span>
-          <span fg={colors.fg.dim}>(not yet assigned)</span>
+          <span fg={isSelected ? colors.fg.primary : colors.fg.secondary}>Task: </span>
+          <span fg={colors.accent.tertiary}>Waiting for assignment...</span>
         </text>
       </box>
     </box>

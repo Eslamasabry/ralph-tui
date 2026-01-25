@@ -284,9 +284,16 @@ function EmptyState({ state, isLive }: { state: 'none' | 'pending' | 'empty'; is
     empty: { text: 'No output captured', icon: '○', hint: "Press 'o' to view details" },
   };
   const msg = messages[state];
+  const asciiArt =
+    '(  )   (   )  )\n' +
+    ' ) (   )  (  (\n' +
+    '( )  (    ) )\n' +
+    '_____________\n' +
+    '<_____________>';
 
   return (
     <box style={{ padding: 2, flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+      <text fg={colors.fg.muted}>{asciiArt}</text>
       <text fg={colors.fg.muted}>{msg.icon}</text>
       <text fg={colors.fg.muted}>{msg.text}</text>
       <text fg={colors.fg.dim} style={{ marginTop: 1 }}>
