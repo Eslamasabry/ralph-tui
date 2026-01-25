@@ -2698,6 +2698,13 @@ export function RunApp({
     ? 'Subagents'
     : 'Output';
 
+  const getPanelBorderColor = (paneName: FocusedPane): string => {
+    if (!subagentPanelVisible) {
+      return colors.border.normal;
+    }
+    return focusedPane === paneName ? colors.border.active : colors.border.muted;
+  };
+
   // Get selected task from filtered list (used for display in tasks view)
   const selectedTask = allTasksForCards[selectedIndex] ?? null;
 
@@ -3220,84 +3227,105 @@ export function RunApp({
     >
       {/* Tab Bar - instance navigation (local + remotes) */}
       {instanceTabs && instanceTabs.length > 1 && (
-        <TabBar
-          tabs={instanceTabs}
-          selectedIndex={selectedTabIndex}
-        />
+        <box style={{ backgroundColor: colors.bg.overlay }}>
+          <TabBar
+            tabs={instanceTabs}
+            selectedIndex={selectedTabIndex}
+          />
+        </box>
       )}
 
-      {/* View Tab Bar - view navigation (Tasks | Iterations | Activity | Logs | Settings) */}
-      <ViewTabBar
-        currentView={viewMode}
-        views={[
-          { id: 'tasks', label: 'Tasks' },
-          { id: 'iterations', label: 'Iterations' },
-          { id: 'activity', label: 'Activity' },
-          { id: 'logs', label: 'Logs' },
-          { id: 'settings', label: 'Settings' },
-        ]}
-      />
+      {/* View Tab Bar + Header */}
+      <box
+        style={{
+          flexDirection: 'column',
+          backgroundColor: colors.bg.secondary,
+          border: true,
+          borderColor: colors.border.muted,
+        }}
+      >
+        <ViewTabBar
+          currentView={viewMode}
+          views={[
+            { id: 'tasks', label: 'Tasks' },
+            { id: 'iterations', label: 'Iterations' },
+            { id: 'activity', label: 'Activity' },
+            { id: 'logs', label: 'Logs' },
+            { id: 'settings', label: 'Settings' },
+          ]}
+        />
 
-      {/* Header - compact design showing essential info + agent/tracker + fallback status */}
-      <Header
-        status={displayStatus}
-        elapsedTime={displayElapsedTime}
-        currentTaskId={displayCurrentTaskId}
-        currentTaskTitle={displayCurrentTaskTitle}
-        completedTasks={headerCounts.completed}
-        totalTasks={headerCounts.total}
-        agentName={displayAgentName}
-        trackerName={displayTrackerName}
-        activeAgentState={isViewingRemote ? remoteActiveAgent : activeAgentState}
-        rateLimitState={isViewingRemote ? remoteRateLimitState : rateLimitState}
-        currentIteration={displayCurrentIteration}
-        maxIterations={displayMaxIterations}
-        currentModel={displayModel}
-        sandboxConfig={isViewingRemote ? remoteSandboxConfig : sandboxConfig}
-        resolvedSandboxMode={isViewingRemote ? remoteResolvedSandboxMode : resolvedSandboxMode}
-        trackerRealtimeStatus={displayTrackerRealtimeStatus}
-        remoteInfo={
-          isViewingRemote && instanceTabs?.[selectedTabIndex]
-            ? {
-              name: instanceTabs[selectedTabIndex].alias ?? instanceTabs[selectedTabIndex].label,
-              host: instanceTabs[selectedTabIndex].host ?? 'unknown',
-              port: instanceTabs[selectedTabIndex].port ?? 0,
-            }
-            : undefined
-        }
-      />
-
-      {/* Progress Dashboard - toggleable with 'd' key */}
-      {showDashboard && (
-        <ProgressDashboard
+        {/* Header - compact design showing essential info + agent/tracker + fallback status */}
+        <Header
           status={displayStatus}
-          agentName={displayAgentName}
-          currentModel={displayModel}
-          trackerName={displayTrackerName || 'beads'}
-          epicName={epicName}
+          elapsedTime={displayElapsedTime}
           currentTaskId={displayCurrentTaskId}
           currentTaskTitle={displayCurrentTaskTitle}
+          completedTasks={headerCounts.completed}
+          totalTasks={headerCounts.total}
+          agentName={displayAgentName}
+          trackerName={displayTrackerName}
+          activeAgentState={isViewingRemote ? remoteActiveAgent : activeAgentState}
+          rateLimitState={isViewingRemote ? remoteRateLimitState : rateLimitState}
+          currentIteration={displayCurrentIteration}
+          maxIterations={displayMaxIterations}
+          currentModel={displayModel}
           sandboxConfig={isViewingRemote ? remoteSandboxConfig : sandboxConfig}
           resolvedSandboxMode={isViewingRemote ? remoteResolvedSandboxMode : resolvedSandboxMode}
+          trackerRealtimeStatus={displayTrackerRealtimeStatus}
           remoteInfo={
             isViewingRemote && instanceTabs?.[selectedTabIndex]
               ? {
-                  name: instanceTabs[selectedTabIndex].alias ?? instanceTabs[selectedTabIndex].label,
-                  host: instanceTabs[selectedTabIndex].host ?? 'unknown',
-                  port: instanceTabs[selectedTabIndex].port ?? 0,
-                }
+                name: instanceTabs[selectedTabIndex].alias ?? instanceTabs[selectedTabIndex].label,
+                host: instanceTabs[selectedTabIndex].host ?? 'unknown',
+                port: instanceTabs[selectedTabIndex].port ?? 0,
+              }
               : undefined
           }
-          autoCommit={isViewingRemote ? remoteAutoCommit : storedConfig?.autoCommit}
-          gitInfo={isViewingRemote ? remoteGitInfo : localGitInfo}
-          pendingMainCount={pendingMainCount}
-          worktreeHealth={{
-            stale: worktreeHealthSummary.stale,
-            prunable: worktreeHealthSummary.prunable,
-          }}
-          pruning={pruning}
-          onManualPrune={handlePruneWorktrees}
         />
+      </box>
+
+      {/* Progress Dashboard - toggleable with 'd' key */}
+      {showDashboard && (
+        <box
+          style={{
+            border: true,
+            borderColor: colors.border.muted,
+            backgroundColor: colors.bg.secondary,
+            paddingTop: 1,
+            paddingBottom: 1,
+          }}
+        >
+          <ProgressDashboard
+            status={displayStatus}
+            agentName={displayAgentName}
+            currentModel={displayModel}
+            trackerName={displayTrackerName || 'beads'}
+            epicName={epicName}
+            currentTaskId={displayCurrentTaskId}
+            currentTaskTitle={displayCurrentTaskTitle}
+            sandboxConfig={isViewingRemote ? remoteSandboxConfig : sandboxConfig}
+            resolvedSandboxMode={isViewingRemote ? remoteResolvedSandboxMode : resolvedSandboxMode}
+            remoteInfo={
+              isViewingRemote && instanceTabs?.[selectedTabIndex]
+                ? {
+                    name: instanceTabs[selectedTabIndex].alias ?? instanceTabs[selectedTabIndex].label,
+                    host: instanceTabs[selectedTabIndex].host ?? 'unknown',
+                    port: instanceTabs[selectedTabIndex].port ?? 0,
+                  }
+                : undefined
+            }
+            autoCommit={isViewingRemote ? remoteAutoCommit : storedConfig?.autoCommit}
+            gitInfo={isViewingRemote ? remoteGitInfo : localGitInfo}
+            pendingMainCount={pendingMainCount}
+            worktreeHealth={{
+              stale: worktreeHealthSummary.stale,
+              prunable: worktreeHealthSummary.prunable,
+            }}
+            pruning={pruning}
+            onManualPrune={handlePruneWorktrees}
+          />
+        </box>
       )}
 
       {/* Main content area */}
@@ -3307,6 +3335,8 @@ export function RunApp({
           flexShrink: 1,
           minHeight: 1,
           flexDirection: isCompact || viewMode === 'tasks' ? 'column' : 'row',
+          padding: layout.padding.small,
+          gap: 1,
         }}
       >
         {viewMode === 'iteration-detail' && detailIteration ? (
@@ -3344,21 +3374,28 @@ export function RunApp({
           />
         ) : viewMode === 'logs' ? (
           // Logs view - Output/CLI/Prompt sub-views
-          <box style={{ flexDirection: 'column', flexGrow: 1, height: '100%' }}>
+          <box
+            style={{
+              flexDirection: 'column',
+              flexGrow: 1,
+              height: '100%',
+              backgroundColor: colors.bg.secondary,
+              border: true,
+              borderColor: colors.border.normal,
+            }}
+          >
             <box
               style={{
                 flexGrow: 1,
                 flexShrink: 1,
-                border: true,
-                borderColor: colors.border.normal,
-                backgroundColor: colors.bg.primary,
+                backgroundColor: colors.bg.secondary,
               }}
             >
               {/* Log sub-views header */}
               <box
                 style={{
                   padding: 1,
-                  backgroundColor: colors.bg.secondary,
+                  backgroundColor: colors.bg.tertiary,
                   borderColor: colors.border.muted,
                 }}
               >
@@ -3436,7 +3473,7 @@ export function RunApp({
           </box>
         ) : viewMode === 'tasks' ? (
           <>
-            {/* Top half: Dashboard Banner + Task Cards Row */}
+            {/* Top: Banner + Task Cards */}
             <box
               style={{
                 flexDirection: 'column',
@@ -3445,13 +3482,6 @@ export function RunApp({
                 gap: 1,
               }}
             >
-              <box style={{ paddingLeft: 1, paddingRight: 1 }}>
-                <text>
-                  <span fg={colors.fg.secondary}>Run Overview</span>
-                  <span fg={colors.fg.muted}> - Live stats, merges, and validations.</span>
-                </text>
-              </box>
-
               {/* Dashboard Banner - shows task counts */}
               <DashboardBanner
                 executionMode={mergeStats.worktrees > 0 ? 'parallel' : 'sequential'}
@@ -3476,13 +3506,6 @@ export function RunApp({
                 appVersion={appVersion}
               />
 
-              <box style={{ paddingLeft: 1, paddingRight: 1 }}>
-                <text>
-                  <span fg={colors.fg.secondary}>Task Board</span>
-                  <span fg={colors.fg.muted}> - Status, ownership, and merge/validation badges.</span>
-                </text>
-              </box>
-
               {/* Task Cards Row - horizontal cards for all tasks */}
               <TaskCardsRow
                 tasks={allTasksForCards}
@@ -3492,14 +3515,32 @@ export function RunApp({
               />
             </box>
 
+            {/* Bottom: Split Pane (Details | Subagents) */}
             <box
               style={{
                 flexGrow: 1,
                 flexDirection: !isCompact && subagentPanelVisible ? 'row' : 'column',
+                gap: 1,
               }}
             >
-              <box style={{ flexGrow: 1, flexDirection: 'column' }}>
-                <box style={{ paddingLeft: 1, paddingRight: 1 }}>
+              <box
+                style={{
+                  flexGrow: 1,
+                  flexDirection: 'column',
+                  border: true,
+                  borderColor: getPanelBorderColor('output'),
+                  backgroundColor: colors.bg.secondary,
+                }}
+              >
+                <box
+                  style={{
+                    paddingLeft: 1,
+                    paddingRight: 1,
+                    backgroundColor: colors.bg.tertiary,
+                    border: true,
+                    borderColor: colors.border.muted,
+                  }}
+                >
                   <text>
                     <span fg={colors.fg.secondary}>Task Focus</span>
                     <span fg={colors.fg.muted}> - Details, output, and CLI.</span>
@@ -3527,25 +3568,40 @@ export function RunApp({
               </box>
 
               {subagentPanelVisible && !isCompact && (
-                <SubagentTreePanel
-                  tree={isViewingRemote ? remoteSubagentTree : subagentTree}
-                  activeSubagentId={focusedSubagentId}
-                  width={45}
-                  currentTaskId={displayCurrentTaskId}
-                  currentTaskTitle={displayCurrentTaskTitle}
-                  currentTaskStatus={displayStatus === 'executing' ? 'running' : displayStatus === 'complete' ? 'completed' : displayStatus === 'error' ? 'error' : 'idle'}
-                  selectedId={selectedSubagentId}
-                  onSelect={setSelectedSubagentId}
-                  isFocused={focusedPane === 'subagentTree'}
-                />
-              )}
-
-              {subagentPanelVisible && isCompact && (
-                <box style={{ marginTop: 1 }}>
+                <box
+                  style={{
+                    width: 45,
+                    border: true,
+                    borderColor: getPanelBorderColor('subagentTree'),
+                    backgroundColor: colors.bg.secondary,
+                  }}
+                >
                   <SubagentTreePanel
                     tree={isViewingRemote ? remoteSubagentTree : subagentTree}
                     activeSubagentId={focusedSubagentId}
-                    width={Math.max(30, Math.min(45, width - 4))}
+                    width={43}
+                    currentTaskId={displayCurrentTaskId}
+                    currentTaskTitle={displayCurrentTaskTitle}
+                    currentTaskStatus={displayStatus === 'executing' ? 'running' : displayStatus === 'complete' ? 'completed' : displayStatus === 'error' ? 'error' : 'idle'}
+                    selectedId={selectedSubagentId}
+                    onSelect={setSelectedSubagentId}
+                    isFocused={focusedPane === 'subagentTree'}
+                  />
+                </box>
+              )}
+
+              {subagentPanelVisible && isCompact && (
+                <box
+                  style={{
+                    border: true,
+                    borderColor: getPanelBorderColor('subagentTree'),
+                    backgroundColor: colors.bg.secondary,
+                  }}
+                >
+                  <SubagentTreePanel
+                    tree={isViewingRemote ? remoteSubagentTree : subagentTree}
+                    activeSubagentId={focusedSubagentId}
+                    width={Math.max(30, Math.min(43, width - 6))}
                     currentTaskId={displayCurrentTaskId}
                     currentTaskTitle={displayCurrentTaskTitle}
                     currentTaskStatus={displayStatus === 'executing' ? 'running' : displayStatus === 'complete' ? 'completed' : displayStatus === 'error' ? 'error' : 'idle'}
@@ -3559,37 +3615,64 @@ export function RunApp({
           </>
         ) : (
           <>
-            <IterationHistoryView
-              iterations={iterations}
-              totalIterations={totalIterations}
-              selectedIndex={iterationSelectedIndex}
-              runningIteration={currentIteration}
-              width={isCompact ? width : Math.floor(width * 0.5)}
-              subagentStats={subagentStatsCache}
-            />
-            <LogPane
-              taskTitle={selectedTask?.title}
-              taskId={selectedTask?.id}
-              currentIteration={selectedTaskIteration.iteration}
-              iterationOutput={displayIterationOutput}
-              iterationTiming={selectedTaskIteration.timing}
-              agentName={displayAgentInfo.agent}
-              currentModel={displayAgentInfo.model}
-              isFocused={!subagentPanelVisible || focusedPane === 'output'}
-            />
+            <box
+              style={{
+                width: isCompact ? '100%' : Math.floor(width * 0.5),
+                border: true,
+                borderColor: colors.border.normal,
+                backgroundColor: colors.bg.secondary,
+              }}
+            >
+              <IterationHistoryView
+                iterations={iterations}
+                totalIterations={totalIterations}
+                selectedIndex={iterationSelectedIndex}
+                runningIteration={currentIteration}
+                width={isCompact ? width : Math.floor(width * 0.5) - 2}
+                subagentStats={subagentStatsCache}
+              />
+            </box>
+            <box
+              style={{
+                flexGrow: 1,
+                border: true,
+                borderColor: getPanelBorderColor('output'),
+                backgroundColor: colors.bg.secondary,
+              }}
+            >
+              <LogPane
+                taskTitle={selectedTask?.title}
+                taskId={selectedTask?.id}
+                currentIteration={selectedTaskIteration.iteration}
+                iterationOutput={displayIterationOutput}
+                iterationTiming={selectedTaskIteration.timing}
+                agentName={displayAgentInfo.agent}
+                currentModel={displayAgentInfo.model}
+                isFocused={!subagentPanelVisible || focusedPane === 'output'}
+              />
+            </box>
             {/* Subagent Tree Panel - shown on right side when toggled with 'T' key */}
             {subagentPanelVisible && (
-              <SubagentTreePanel
-                tree={isViewingRemote ? remoteSubagentTree : subagentTree}
-                activeSubagentId={focusedSubagentId}
-                width={45}
-                currentTaskId={displayCurrentTaskId}
-                currentTaskTitle={displayCurrentTaskTitle}
-                currentTaskStatus={displayStatus === 'executing' ? 'running' : displayStatus === 'complete' ? 'completed' : displayStatus === 'error' ? 'error' : 'idle'}
-                selectedId={selectedSubagentId}
-                onSelect={setSelectedSubagentId}
-                isFocused={focusedPane === 'subagentTree'}
-              />
+              <box
+                style={{
+                  width: 45,
+                  border: true,
+                  borderColor: getPanelBorderColor('subagentTree'),
+                  backgroundColor: colors.bg.secondary,
+                }}
+              >
+                <SubagentTreePanel
+                  tree={isViewingRemote ? remoteSubagentTree : subagentTree}
+                  activeSubagentId={focusedSubagentId}
+                  width={43}
+                  currentTaskId={displayCurrentTaskId}
+                  currentTaskTitle={displayCurrentTaskTitle}
+                  currentTaskStatus={displayStatus === 'executing' ? 'running' : displayStatus === 'complete' ? 'completed' : displayStatus === 'error' ? 'error' : 'idle'}
+                  selectedId={selectedSubagentId}
+                  onSelect={setSelectedSubagentId}
+                  isFocused={focusedPane === 'subagentTree'}
+                />
+              </box>
             )}
           </>
         )}
