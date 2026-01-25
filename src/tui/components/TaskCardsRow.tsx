@@ -548,8 +548,9 @@ export function TaskCardsRow({
 
   // Auto-scroll to keep selected task visible
   const { width } = useTerminalDimensions();
-  const cardWidth = 24; // Approximate card width
-  const visibleCards = Math.floor((width - 4) / cardWidth);
+  const { cardWidth } = getCardDimensions(width);
+  const cardSlot = cardWidth + 1; // card width + gap
+  const visibleCards = Math.max(1, Math.floor((width - 6) / cardSlot));
 
   useEffect(() => {
     if (selectedIndex < internalScrollOffset) {
