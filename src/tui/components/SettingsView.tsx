@@ -256,6 +256,7 @@ function CategoryHeader({ category }: { category: CategoryInfo }): ReactNode {
         paddingRight: 1,
         border: true,
         borderColor: colors.border.muted,
+        backgroundColor: colors.bg.tertiary,
       }}
     >
       <text>
@@ -625,7 +626,7 @@ export function SettingsView({
                       style={{
                         flexDirection: 'row',
                         alignItems: 'center',
-                        backgroundColor: isSelected ? colors.bg.highlight : undefined,
+                        backgroundColor: isSelected ? colors.bg.highlight : colors.bg.secondary,
                         paddingLeft: 2 + layout.padding.small,
                         paddingRight: layout.padding.small,
                         marginBottom: 0,

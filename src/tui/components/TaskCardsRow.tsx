@@ -73,9 +73,17 @@ function getCardBackgroundColor(isSelected: boolean): string {
   return isSelected ? colors.bg.highlight : colors.bg.secondary;
 }
 
-function getCardBorderColor(isSelected: boolean, isFocused: boolean): string {
+function getCardBorderColor(
+  isSelected: boolean,
+  isFocused: boolean,
+  isRunning: boolean,
+  pulseOn: boolean
+): string {
   if (isSelected && isFocused) {
     return colors.accent.primary;
+  }
+  if (isRunning) {
+    return pulseOn ? colors.accent.primary : colors.border.active;
   }
   return colors.border.muted;
 }
@@ -145,6 +153,7 @@ function TaskCard({
   index,
   isSelected,
   isFocused,
+  pulseOn,
   timing,
   nowMs,
 }: {
@@ -152,6 +161,7 @@ function TaskCard({
   index: number;
   isSelected: boolean;
   isFocused: boolean;
+  pulseOn: boolean;
   timing?: IterationTimingInfo;
   nowMs: number;
 }): ReactNode {
@@ -159,12 +169,12 @@ function TaskCard({
   const statusIndicator = getTaskStatusIndicator(task.status);
   const workerLabel = task.workerId ? getWorkerLabel(task.workerId, index) : null;
   const backgroundColor = getCardBackgroundColor(isSelected);
-  const borderColor = getCardBorderColor(isSelected, isFocused);
+  const isRunning = task.status === 'active' || timing?.isRunning === true;
+  const borderColor = getCardBorderColor(isSelected, isFocused, isRunning, pulseOn);
 
   const { width: terminalWidth } = useTerminalDimensions();
   const { cardWidth, titleMaxWidth } = getCardDimensions(terminalWidth);
 
-  const isRunning = task.status === 'active';
   const statusLabel = getStatusLabel(task.status, task.blockedByTasks);
   const durationDisplay = useMemo(() => getDurationDisplay(timing, nowMs), [timing, nowMs]);
   const priorityDisplay = getPriorityDisplay(task.priority);
@@ -178,6 +188,7 @@ function TaskCard({
   // Calculate title with emphasis for selected/running
   const displayTitle = truncateText(task.title, titleMaxWidth);
   const titleColor = isSelected ? colors.fg.primary : colors.fg.secondary;
+  const runningIndicator = isRunning ? (pulseOn ? '▶' : '▷') : statusIndicator;
 
   return (
     <box
@@ -217,7 +228,7 @@ function TaskCard({
         {/* Header row: Status + ID + Priority */}
         <box style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
           <text fg={statusColor}>
-            {statusIndicator} {task.id}
+            {runningIndicator} {task.id}
           </text>
           {task.priority !== undefined && (
             <text fg={priorityDisplay.color}>{priorityDisplay.icon}</text>
@@ -239,7 +250,7 @@ function TaskCard({
         {/* Footer: Worker + Duration */}
         <box style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
           {workerLabel ? (
-            <text fg={colors.accent.tertiary}>
+            <text fg={isRunning && pulseOn ? colors.accent.tertiary : colors.fg.secondary}>
               [W-{workerLabel.split(' ').pop()}]
             </text>
           ) : (
@@ -346,6 +357,7 @@ export function TaskCardsRow({
   scrollOffset = 0,
   onScrollChange,
 }: TaskCardsRowProps): ReactNode {
+  const [pulseOn, setPulseOn] = useState(true);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [internalScrollOffset, setInternalScrollOffset] = useState(scrollOffset);
   const hasActive = tasks.some((task) => task.status === 'active');
@@ -360,12 +372,14 @@ export function TaskCardsRow({
 
   useEffect(() => {
     if (!hasActive) {
+      setPulseOn(true);
       return;
     }
 
     const interval = setInterval(() => {
+      setPulseOn((prev) => !prev);
       setNowMs(Date.now());
-    }, 1000);
+    }, 800);
 
     return () => clearInterval(interval);
   }, [hasActive]);
@@ -480,6 +494,7 @@ export function TaskCardsRow({
             index={originalIndex}
             isSelected={originalIndex === selectedIndex}
             isFocused={isFocused}
+            pulseOn={pulseOn}
             timing={timingByTaskId?.get(task.id)}
             nowMs={nowMs}
           />
