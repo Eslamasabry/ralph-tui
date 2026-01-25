@@ -6,7 +6,7 @@
 import { useKeyboard, useTerminalDimensions } from '@opentui/react';
 import type { ReactNode } from 'react';
 import { useState, useCallback, useEffect } from 'react';
-import { getColors, layout } from '../theme.js';
+import { getColors } from '../theme.js';
 import type { AppState, TaskItem } from '../types.js';
 import { Header } from './Header.js';
 import { Footer } from './Footer.js';
@@ -54,7 +54,7 @@ function createDefaultState(tasks: TaskItem[] = []): AppState {
  * Note: Task details are shown inline in the RightPanel, no separate drill-down view
  */
 export function App({ initialState, onQuit }: AppProps): ReactNode {
-  const { width, height } = useTerminalDimensions();
+  const { width } = useTerminalDimensions();
   const [state, setState] = useState<AppState>(() => ({
     ...createDefaultState(),
     ...initialState,
