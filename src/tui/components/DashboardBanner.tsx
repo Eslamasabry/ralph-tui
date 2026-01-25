@@ -121,7 +121,7 @@ export function DashboardBanner({
     <box
       style={{
         width: '100%',
-        height: 5,
+        minHeight: 5,
         flexDirection: 'column',
         backgroundColor: colors.bg.secondary,
         border: true,

@@ -3428,7 +3428,7 @@ export function RunApp({
             <box
               style={{
                 flexDirection: 'column',
-                height: topSectionHeight,
+                minHeight: topSectionHeight,
                 flexShrink: 0,
                 gap: 1,
               }}
