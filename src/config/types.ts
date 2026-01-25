@@ -212,6 +212,120 @@ export interface RuntimeOptions {
 }
 
 /**
+ * Parallel scheduler mode
+ */
+export type SchedulerMode = 'strict' | 'balanced' | 'off';
+
+/**
+ * Parallel execution configuration
+ */
+export interface ParallelConfig {
+  /** Scheduler mode for overlap avoidance */
+  schedulerMode: SchedulerMode;
+}
+
+/**
+ * Impact plan enforcement and drift policy
+ */
+export interface ImpactConfig {
+  /** Require impact plan for execution */
+  required: boolean;
+  /** Block merge on high-risk drift */
+  blockOnHighRiskDrift: boolean;
+  /** Allowed unplanned files before warning/blocking */
+  allowedUnplannedFiles: number;
+  /** Allowed unplanned directories before warning/blocking */
+  allowedUnplannedDirs: number;
+}
+
+/**
+ * Merge train configuration
+ */
+export interface MergeConfig {
+  /** Target branch for integration (e.g., "main" or "ralph/integration") */
+  targetBranch: string;
+  /** Continue merging other independent commits when a merge is blocked */
+  continueOnBlockedIndependent: boolean;
+}
+
+/**
+ * Resolver configuration for merge conflicts and semantic failures
+ */
+export interface ResolverConfig {
+  /** Whether resolver is enabled */
+  enabled: boolean;
+  /** Maximum attempts per merge */
+  maxAttempts: number;
+  /** Delay between attempts (ms) */
+  retryDelayMs: number;
+  /** Escalation policy after max attempts */
+  escalation: 'block' | 'abort';
+}
+
+/**
+ * Validation checks configuration
+ */
+export type ChecksMode = 'none' | 'smoke' | 'standard' | 'strict';
+
+export interface ChecksCommand {
+  /** Display name for the check */
+  name: string;
+  /** Command to run */
+  command: string;
+}
+
+export interface ChecksConfig {
+  /** Profile mode */
+  mode: ChecksMode;
+  /** Commands to run */
+  commands: ChecksCommand[];
+}
+
+export type QualityGateMode = 'per-merge' | 'coalesce' | 'batch-window';
+
+export type QualityGateFallbackStrategy = 'revert' | 'quarantine' | 'pause';
+
+export interface QualityGateCheckConfig {
+  /** Command to run */
+  command: string;
+  /** Whether the check is required */
+  required?: boolean;
+  /** Optional timeout in milliseconds */
+  timeoutMs?: number;
+  /** Whether to retry on failure */
+  retryOnFailure?: boolean;
+  /** Max reruns for this check */
+  maxReruns?: number;
+}
+
+export interface QualityGatesConfig {
+  /** Enable quality gates */
+  enabled: boolean;
+  /** Require impact table before parallel execution */
+  requireImpactTable: boolean;
+  /** Validation mode */
+  mode: QualityGateMode;
+  /** Batch window for batch-window mode */
+  batchWindowMs: number;
+  /** Optional worktree path override for validator */
+  validatorWorktreePath?: string;
+  /** Optional integration branch override */
+  integrationBranch?: string;
+  /** Max attempts for fix loop */
+  maxFixAttempts: number;
+  /** Max reruns for flaky tests */
+  maxTestReruns: number;
+  /** Clean repo before running checks */
+  cleanBeforeRun: boolean;
+  /** Fallback strategy after failures */
+  fallbackStrategy: QualityGateFallbackStrategy;
+  /** Named checks */
+  checks: Record<string, QualityGateCheckConfig>;
+  /** Path-based rules to select checks */
+  rules: Record<string, string[]>;
+}
+
+/**
  * Stored configuration (from YAML config file)
  */
 export interface StoredConfig {
@@ -246,6 +360,24 @@ export interface StoredConfig {
   errorHandling?: Partial<ErrorHandlingConfig>;
 
   sandbox?: SandboxConfig;
+
+  /** Parallel scheduler configuration */
+  parallel?: Partial<ParallelConfig>;
+
+  /** Impact plan enforcement configuration */
+  impact?: Partial<ImpactConfig>;
+
+  /** Merge train configuration */
+  merge?: Partial<MergeConfig>;
+
+  /** Resolver configuration */
+  resolver?: Partial<ResolverConfig>;
+
+  /** Validation checks configuration */
+  checks?: Partial<ChecksConfig>;
+
+  /** Quality gates configuration */
+  qualityGates?: Partial<QualityGatesConfig>;
 
   /** Shorthand: agent plugin name */
   agent?: string;
@@ -353,6 +485,24 @@ export interface RalphConfig {
 
   sandbox?: SandboxConfig;
 
+  /** Parallel scheduler configuration */
+  parallel: ParallelConfig;
+
+  /** Impact plan enforcement configuration */
+  impact: ImpactConfig;
+
+  /** Merge train configuration */
+  merge: MergeConfig;
+
+  /** Resolver configuration */
+  resolver: ResolverConfig;
+
+  /** Validation checks configuration */
+  checks: ChecksConfig;
+
+  /** Quality gates configuration */
+  qualityGates: QualityGatesConfig;
+
   /** Cleanup configuration for post-run cleanup actions */
   cleanup?: CleanupConfig;
 
@@ -390,6 +540,47 @@ export const DEFAULT_ERROR_HANDLING: ErrorHandlingConfig = {
   continueOnNonZeroExit: false,
 };
 
+export const DEFAULT_PARALLEL_CONFIG: ParallelConfig = {
+  schedulerMode: 'balanced',
+};
+
+export const DEFAULT_IMPACT_CONFIG: ImpactConfig = {
+  required: true,
+  blockOnHighRiskDrift: true,
+  allowedUnplannedFiles: 2,
+  allowedUnplannedDirs: 0,
+};
+
+export const DEFAULT_MERGE_CONFIG: MergeConfig = {
+  targetBranch: 'ralph/integration',
+  continueOnBlockedIndependent: true,
+};
+
+export const DEFAULT_RESOLVER_CONFIG: ResolverConfig = {
+  enabled: true,
+  maxAttempts: 3,
+  retryDelayMs: 2000,
+  escalation: 'block',
+};
+
+export const DEFAULT_CHECKS_CONFIG: ChecksConfig = {
+  mode: 'standard',
+  commands: [],
+};
+
+export const DEFAULT_QUALITY_GATES_CONFIG: QualityGatesConfig = {
+  enabled: true,
+  requireImpactTable: true,
+  mode: 'per-merge',
+  batchWindowMs: 5000,
+  maxFixAttempts: 2,
+  maxTestReruns: 2,
+  cleanBeforeRun: true,
+  fallbackStrategy: 'revert',
+  checks: {},
+  rules: {},
+};
+
 /**
  * Default configuration values
  */
@@ -402,4 +593,10 @@ export const DEFAULT_CONFIG: Omit<RalphConfig, 'agent' | 'tracker'> = {
   showTui: true,
   errorHandling: DEFAULT_ERROR_HANDLING,
   sandbox: DEFAULT_SANDBOX_CONFIG,
+  parallel: DEFAULT_PARALLEL_CONFIG,
+  impact: DEFAULT_IMPACT_CONFIG,
+  merge: DEFAULT_MERGE_CONFIG,
+  resolver: DEFAULT_RESOLVER_CONFIG,
+  checks: DEFAULT_CHECKS_CONFIG,
+  qualityGates: DEFAULT_QUALITY_GATES_CONFIG,
 };

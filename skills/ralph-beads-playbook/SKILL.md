@@ -31,6 +31,7 @@ Use this playbook to plan the next development set in ralph-tui by creating a be
 - 6–15 child beads with clear dependencies
 - Acceptance criteria for each child bead
 - Quality gates appended to every bead
+- Task Impact Table included for every child bead (required)
 
 ## Bead Sizing Rules
 - Each task must fit in a single ralph-tui run (one agent context window)
@@ -48,6 +49,38 @@ Use this playbook to plan the next development set in ralph-tui by creating a be
 - Avoid vague language ("works correctly")
 - Prefer concrete checks ("Header shows X", "Key Y toggles Z")
 
+## Task Impact Table (Required)
+Each child bead must include a Task Impact Table that declares expected file changes.
+
+**Required format:**
+```
+## Task Impact Table (Required)
+| action | path | risk | rationale |
+|---|---|---|---|
+| create | src/new.ts | low | Add new helper |
+| modify | src/app.tsx | med | Wire up UI |
+| delete | src/legacy.ts | low | Remove unused code |
+| rename | src/a.ts → src/b.ts | low | Clarify naming |
+
+Module tags: core, ui
+Expected checks:
+- bun run typecheck: `bun run typecheck`
+- bun run lint: `bun run lint`
+- bun run build: `bun run build`
+```
+
+**No file changes example (still required):**
+```
+## Task Impact Table (Required)
+| action | path | risk | rationale |
+|---|---|---|---|
+| (none) | (none) | low | No file changes declared |
+
+Module tags: (none)
+Expected checks:
+- (none)
+```
+
 ## Quality Gates (append to every task)
 - `bun run typecheck`
 - `bun run lint`
@@ -62,6 +95,17 @@ Use this playbook to plan the next development set in ralph-tui by creating a be
 ```
 Title: PC-003: Metrics Bar Threshold Colors
 Description: As a power user, I want throughput and success metrics with clear thresholds so that I can identify unhealthy runs quickly.
+
+## Task Impact Table (Required)
+| action | path | risk | rationale |
+|---|---|---|---|
+| modify | src/tui/components/MetricsBar.tsx | med | Add thresholds and colors |
+
+Module tags: tui
+Expected checks:
+- bun run typecheck: `bun run typecheck`
+- bun run lint: `bun run lint`
+- bun run build: `bun run build`
 
 Acceptance Criteria:
 - [ ] Metrics bar shows TPH, Success Rate, Efficiency, and Scheduler State

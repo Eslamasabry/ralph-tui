@@ -157,6 +157,29 @@ function getStatusLabel(status: TaskItem['status'], blockedByTasks?: BlockerInfo
   }
 }
 
+function getValidationBadge(status?: TaskItem['validationStatus']): { label: string; color: string } | null {
+  if (!status) return null;
+  switch (status) {
+    case 'passed':
+    case 'healed':
+      return { label: 'Validated ✓', color: colors.status.success };
+    case 'flaky':
+      return { label: 'Flaky ◐', color: colors.status.warning };
+    case 'fixing':
+    case 'running':
+      return { label: 'Validating…', color: colors.status.info };
+    case 'reverted':
+      return { label: 'Reverted ↩', color: colors.status.warning };
+    case 'blocked':
+    case 'failed':
+      return { label: 'Validation Failed', color: colors.status.error };
+    case 'queued':
+      return { label: 'Validation Queued', color: colors.fg.muted };
+    default:
+      return null;
+  }
+}
+
 /**
  * Get priority display with icon and color
  */
@@ -231,6 +254,7 @@ function TaskCard({
 
   const isRunning = task.status === 'active';
   const statusLabel = getStatusLabel(task.status, task.blockedByTasks);
+  const validationBadge = getValidationBadge(task.validationStatus);
   const durationDisplay = useMemo(() => getDurationDisplay(timing, nowMs), [timing, nowMs]);
   const startedDisplay = timing?.startedAt ? formatTimestamp(timing.startedAt) : '—';
   const endedDisplay = timing?.endedAt ? formatTimestamp(timing.endedAt) : '—';
@@ -303,6 +327,12 @@ function TaskCard({
           <text fg={statusColor}>
             {displayStatusLabel}
           </text>
+        </box>
+      )}
+
+      {validationBadge && (
+        <box style={{ marginTop: 0 }}>
+          <text fg={validationBadge.color}>{validationBadge.label}</text>
         </box>
       )}
 

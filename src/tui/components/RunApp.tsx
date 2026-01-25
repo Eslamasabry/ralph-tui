@@ -12,6 +12,7 @@ import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { colors, layout } from '../theme.js';
 import type { RalphStatus, TaskStatus } from '../theme.js';
 import type { TaskItem, BlockerInfo, DetailsViewMode, IterationTimingInfo, SubagentTreeNode } from '../types.js';
+import type { ValidationStatus } from '../../engine/types.js';
 import type { ActivityEvent } from '../../logs/activity-events.js';
 import { Header } from './Header.js';
 import { Footer } from './Footer.js';
@@ -225,7 +226,7 @@ function recalculateDependencyStatus(tasks: TaskItem[]): TaskItem[] {
 
     // If no dependencies, it's actionable
     if (!task.dependsOn || task.dependsOn.length === 0) {
-      return task.status === 'pending' ? { ...task, status: 'actionable' as TaskStatus } : task;
+      return task.status === 'pending' ? { ...task, status: 'actionable' } : task;
     }
 
     // Check if all dependencies are resolved (done/closed status in our TaskItem world)
@@ -255,7 +256,7 @@ function recalculateDependencyStatus(tasks: TaskItem[]): TaskItem[] {
     if (blockers.length > 0) {
       return {
         ...task,
-        status: 'blocked' as TaskStatus,
+        status: 'blocked',
         blockedByTasks: blockers,
       };
     }
@@ -263,7 +264,7 @@ function recalculateDependencyStatus(tasks: TaskItem[]): TaskItem[] {
     // All dependencies resolved - task is now actionable
     return {
       ...task,
-      status: 'actionable' as TaskStatus,
+      status: 'actionable',
       blockedByTasks: undefined,
     };
   });
@@ -276,9 +277,9 @@ function recalculateDependencyStatus(tasks: TaskItem[]): TaskItem[] {
  */
 function convertTasksWithDependencyStatus(trackerTasks: TrackerTask[]): TaskItem[] {
   // First, create a map of task IDs to their status and title for quick lookup
-  const taskMap = new Map<string, { status: string; title: string }>();
+  const taskMap = new Map<string, { status: BlockerInfo['status']; title: string }>();
   for (const task of trackerTasks) {
-    taskMap.set(task.id, { status: task.status, title: task.title });
+    taskMap.set(task.id, { status: task.status as BlockerInfo['status'], title: task.title });
   }
 
   // Convert each task, determining actionable/blocked based on dependencies
@@ -292,7 +293,7 @@ function convertTasksWithDependencyStatus(trackerTasks: TrackerTask[]): TaskItem
 
     // If no dependencies, it's actionable
     if (!task.dependsOn || task.dependsOn.length === 0) {
-      return { ...baseItem, status: 'actionable' as TaskStatus };
+      return { ...baseItem, status: 'actionable' };
     }
 
     // Check if all dependencies are completed/closed/cancelled
@@ -323,13 +324,13 @@ function convertTasksWithDependencyStatus(trackerTasks: TrackerTask[]): TaskItem
     if (blockers.length > 0) {
       return {
         ...baseItem,
-        status: 'blocked' as TaskStatus,
+        status: 'blocked',
         blockedByTasks: blockers,
       };
     }
 
     // All dependencies are resolved - task is actionable
-    return { ...baseItem, status: 'actionable' as TaskStatus };
+    return { ...baseItem, status: 'actionable' };
   });
 }
 
@@ -411,6 +412,16 @@ export function RunApp({
     failed: 0,
     syncPending: 0,
   });
+  const [validationStats, setValidationStats] = useState<{
+    queued: number;
+    running: boolean;
+    lastStatus?: ValidationStatus;
+  }>({
+    queued: 0,
+    running: false,
+    lastStatus: undefined,
+  });
+  const validationPlanTasksRef = useRef<Map<string, string[]>>(new Map());
   // Worktree health counts for pruning UI
   const [worktreeHealthSummary, setWorktreeHealthSummary] = useState<{
     total: number;
@@ -430,7 +441,7 @@ export function RunApp({
   // Pending main sync count for delivery guarantee visibility
   const [pendingMainCount, setPendingMainCount] = useState(0);
   // List of failures for run summary (US-002)
-  const [runFailures, setRunFailures] = useState<Array<{ taskId: string; taskTitle: string; commitHash?: string; reason: string; conflictFiles?: string[]; phase: 'merge' | 'sync' | 'recovery' | 'execution'; iteration?: number }>>([]);
+  const [runFailures, setRunFailures] = useState<Array<{ taskId: string; taskTitle: string; commitHash?: string; reason: string; conflictFiles?: string[]; phase: 'merge' | 'sync' | 'recovery' | 'execution' | 'validation'; iteration?: number }>>([]);
   // List of pending-main tasks for run summary (US-002)
   const [pendingMainTasksList, setPendingMainTasksList] = useState<Array<{ taskId: string; taskTitle: string; commitCount: number }>>([]);
   // Main sync failure reason for run summary
@@ -820,7 +831,15 @@ export function RunApp({
           setRemoteStatus('running');
           break;
         case 'engine:stopped':
-          setRemoteStatus(event.reason === 'completed' ? 'complete' : 'ready');
+          setRemoteStatus(
+            event.reason === 'completed'
+              ? 'complete'
+              : event.reason === 'no_tasks'
+                ? 'idle'
+                : event.reason === 'error'
+                  ? 'error'
+                  : 'stopped'
+          );
           break;
         case 'engine:paused':
           setRemoteStatus('paused');
@@ -935,7 +954,7 @@ export function RunApp({
   // Use remoteTasks when viewing a remote instance
   const displayedTasks = useMemo(() => {
     // Status priority for sorting (lower = higher priority)
-    const statusPriority: Record<TaskStatus, number> = {
+    const statusPriority = {
       active: 0,
       actionable: 1,
       pending: 2, // Treat pending same as actionable (shouldn't happen often)
@@ -943,7 +962,7 @@ export function RunApp({
       error: 4, // Failed tasks show after blocked
       done: 5,
       closed: 6,
-    };
+    } satisfies Record<TaskStatus, number>;
 
     // Use remote tasks when viewing remote, local tasks otherwise
     const sourceTasks = isViewingRemote ? remoteTasks : tasks;
@@ -987,7 +1006,7 @@ export function RunApp({
       if (bIsActiveWithWorker) return 1;
 
       // Then sort by status priority (displayedTasks already has this order)
-      const statusPriority: Record<string, number> = {
+      const statusPriority = {
         active: 0,
         actionable: 1,
         pending: 2,
@@ -995,7 +1014,7 @@ export function RunApp({
         error: 4,
         done: 5,
         closed: 6,
-      };
+      } satisfies Record<TaskStatus, number>;
       const priorityA = statusPriority[a.status] ?? 10;
       const priorityB = statusPriority[b.status] ?? 10;
       if (priorityA !== priorityB) {
@@ -1135,7 +1154,7 @@ export function RunApp({
               {
                 id: event.task.id,
                 title: event.task.title,
-                status: 'pending' as TaskStatus,
+                status: 'pending',
                 description: event.task.description,
                 iteration: event.iteration,
               },
@@ -1177,7 +1196,7 @@ export function RunApp({
           // Update task list to show current task as active
           setTasks((prev) =>
             prev.map((t) =>
-              t.id === event.task.id ? { ...t, status: 'active' as TaskStatus } : t
+              t.id === event.task.id ? { ...t, status: 'active' } : t
             )
           );
           // Select the active task (index 0 after sorting, since active tasks have highest priority)
@@ -1195,9 +1214,9 @@ export function RunApp({
             // Update completed task status AND recalculate dependency status for all tasks
             // This ensures that tasks previously blocked by this one become actionable
             setTasks((prev) => {
-              const updated = prev.map((t) =>
+              const updated: TaskItem[] = prev.map((t) =>
                 t.id === event.result.task.id
-                  ? { ...t, status: 'done' as TaskStatus }
+                  ? { ...t, status: 'done' }
                   : t
               );
               // Recalculate blocked/actionable status now that dependencies may have changed
@@ -1236,7 +1255,7 @@ export function RunApp({
           // Mark task as having an error (not 'blocked' - that's for dependency issues)
           setTasks((prev) =>
             prev.map((t) =>
-              t.id === event.task.id ? { ...t, status: 'error' as TaskStatus } : t
+              t.id === event.task.id ? { ...t, status: 'error' } : t
             )
           );
           // Track failure for run summary (US-002)
@@ -1255,7 +1274,7 @@ export function RunApp({
         case 'task:completed':
           setTasks((prev) =>
             prev.map((t) =>
-              t.id === event.task.id ? { ...t, status: 'done' as TaskStatus } : t
+              t.id === event.task.id ? { ...t, status: 'done' } : t
             )
           );
           break;
@@ -1263,7 +1282,7 @@ export function RunApp({
         case 'task:blocked':
           setTasks((prev) =>
             prev.map((t) =>
-              t.id === event.task.id ? { ...t, status: 'blocked' as TaskStatus } : t
+              t.id === event.task.id ? { ...t, status: 'blocked' } : t
             )
           );
           setInfoFeedback(`Merge blocked: ${event.reason}`);
@@ -1343,7 +1362,7 @@ export function RunApp({
                 const prevTask = prev.find((t) => t.id === freshTask.id);
                 return {
                   ...freshTask,
-                  status: 'active' as TaskStatus,
+                  status: 'active',
                   workerId: prevTask?.workerId,
                 };
               }
@@ -1504,6 +1523,11 @@ export function RunApp({
             failed: 0,
             syncPending: 0,
           });
+          setValidationStats({
+            queued: 0,
+            running: false,
+            lastStatus: undefined,
+          });
           break;
         case 'parallel:stopped':
           setMergeStats((prev) => ({ ...prev, worktrees: 0 }));
@@ -1537,6 +1561,210 @@ export function RunApp({
               phase: 'merge',
             },
           ]);
+          break;
+        case 'parallel:impact-missing':
+          setInfoFeedback(parallelEvent.reason);
+          appendActivityEvent({
+            category: 'system',
+            eventType: 'failed',
+            timestamp: parallelEvent.timestamp,
+            severity: 'warning',
+            description: `Impact plan missing: ${parallelEvent.task.id}`,
+            taskId: parallelEvent.task.id,
+            taskTitle: parallelEvent.task.title,
+          });
+          break;
+        case 'parallel:validation-queued':
+          setValidationStats((prev) => ({
+            ...prev,
+            queued: parallelEvent.queueDepth,
+          }));
+          validationPlanTasksRef.current.set(
+            parallelEvent.plan.planId,
+            parallelEvent.plan.taskIds
+          );
+          setTasks((prev) =>
+            prev.map((task) =>
+              parallelEvent.plan.taskIds.includes(task.id)
+                ? { ...task, validationStatus: 'queued' }
+                : task
+            )
+          );
+          appendActivityEvent({
+            category: 'system',
+            eventType: 'started',
+            timestamp: parallelEvent.timestamp,
+            severity: 'info',
+            description: `Validation queued: ${parallelEvent.plan.planId}`,
+          });
+          break;
+        case 'parallel:validation-started':
+          setValidationStats((prev) => ({
+            ...prev,
+            running: true,
+          }));
+          {
+            const taskIds = validationPlanTasksRef.current.get(parallelEvent.plan.planId) ?? parallelEvent.plan.taskIds;
+            setTasks((prev) =>
+              prev.map((task) =>
+                taskIds.includes(task.id) ? { ...task, validationStatus: 'running' } : task
+              )
+            );
+          }
+          appendActivityEvent({
+            category: 'system',
+            eventType: 'started',
+            timestamp: parallelEvent.timestamp,
+            severity: 'info',
+            description: `Validation started: ${parallelEvent.plan.planId}`,
+          });
+          break;
+        case 'parallel:validation-check-finished':
+          appendActivityEvent({
+            category: 'system',
+            eventType: parallelEvent.exitCode === 0 ? 'completed' : 'failed',
+            timestamp: parallelEvent.timestamp,
+            severity: parallelEvent.exitCode === 0 ? 'info' : 'warning',
+            description: `Check ${parallelEvent.checkId}: exit ${parallelEvent.exitCode}`,
+          });
+          break;
+        case 'parallel:validation-passed':
+          setValidationStats((prev) => ({
+            ...prev,
+            queued: Math.max(0, prev.queued - 1),
+            running: false,
+            lastStatus: parallelEvent.status,
+          }));
+          {
+            const taskIds = validationPlanTasksRef.current.get(parallelEvent.planId) ?? [];
+            setTasks((prev) =>
+              prev.map((task) =>
+                taskIds.includes(task.id) ? { ...task, validationStatus: parallelEvent.status } : task
+              )
+            );
+          }
+          appendActivityEvent({
+            category: 'system',
+            eventType: 'completed',
+            timestamp: parallelEvent.timestamp,
+            severity: 'info',
+            description: `Validation ${parallelEvent.status}: ${parallelEvent.planId}`,
+          });
+          break;
+        case 'parallel:validation-failed':
+          setValidationStats((prev) => ({
+            ...prev,
+            queued: Math.max(0, prev.queued - 1),
+            running: false,
+            lastStatus: parallelEvent.status,
+          }));
+          {
+            const taskIds = validationPlanTasksRef.current.get(parallelEvent.planId) ?? [];
+            setTasks((prev) =>
+              prev.map((task) =>
+                taskIds.includes(task.id) ? { ...task, validationStatus: 'failed' } : task
+              )
+            );
+          }
+          setRunFailures((prev) => [
+            ...prev,
+            {
+              taskId: parallelEvent.planId,
+              taskTitle: parallelEvent.planId,
+              reason: parallelEvent.reason,
+              phase: 'validation',
+            },
+          ]);
+          appendActivityEvent({
+            category: 'system',
+            eventType: 'failed',
+            timestamp: parallelEvent.timestamp,
+            severity: 'error',
+            description: `Validation failed: ${parallelEvent.failedCheckId} (${parallelEvent.reason})`,
+          });
+          break;
+        case 'parallel:validation-fix-started':
+          setValidationStats((prev) => ({
+            ...prev,
+            running: true,
+            lastStatus: 'fixing',
+          }));
+          {
+            const taskIds = validationPlanTasksRef.current.get(parallelEvent.planId) ?? [];
+            setTasks((prev) =>
+              prev.map((task) =>
+                taskIds.includes(task.id) ? { ...task, validationStatus: 'fixing' } : task
+              )
+            );
+          }
+          appendActivityEvent({
+            category: 'system',
+            eventType: 'started',
+            timestamp: parallelEvent.timestamp,
+            severity: 'info',
+            description: `Validation fix attempt ${parallelEvent.attempt} started`,
+          });
+          break;
+        case 'parallel:validation-fix-succeeded':
+          appendActivityEvent({
+            category: 'system',
+            eventType: 'completed',
+            timestamp: parallelEvent.timestamp,
+            severity: 'info',
+            description: `Validation fix attempt ${parallelEvent.attempt} succeeded`,
+          });
+          break;
+        case 'parallel:validation-fix-failed':
+          appendActivityEvent({
+            category: 'system',
+            eventType: 'failed',
+            timestamp: parallelEvent.timestamp,
+            severity: 'warning',
+            description: `Validation fix attempt ${parallelEvent.attempt} failed: ${parallelEvent.reason}`,
+          });
+          break;
+        case 'parallel:validation-reverted':
+          setValidationStats((prev) => ({
+            ...prev,
+            lastStatus: 'reverted',
+          }));
+          {
+            const taskIds = validationPlanTasksRef.current.get(parallelEvent.planId) ?? [];
+            setTasks((prev) =>
+              prev.map((task) =>
+                taskIds.includes(task.id) ? { ...task, validationStatus: 'reverted' } : task
+              )
+            );
+          }
+          appendActivityEvent({
+            category: 'system',
+            eventType: 'failed',
+            timestamp: parallelEvent.timestamp,
+            severity: 'warning',
+            description: `Validation reverted commit ${parallelEvent.commit.slice(0, 7)}: ${parallelEvent.reason}`,
+          });
+          break;
+        case 'parallel:validation-blocked':
+          setValidationStats((prev) => ({
+            ...prev,
+            running: false,
+            lastStatus: 'blocked',
+          }));
+          {
+            const taskIds = validationPlanTasksRef.current.get(parallelEvent.planId) ?? [];
+            setTasks((prev) =>
+              prev.map((task) =>
+                taskIds.includes(task.id) ? { ...task, validationStatus: 'blocked' } : task
+              )
+            );
+          }
+          appendActivityEvent({
+            category: 'system',
+            eventType: 'failed',
+            timestamp: parallelEvent.timestamp,
+            severity: 'error',
+            description: `Validation blocked: ${parallelEvent.reason}`,
+          });
           break;
         case 'parallel:main-sync-skipped':
           setMergeStats((prev) => ({
@@ -1639,7 +1867,7 @@ export function RunApp({
           // Set task status to active so it appears in running tasks
           setTasks((prev) =>
             prev.map((t) =>
-              t.id === parallelEvent.task.id ? { ...t, status: 'active' as TaskStatus } : t
+              t.id === parallelEvent.task.id ? { ...t, status: 'active' } : t
             )
           );
           break;
@@ -1653,8 +1881,8 @@ export function RunApp({
           // Set task status based on completion
           if (parallelEvent.completed) {
             setTasks((prev) => {
-              const updated = prev.map((t) =>
-                t.id === parallelEvent.task.id ? { ...t, status: 'done' as TaskStatus } : t
+              const updated: TaskItem[] = prev.map((t) =>
+                t.id === parallelEvent.task.id ? { ...t, status: 'done' } : t
               );
               // Recalculate blocked/actionable status for dependent tasks
               return recalculateDependencyStatus(updated);
@@ -2503,7 +2731,9 @@ export function RunApp({
     const effectiveTaskStatus = viewMode === 'iterations'
       ? selectedIteration?.task?.status
       : selectedTask?.status;
-    const isActiveTask = effectiveTaskStatus === 'active' || effectiveTaskStatus === 'in_progress';
+    const isActiveTask =
+      effectiveTaskStatus === 'active' ||
+      effectiveTaskStatus === 'in_progress'; // Tracker status in iterations view.
     const isExecuting = currentTaskId === effectiveTaskId || isActiveTask;
     if (isExecuting && currentTaskId) {
       // Use the captured start time from the iteration:started event
@@ -3164,6 +3394,9 @@ export function RunApp({
                 mergesSucceeded={mergeStats.merged}
                 mergesFailed={mergeStats.failed}
                 mainSyncPending={mergeStats.syncPending}
+                validationsQueued={validationStats.queued}
+                validating={validationStats.running}
+                lastValidationStatus={validationStats.lastStatus}
                 appVersion={appVersion}
               />
 

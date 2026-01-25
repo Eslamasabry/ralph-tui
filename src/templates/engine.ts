@@ -289,6 +289,9 @@ export interface ExtendedTemplateContext {
 
   /** Selection reason (for beads-bv tracker) */
   selectionReason?: string;
+
+  /** Impact plan table (pre-rendered markdown) */
+  impactPlan?: string;
 }
 
 /**
@@ -314,6 +317,7 @@ export function buildTemplateVariables(
   let prdCompletedCount = '0';
   let prdTotalCount = '0';
   let selectionReason = '';
+  let impactPlan = '';
 
   if (typeof extended === 'string') {
     recentProgress = extended;
@@ -321,6 +325,7 @@ export function buildTemplateVariables(
     recentProgress = extended.recentProgress ?? '';
     codebasePatterns = extended.codebasePatterns ?? '';
     selectionReason = extended.selectionReason ?? '';
+    impactPlan = extended.impactPlan ?? '';
 
     if (extended.prd) {
       prdName = extended.prd.name;
@@ -374,6 +379,7 @@ export function buildTemplateVariables(
     codebasePatterns,
     // New selection context variable
     selectionReason,
+    impactPlan,
   };
 }
 

@@ -15,10 +15,11 @@ Converts PRDs to beads (epic + child tasks) for ralph-tui autonomous execution.
 
 Take a PRD (markdown file or text) and create beads in `.beads/beads.jsonl`:
 1. **Extract Quality Gates** from the PRD's "Quality Gates" section
-2. Create an **epic** bead for the feature
-3. Create **child beads** for each user story (with quality gates appended)
-4. Set up **dependencies** between beads (schema → backend → UI)
-5. Output ready for `ralph-tui run --tracker beads`
+2. **Extract Task Impact Tables** for each story (required)
+3. Create an **epic** bead for the feature
+4. Create **child beads** for each user story (include impact table + quality gates)
+5. Set up **dependencies** between beads (schema → backend → UI)
+6. Output ready for `ralph-tui run --tracker beads`
 
 ---
 
@@ -45,6 +46,55 @@ Extract:
 
 ---
 
+## Step 2: Require Task Impact Tables (MANDATORY)
+
+Each story must include a **Task Impact Table** describing expected file operations. This is required for autonomous parallel execution.
+
+If the PRD does not include an impact table per story, ask the user to provide one. Do not proceed without it unless explicitly told to.
+
+**Impact Table schema (per story):**
+
+- `create[]`: `{ path, reason, risk }`
+- `modify[]`: `{ path, reason, risk }`
+- `delete[]`: `{ path, reason, risk }`
+- `rename[]`: `{ from, to, reason, risk }`
+- `expectedChecks[]`: optional `{ name, command }`
+- `moduleTags[]`: optional module labels
+
+**Risk levels:** `low | med | high`
+
+Use this exact markdown table format inside the bead description:
+
+```markdown
+## Task Impact Table (Required)
+| action | path | risk | rationale |
+|---|---|---|---|
+| create | src/new.ts | low | Add new API helper |
+| modify | src/app.tsx | med | Wire new UI hook |
+| delete | src/legacy.ts | low | Remove unused code |
+| rename | src/a.ts → src/b.ts | low | Clarify naming |
+
+Module tags: core, ui
+Expected checks:
+- test: `bun test`
+```
+
+If there are no file changes, include a single `(none)` row and `Expected checks: - (none)` (do not omit the table).
+
+**No file changes example (still required):**
+```markdown
+## Task Impact Table (Required)
+| action | path | risk | rationale |
+|---|---|---|---|
+| (none) | (none) | low | No file changes declared |
+
+Module tags: (none)
+Expected checks:
+- (none)
+```
+
+---
+
 ## Output Format
 
 Beads use `bd create` command:
@@ -61,7 +111,7 @@ bd create --type=epic \
 bd create \
   --parent=EPIC_ID \
   --title="[Story Title]" \
-  --description="[Story description with acceptance criteria INCLUDING quality gates]" \
+  --description="[Story description with Task Impact Table + acceptance criteria INCLUDING quality gates]" \
   --priority=[1-4] \
   --labels="ralph,task"
 ```
@@ -137,7 +187,11 @@ ralph-tui will:
 
 ## Acceptance Criteria: Quality Gates + Story-Specific
 
-Each bead's description should include acceptance criteria with:
+Each bead's description must include, in this order:
+1. **Task Impact Table** (required)
+2. **Acceptance Criteria** (story-specific + quality gates appended)
+
+Acceptance criteria should include:
 1. **Story-specific criteria** from the PRD (what this story accomplishes)
 2. **Quality gates** from the PRD's Quality Gates section (appended at the end)
 
@@ -157,14 +211,15 @@ Each bead's description should include acceptance criteria with:
 ## Conversion Rules
 
 1. **Extract Quality Gates** from PRD first
-2. **Each user story → one bead**
-3. **First story**: No dependencies (creates foundation)
-4. **Subsequent stories**: Depend on their predecessors (UI depends on backend, etc.)
-5. **Priority**: Based on dependency order, then document order (0=critical, 2=medium, 4=backlog)
-6. **Labels**: Epic gets `ralph,feature`; Tasks get `ralph,task`
-7. **All stories**: `status: "open"`
-8. **Acceptance criteria**: Story criteria + quality gates appended
-9. **UI stories**: Also append UI-specific gates (browser verification)
+2. **Require Impact Tables** for every story
+3. **Each user story → one bead**
+4. **First story**: No dependencies (creates foundation)
+5. **Subsequent stories**: Depend on their predecessors (UI depends on backend, etc.)
+6. **Priority**: Based on dependency order, then document order (0=critical, 2=medium, 4=backlog)
+7. **Labels**: Epic gets `ralph,feature`; Tasks get `ralph,task`
+8. **All stories**: `status: "open"`
+9. **Description**: Task Impact Table + Acceptance Criteria (quality gates appended)
+10. **UI stories**: Also append UI-specific gates (browser verification)
 
 ---
 
@@ -245,6 +300,17 @@ bd create --parent=ralph-tui-abc \
   --title="US-001: Add investorType field to investor table" \
   --description="As a developer, I need to categorize investors as 'cold' or 'friend'.
 
+## Task Impact Table (Required)
+| action | path | risk | rationale |
+|---|---|---|---|
+| modify | prisma/schema.prisma | med | Add investorType enum field |
+| create | prisma/migrations/2024... | low | Migration for new column |
+
+Module tags: db
+Expected checks:
+- pnpm typecheck: `pnpm typecheck`
+- pnpm lint: `pnpm lint`
+
 ## Acceptance Criteria
 - [ ] Add investorType column: 'cold' | 'friend' (default 'cold')
 - [ ] Generate and run migration successfully
@@ -257,6 +323,17 @@ bd create --parent=ralph-tui-abc \
 bd create --parent=ralph-tui-abc \
   --title="US-002: Add type toggle to investor list rows" \
   --description="As Ryan, I want to toggle investor type directly from the list.
+
+## Task Impact Table (Required)
+| action | path | risk | rationale |
+|---|---|---|---|
+| modify | src/components/InvestorRow.tsx | med | Add toggle UI |
+| modify | src/actions/investors.ts | med | Update type mutation |
+
+Module tags: ui
+Expected checks:
+- pnpm typecheck: `pnpm typecheck`
+- pnpm lint: `pnpm lint`
 
 ## Acceptance Criteria
 - [ ] Each row has Cold | Friend toggle
@@ -275,6 +352,17 @@ bd dep add ralph-tui-002 ralph-tui-001
 bd create --parent=ralph-tui-abc \
   --title="US-003: Filter investors by type" \
   --description="As Ryan, I want to filter the list to see just friends or cold.
+
+## Task Impact Table (Required)
+| action | path | risk | rationale |
+|---|---|---|---|
+| modify | src/components/InvestorList.tsx | med | Add filter dropdown |
+| modify | src/routes/investors.tsx | low | Persist filter in URL |
+
+Module tags: ui
+Expected checks:
+- pnpm typecheck: `pnpm typecheck`
+- pnpm lint: `pnpm lint`
 
 ## Acceptance Criteria
 - [ ] Filter dropdown: All | Cold | Friend
@@ -315,6 +403,7 @@ ralph-tui will:
 ## Checklist Before Creating Beads
 
 - [ ] Extracted Quality Gates from PRD (or asked user if missing)
+- [ ] Task Impact Table included for each story (required)
 - [ ] Each story is completable in one iteration (small enough)
 - [ ] Stories are ordered by dependency (schema → backend → UI)
 - [ ] Quality gates appended to every bead's acceptance criteria

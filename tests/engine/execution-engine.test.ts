@@ -13,6 +13,7 @@ import type {
   IterationResult,
 } from '../../src/engine/types.js';
 import type { RalphConfig } from '../../src/config/types.js';
+import { DEFAULT_QUALITY_GATES_CONFIG } from '../../src/config/types.js';
 import type { TrackerTask, TrackerPlugin } from '../../src/plugins/trackers/types.js';
 import type { AgentPlugin, AgentExecutionHandle, AgentExecutionResult } from '../../src/plugins/agents/types.js';
 import { createTrackerTask, createTrackerTasks } from '../factories/tracker-task.js';
@@ -93,6 +94,7 @@ function createTestConfig(overrides: Partial<RalphConfig> = {}): RalphConfig {
       retryDelayMs: 0,
       continueOnNonZeroExit: false,
     },
+    qualityGates: DEFAULT_QUALITY_GATES_CONFIG,
     ...overrides,
   } as RalphConfig;
 }

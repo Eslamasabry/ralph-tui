@@ -4,6 +4,7 @@
  */
 
 import type { ReactNode } from 'react';
+import type { ValidationStatus } from '../../engine/types.js';
 import { colors } from '../theme.js';
 
 /**
@@ -40,6 +41,12 @@ export interface DashboardBannerProps {
   mergesFailed: number;
   /** Number of main sync pending events */
   mainSyncPending: number;
+  /** Number of queued validation plans */
+  validationsQueued: number;
+  /** Whether validation is currently running */
+  validating: boolean;
+  /** Last validation status */
+  lastValidationStatus?: ValidationStatus;
   /** Running ralph-tui version string (e.g., "v1.2.3") */
   appVersion?: string;
 }
@@ -85,6 +92,9 @@ export function DashboardBanner({
   mergesSucceeded,
   mergesFailed,
   mainSyncPending,
+  validationsQueued,
+  validating,
+  lastValidationStatus,
   appVersion,
 }: DashboardBannerProps): ReactNode {
   const hasActive = activeTasks > 0;
@@ -92,6 +102,20 @@ export function DashboardBanner({
   const statusIndicator = hasActive ? '●' : hasQueued ? '◐' : '○';
   const statusColor = hasActive ? colors.task.active : hasQueued ? colors.status.warning : colors.fg.muted;
   const statusLabel = hasActive ? 'Running' : hasQueued ? 'Queued' : 'Idle';
+  const validationLabel = validating
+    ? 'Validating'
+    : lastValidationStatus
+      ? lastValidationStatus
+      : 'Idle';
+  const validationColor = validating
+    ? colors.status.info
+    : lastValidationStatus === 'passed' || lastValidationStatus === 'healed'
+      ? colors.status.success
+      : lastValidationStatus === 'flaky' || lastValidationStatus === 'reverted'
+        ? colors.status.warning
+        : lastValidationStatus === 'failed' || lastValidationStatus === 'blocked'
+          ? colors.status.error
+          : colors.fg.muted;
 
   return (
     <box
@@ -164,6 +188,11 @@ export function DashboardBanner({
         <StatItem label="Merged" value={mergesSucceeded} color={colors.status.success} />
         <StatItem label="Merge Fail" value={mergesFailed} color={colors.status.error} />
         <StatItem label="Sync Pending" value={mainSyncPending} color={colors.status.warning} />
+        <StatItem label="Valid Q" value={validationsQueued} color={colors.fg.muted} />
+        <text>
+          <span fg={colors.fg.muted}>Validation:</span>{' '}
+          <span fg={validationColor}>{validationLabel}</span>
+        </text>
       </box>
     </box>
   );

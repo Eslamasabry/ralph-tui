@@ -48,7 +48,6 @@ export const darkColors = {
     blocked: '#f7768e',
     error: '#f7768e',
     closed: '#414868',
-    queued: '#e0af68',
   },
 
   // Accent colors - for emphasis and branding
@@ -136,7 +135,6 @@ export const lightColors = {
     blocked: '#dc2626',
     error: '#dc2626',
     closed: '#787c99',
-    queued: '#b45309',
   },
 
   // Accent colors - adjusted for light theme visibility
@@ -203,6 +201,7 @@ export let currentThemeMode: ThemeMode = 'dark';
  */
 export function setThemeMode(mode: ThemeMode): void {
   currentThemeMode = mode;
+  colors = getColors();
 }
 
 /**
@@ -215,7 +214,7 @@ export function getColors() {
 /**
  * Active color scheme colors (convenience export for current theme)
  */
-export const colors = darkColors;
+export let colors = getColors();
 
 /**
  * Current color scheme (defaults to dark)
@@ -261,7 +260,7 @@ export const statusIndicators = {
   complete: '✓',
   idle: '○',
   ready: '◉', // Ready to start - waiting for user action
-} as const;
+} satisfies Record<TaskStatus | RalphStatus, string>;
 
 /**
  * Keyboard shortcut display mappings for footer (condensed)

@@ -387,6 +387,52 @@ Use `ralph-tui template show` to see which template would be used, and `ralph-tu
 | `--notify` | boolean | Enable notifications |
 | `--no-notify` | boolean | Disable notifications |
 
+## Quality Gates (Parallel)
+
+Quality gates validate merged parallel work before syncing to main. These settings are local-only and apply to parallel execution.
+
+```toml
+[qualityGates]
+enabled = true
+requireImpactTable = true
+mode = "per-merge"            # "per-merge" | "coalesce" | "batch-window"
+batchWindowMs = 5000
+validatorWorktreePath = ".ralph-worktrees/validator"
+integrationBranch = "ralph/integration"
+maxFixAttempts = 2
+maxTestReruns = 2
+cleanBeforeRun = true
+fallbackStrategy = "revert"   # "revert" | "quarantine" | "pause"
+
+[qualityGates.checks.sanity]
+required = true
+command = "pnpm -s lint && pnpm -s typecheck"
+
+[qualityGates.checks.unit]
+required = true
+command = "pnpm -s test"
+
+[qualityGates.rules]
+"src/ui/" = ["sanity", "unit"]
+"src/engine/" = ["sanity", "unit"]
+"package.json" = ["sanity", "unit"]
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `qualityGates.enabled` | boolean | `true` | Enable quality gates |
+| `qualityGates.requireImpactTable` | boolean | `true` | Require impact table before parallel tasks |
+| `qualityGates.mode` | string | `"per-merge"` | Validation queue mode |
+| `qualityGates.batchWindowMs` | number | `5000` | Batch window for `batch-window` mode |
+| `qualityGates.validatorWorktreePath` | string | - | Custom validator worktree path |
+| `qualityGates.integrationBranch` | string | - | Override integration branch |
+| `qualityGates.maxFixAttempts` | number | `2` | Max fix attempts per validation |
+| `qualityGates.maxTestReruns` | number | `2` | Max reruns for flake checks |
+| `qualityGates.cleanBeforeRun` | boolean | `true` | Hard reset + clean before checks |
+| `qualityGates.fallbackStrategy` | string | `"revert"` | Failure handling strategy |
+| `qualityGates.checks` | object | `{}` | Named checks (command + required) |
+| `qualityGates.rules` | object | `{}` | Path prefix -> check list |
+
 ## Validation Constraints
 
 All numeric options have validation constraints:

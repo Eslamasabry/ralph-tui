@@ -21,6 +21,12 @@ import {
   DEFAULT_SANDBOX_CONFIG,
   DEFAULT_CLEANUP_CONFIG,
   DEFAULT_BACKUP_CONFIG,
+  DEFAULT_PARALLEL_CONFIG,
+  DEFAULT_IMPACT_CONFIG,
+  DEFAULT_MERGE_CONFIG,
+  DEFAULT_RESOLVER_CONFIG,
+  DEFAULT_CHECKS_CONFIG,
+  DEFAULT_QUALITY_GATES_CONFIG,
 } from './types.js';
 import type { ErrorHandlingConfig } from '../engine/types.js';
 import type { AgentPluginConfig } from '../plugins/agents/types.js';
@@ -201,6 +207,24 @@ function mergeConfigs(global: StoredConfig, project: StoredConfig): StoredConfig
   }
   if (project.backup !== undefined) {
     merged.backup = { ...merged.backup, ...project.backup };
+  }
+  if (project.parallel !== undefined) {
+    merged.parallel = { ...merged.parallel, ...project.parallel };
+  }
+  if (project.impact !== undefined) {
+    merged.impact = { ...merged.impact, ...project.impact };
+  }
+  if (project.merge !== undefined) {
+    merged.merge = { ...merged.merge, ...project.merge };
+  }
+  if (project.resolver !== undefined) {
+    merged.resolver = { ...merged.resolver, ...project.resolver };
+  }
+  if (project.checks !== undefined) {
+    merged.checks = { ...merged.checks, ...project.checks };
+  }
+  if (project.qualityGates !== undefined) {
+    merged.qualityGates = { ...merged.qualityGates, ...project.qualityGates };
   }
 
   return merged;
@@ -563,6 +587,36 @@ export async function buildConfig(
     ...(options.sandbox ?? {}),
   };
 
+  const parallel = {
+    ...DEFAULT_PARALLEL_CONFIG,
+    ...(storedConfig.parallel ?? {}),
+  };
+
+  const impact = {
+    ...DEFAULT_IMPACT_CONFIG,
+    ...(storedConfig.impact ?? {}),
+  };
+
+  const merge = {
+    ...DEFAULT_MERGE_CONFIG,
+    ...(storedConfig.merge ?? {}),
+  };
+
+  const resolver = {
+    ...DEFAULT_RESOLVER_CONFIG,
+    ...(storedConfig.resolver ?? {}),
+  };
+
+  const checks = {
+    ...DEFAULT_CHECKS_CONFIG,
+    ...(storedConfig.checks ?? {}),
+  };
+
+  const qualityGates = {
+    ...DEFAULT_QUALITY_GATES_CONFIG,
+    ...(storedConfig.qualityGates ?? {}),
+  };
+
   return {
     agent: agentConfig,
     tracker: trackerConfig,
@@ -583,6 +637,12 @@ export async function buildConfig(
     showTui: !options.headless,
     errorHandling,
     sandbox,
+    parallel,
+    impact,
+    merge,
+    resolver,
+    checks,
+    qualityGates,
     // CLI --prompt takes precedence over config file prompt_template
     promptTemplate: options.promptPath ?? storedConfig.prompt_template,
     staleLockTimeoutMinutes: storedConfig.staleLockTimeoutMinutes,
@@ -695,7 +755,12 @@ export async function validateConfig(
 
 // Re-export types
 export type { StoredConfig, RalphConfig, RuntimeOptions, ConfigValidationResult, SubagentDetailLevel, NotificationSoundMode, CleanupMode, CleanupConfig, CleanupActionConfig, BackupConfig } from './types.js';
-export { DEFAULT_CONFIG, DEFAULT_SANDBOX_CONFIG, DEFAULT_BACKUP_CONFIG };
+export {
+  DEFAULT_CONFIG,
+  DEFAULT_SANDBOX_CONFIG,
+  DEFAULT_BACKUP_CONFIG,
+  DEFAULT_QUALITY_GATES_CONFIG,
+} from './types.js';
 
 // Export schema utilities
 export {
@@ -709,6 +774,7 @@ export {
   NotificationSoundModeSchema,
   CleanupModeSchema,
   CleanupConfigSchema,
+  QualityGatesConfigSchema,
 } from './schema.js';
 export type {
   ConfigParseResult,

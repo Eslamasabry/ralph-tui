@@ -179,6 +179,33 @@ maxRetries = 5
 baseBackoffMs = 10000
 ```
 
+### Quality Gates for Parallel Runs
+
+Use quality gates to validate integrations before syncing to main:
+
+```toml
+[qualityGates]
+enabled = true
+requireImpactTable = true
+mode = "per-merge"
+maxFixAttempts = 2
+maxTestReruns = 2
+cleanBeforeRun = true
+fallbackStrategy = "revert"
+
+[qualityGates.checks.sanity]
+required = true
+command = "pnpm -s lint && pnpm -s typecheck"
+
+[qualityGates.checks.unit]
+required = true
+command = "pnpm -s test"
+
+[qualityGates.rules]
+"src/engine/" = ["sanity", "unit"]
+"src/ui/" = ["sanity", "unit"]
+```
+
 ### Headless/CI Setup
 
 For automated pipelines:

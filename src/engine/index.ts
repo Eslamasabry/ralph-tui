@@ -53,6 +53,7 @@ import {
 } from '../logs/index.js';
 import type { AgentSwitchEntry } from '../logs/index.js';
 import { renderPrompt } from '../templates/index.js';
+import { formatImpactPlan, getImpactPlan } from './impact.js';
 import { BeadsRealtimeWatcher } from './beads-realtime.js';
 import { MainSyncWorktree } from '../git/index.js';
 import { join } from 'node:path';
@@ -119,6 +120,7 @@ async function buildPrompt(
     recentProgress,
     codebasePatterns,
     prd: prdContext ?? undefined,
+    impactPlan: formatImpactPlan(getImpactPlan(task)),
   };
 
   // Use the template system (tracker template used if no custom/user override)
@@ -661,7 +663,7 @@ export class ExecutionEngine {
           this.emit({
             type: 'engine:warning',
             timestamp: new Date().toISOString(),
-            code: 'sandbox-network-conflict', // Reusing warning type for "sync blocked"
+            code: 'pending-main-sync-blocked',
             message: `Engine paused: ${this.pendingMainSyncTasks.size} tasks blocked pending main sync.`,
           });
           this.pause();
@@ -809,6 +811,7 @@ export class ExecutionEngine {
             this.retryCountMap.delete(task.id);
             // Fix 2: Prevent tracker task from being stuck in in_progress forever
             await this.tracker!.updateTaskStatus(task.id, 'open');
+            result = { ...result, status: 'skipped', error: skipReason };
           }
           break;
         }
@@ -828,6 +831,7 @@ export class ExecutionEngine {
           this.skippedTasks.add(task.id);
           // Bug fix: Reset task status to 'open' so it doesn't stay stuck as in_progress
           await this.tracker!.updateTaskStatus(task.id, 'open');
+          result = { ...result, status: 'skipped', error: errorMessage };
           break;
         }
 

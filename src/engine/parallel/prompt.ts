@@ -6,6 +6,7 @@
 import type { TrackerTask, TrackerPlugin } from '../../plugins/trackers/types.js';
 import type { RalphConfig } from '../../config/types.js';
 import { renderPrompt } from '../../templates/index.js';
+import { formatImpactPlan, getImpactPlan } from '../impact.js';
 import { getRecentProgressSummary, getCodebasePatternsForPrompt } from '../../logs/index.js';
 
 export async function buildParallelPrompt(
@@ -25,6 +26,7 @@ export async function buildParallelPrompt(
     recentProgress,
     codebasePatterns,
     prd: prdContext ?? undefined,
+    impactPlan: formatImpactPlan(getImpactPlan(task)),
   };
 
   const result = renderPrompt(task, workerConfig, undefined, extendedContext, trackerTemplate);

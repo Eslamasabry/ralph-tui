@@ -42,6 +42,70 @@ export const RateLimitHandlingConfigSchema = z.object({
   recoverPrimaryBetweenIterations: z.boolean().optional(),
 });
 
+export const SchedulerModeSchema = z.enum(['strict', 'balanced', 'off']);
+
+export const ParallelConfigSchema = z.object({
+  schedulerMode: SchedulerModeSchema.optional(),
+});
+
+export const ImpactConfigSchema = z.object({
+  required: z.boolean().optional(),
+  blockOnHighRiskDrift: z.boolean().optional(),
+  allowedUnplannedFiles: z.number().int().min(0).max(1000).optional(),
+  allowedUnplannedDirs: z.number().int().min(0).max(1000).optional(),
+});
+
+export const MergeConfigSchema = z.object({
+  targetBranch: z.string().optional(),
+  continueOnBlockedIndependent: z.boolean().optional(),
+});
+
+export const ResolverConfigSchema = z.object({
+  enabled: z.boolean().optional(),
+  maxAttempts: z.number().int().min(0).max(10).optional(),
+  retryDelayMs: z.number().int().min(0).max(300000).optional(),
+  escalation: z.enum(['block', 'abort']).optional(),
+});
+
+export const ChecksConfigSchema = z.object({
+  mode: z.enum(['none', 'smoke', 'standard', 'strict']).optional(),
+  commands: z
+    .array(
+      z.object({
+        name: z.string().min(1),
+        command: z.string().min(1),
+      })
+    )
+    .optional(),
+});
+
+export const QualityGateModeSchema = z.enum(['per-merge', 'coalesce', 'batch-window']);
+
+export const QualityGateFallbackSchema = z.enum(['revert', 'quarantine', 'pause']);
+
+export const QualityGateCheckSchema = z.object({
+  command: z.string().min(1),
+  required: z.boolean().optional(),
+  timeoutMs: z.number().int().min(0).max(1800000).optional(),
+  retryOnFailure: z.boolean().optional(),
+  maxReruns: z.number().int().min(0).max(10).optional(),
+});
+
+export const QualityGatesConfigSchema = z.object({
+  enabled: z.boolean().optional(),
+  requireImpactTable: z.boolean().optional(),
+  mode: QualityGateModeSchema.optional(),
+  batchWindowMs: z.number().int().min(0).max(600000).optional(),
+  validatorWorktreePath: z.string().optional(),
+  integrationBranch: z.string().optional(),
+  maxFixAttempts: z.number().int().min(0).max(10).optional(),
+  maxTestReruns: z.number().int().min(0).max(10).optional(),
+  cleanBeforeRun: z.boolean().optional(),
+  fallbackStrategy: QualityGateFallbackSchema.optional(),
+  checks: z.record(z.string(), QualityGateCheckSchema).optional(),
+  rules: z.record(z.string(), z.array(z.string().min(1))).optional(),
+});
+
 export const SandboxConfigSchema = z.object({
   enabled: z.boolean().optional(),
   mode: SandboxModeSchema.optional(),
@@ -181,6 +245,18 @@ export const StoredConfigSchema = z
     errorHandling: ErrorHandlingConfigSchema.optional(),
 
     sandbox: SandboxConfigSchema.optional(),
+
+    parallel: ParallelConfigSchema.optional(),
+
+    impact: ImpactConfigSchema.optional(),
+
+    merge: MergeConfigSchema.optional(),
+
+    resolver: ResolverConfigSchema.optional(),
+
+    checks: ChecksConfigSchema.optional(),
+
+    qualityGates: QualityGatesConfigSchema.optional(),
 
     // Fallback agents (shorthand for default agent)
     fallbackAgents: z.array(z.string().min(1)).optional(),

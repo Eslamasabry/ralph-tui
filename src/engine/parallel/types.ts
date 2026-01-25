@@ -5,6 +5,7 @@
 import type { TrackerTask } from '../../plugins/trackers/types.js';
 import type { AgentExecutionResult } from '../../plugins/agents/types.js';
 import type { FormattedSegment } from '../../plugins/agents/output-formatting.js';
+import type { TaskImpactObserved, ValidationPlan, ValidationStatus } from '../types.js';
 
 /**
  * Health status of a worktree based on its state.
@@ -155,8 +156,25 @@ export type ParallelEvent =
   | { type: 'parallel:task-segments'; timestamp: string; workerId: string; taskId: string; segments: FormattedSegment[] }
   | { type: 'parallel:task-finished'; timestamp: string; workerId: string; task: TrackerTask; result: AgentExecutionResult; completed: boolean }
   | { type: 'parallel:merge-queued'; timestamp: string; workerId: string; task: TrackerTask; commit: string; commitMetadata: CommitMetadata; filesChanged?: string[] }
+  | { type: 'parallel:merge-started'; timestamp: string; workerId: string; task: TrackerTask; commit: string; queuePosition: number }
+  | { type: 'parallel:merge-resolving'; timestamp: string; workerId: string; task: TrackerTask; commit: string; attempt: number; conflictFiles?: string[] }
+  | { type: 'parallel:merge-validated'; timestamp: string; workerId: string; task: TrackerTask; commit: string; checks: Array<{ name: string; command: string; exitCode: number }>; success: boolean }
+  | { type: 'parallel:merge-blocked'; timestamp: string; workerId: string; task: TrackerTask; commit: string; reason: string; attemptsUsed: number; conflictFiles?: string[] }
   | { type: 'parallel:merge-succeeded'; timestamp: string; workerId: string; task: TrackerTask; commit: string; commitMetadata: CommitMetadata; resolved?: boolean; filesChanged?: string[]; conflictFiles?: string[] }
   | { type: 'parallel:merge-failed'; timestamp: string; workerId: string; task: TrackerTask; commit: string; commitMetadata: CommitMetadata; reason: string; conflictFiles?: string[] }
+  | { type: 'parallel:impact-drift'; timestamp: string; task: TrackerTask; observed: TaskImpactObserved }
+  | { type: 'parallel:impact-missing'; timestamp: string; task: TrackerTask; reason: string }
+  | { type: 'parallel:validation-queued'; timestamp: string; plan: ValidationPlan; queueDepth: number }
+  | { type: 'parallel:validation-started'; timestamp: string; plan: ValidationPlan }
+  | { type: 'parallel:validation-check-started'; timestamp: string; planId: string; checkId: string }
+  | { type: 'parallel:validation-check-finished'; timestamp: string; planId: string; checkId: string; exitCode: number; durationMs: number; outputPath?: string }
+  | { type: 'parallel:validation-passed'; timestamp: string; planId: string; status: ValidationStatus }
+  | { type: 'parallel:validation-failed'; timestamp: string; planId: string; status: ValidationStatus; failedCheckId: string; reason: string }
+  | { type: 'parallel:validation-fix-started'; timestamp: string; planId: string; attempt: number }
+  | { type: 'parallel:validation-fix-succeeded'; timestamp: string; planId: string; attempt: number }
+  | { type: 'parallel:validation-fix-failed'; timestamp: string; planId: string; attempt: number; reason: string }
+  | { type: 'parallel:validation-reverted'; timestamp: string; planId: string; commit: string; reason: string }
+  | { type: 'parallel:validation-blocked'; timestamp: string; planId: string; reason: string }
   | { type: 'parallel:main-sync-skipped'; timestamp: string; reason: string }
   | { type: 'parallel:main-sync-succeeded'; timestamp: string; commit: string }
   | { type: 'parallel:main-sync-failed'; timestamp: string; task: TrackerTask; reason: string }

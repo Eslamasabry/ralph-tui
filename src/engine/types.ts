@@ -97,6 +97,87 @@ export interface SubagentTreeNode {
 }
 
 /**
+ * Risk level for impact plan entries
+ */
+export type ImpactRisk = 'low' | 'med' | 'high';
+
+export interface TaskImpactPlanEntry {
+  path: string;
+  reason: string;
+  risk: ImpactRisk;
+}
+
+export interface TaskImpactPlanRename {
+  from: string;
+  to: string;
+  reason: string;
+  risk: ImpactRisk;
+}
+
+export interface TaskImpactPlan {
+  version: 1;
+  create: TaskImpactPlanEntry[];
+  modify: TaskImpactPlanEntry[];
+  delete: TaskImpactPlanEntry[];
+  rename: TaskImpactPlanRename[];
+  expectedChecks?: Array<{ name: string; command: string }>;
+  moduleTags?: string[];
+  expectedMergeRisk?: boolean;
+}
+
+export interface TaskImpactObserved {
+  filesChanged: string[];
+  filesCreated: string[];
+  filesDeleted: string[];
+  filesRenamed: Array<{ from: string; to: string }>;
+  drift: {
+    status: 'none' | 'warning' | 'block';
+    unexpectedChanges: string[];
+    missingPlannedChanges: string[];
+  };
+}
+
+export type ValidationStatus =
+  | 'queued'
+  | 'running'
+  | 'passed'
+  | 'failed'
+  | 'flaky'
+  | 'fixing'
+  | 'healed'
+  | 'reverted'
+  | 'blocked';
+
+export type ImpactChangeType = 'create' | 'modify' | 'delete' | 'rename';
+
+export interface ImpactEntry {
+  path: string;
+  change: ImpactChangeType;
+  purpose: string;
+  notes?: string;
+}
+
+export interface ValidationCheck {
+  id: string;
+  command: string;
+  cwd?: string;
+  timeoutMs?: number;
+  retryOnFailure?: boolean;
+  maxReruns?: number;
+  required: boolean;
+}
+
+export interface ValidationPlan {
+  planId: string;
+  taskIds: string[];
+  commits: string[];
+  checks: ValidationCheck[];
+  createdAt: string;
+  rationale: string;
+  impact: ImpactEntry[];
+}
+
+/**
  * Convert parser SubagentState to engine EngineSubagentState.
  */
 export function toEngineSubagentState(
@@ -289,10 +370,20 @@ export interface EngineResumedEvent extends EngineEventBase {
 export interface EngineWarningEvent extends EngineEventBase {
   type: 'engine:warning';
   /** Warning code for programmatic handling */
-  code: 'sandbox-network-conflict';
+  code: EngineWarningCode;
   /** Human-readable warning message */
   message: string;
 }
+
+/**
+ * Warning codes emitted by the engine.
+ * Keep these stable for UI filtering / telemetry.
+ */
+export type EngineWarningCode =
+  /** Agent requires network, but sandbox network is disabled */
+  | 'sandbox-network-conflict'
+  /** Tasks are blocked pending main branch sync */
+  | 'pending-main-sync-blocked';
 
 /**
  * Iterations added event - emitted when maxIterations is increased at runtime
@@ -696,12 +787,20 @@ export interface EngineController {
   on(listener: EngineEventListener): () => void;
   onParallel?: (listener: (event: unknown) => void) => () => void;
   getIterationInfo?: () => { currentIteration: number; maxIterations: number };
-  addIterations?: (count: number) => void;
-  removeIterations?: (count: number) => void;
+  addIterations?: (count: number) => Promise<boolean>;
+  removeIterations?: (count: number) => Promise<boolean>;
   continueExecution?: () => Promise<void>;
-  getSubagentTree?: () => unknown;
+  getSubagentTree?: () => SubagentTreeNode[];
   getSubagentOutput?: (subagentId: string) => string | undefined;
-  getSubagentDetails?: (subagentId: string) => unknown;
+  getSubagentDetails?: (subagentId: string) =>
+    | {
+        prompt?: string;
+        result?: string;
+        spawnedAt: string;
+        endedAt?: string;
+        childIds: string[];
+      }
+    | undefined;
   generatePromptPreview?: (
     taskId: string
   ) => Promise<{ success: true; prompt: string; source: string } | { success: false; error: string }>;
@@ -772,4 +871,18 @@ export interface EngineState {
   trackerRealtimeStatus?: TrackerRealtimeStatus;
   /** Polling interval for realtime/fallback mode */
   trackerRealtimeIntervalMs?: number;
+
+  /** Validation status for quality gates (parallel runs) */
+  validation?: {
+    status: ValidationStatus;
+    currentPlan?: ValidationPlan;
+    queuedCount: number;
+    lastResult?: {
+      status: ValidationStatus;
+      planId: string;
+      endedAt: string;
+      failedCheckId?: string;
+      summary: string;
+    };
+  };
 }

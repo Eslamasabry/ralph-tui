@@ -20,6 +20,14 @@ import {
   CONFIG_PATHS,
 } from './index.js';
 import type { StoredConfig, RalphConfig } from './types.js';
+import {
+  DEFAULT_CHECKS_CONFIG,
+  DEFAULT_IMPACT_CONFIG,
+  DEFAULT_MERGE_CONFIG,
+  DEFAULT_PARALLEL_CONFIG,
+  DEFAULT_QUALITY_GATES_CONFIG,
+  DEFAULT_RESOLVER_CONFIG,
+} from './types.js';
 import { registerBuiltinAgents } from '../plugins/agents/builtin/index.js';
 import { registerBuiltinTrackers } from '../plugins/trackers/builtin/index.js';
 
@@ -574,23 +582,31 @@ describe('Config merging - scalar overrides', () => {
 });
 
 describe('validateConfig', () => {
+  const baseConfig: RalphConfig = {
+    agent: { name: 'claude', plugin: 'claude', options: {} },
+    tracker: { name: 'beads-bv', plugin: 'beads-bv', options: {} },
+    maxIterations: 10,
+    iterationDelay: 1000,
+    cwd: process.cwd(),
+    outputDir: '.ralph-tui/iterations',
+    progressFile: '.ralph-tui/progress.md',
+    showTui: true,
+    errorHandling: {
+      strategy: 'skip',
+      maxRetries: 3,
+      retryDelayMs: 5000,
+      continueOnNonZeroExit: false,
+    },
+    parallel: DEFAULT_PARALLEL_CONFIG,
+    impact: DEFAULT_IMPACT_CONFIG,
+    merge: DEFAULT_MERGE_CONFIG,
+    resolver: DEFAULT_RESOLVER_CONFIG,
+    checks: DEFAULT_CHECKS_CONFIG,
+    qualityGates: DEFAULT_QUALITY_GATES_CONFIG,
+  };
+
   test('validates valid configuration', async () => {
-    const config: RalphConfig = {
-      agent: { name: 'claude', plugin: 'claude', options: {} },
-      tracker: { name: 'beads-bv', plugin: 'beads-bv', options: {} },
-      maxIterations: 10,
-      iterationDelay: 1000,
-      cwd: process.cwd(),
-      outputDir: '.ralph-tui/iterations',
-      progressFile: '.ralph-tui/progress.md',
-      showTui: true,
-      errorHandling: {
-        strategy: 'skip',
-        maxRetries: 3,
-        retryDelayMs: 5000,
-        continueOnNonZeroExit: false,
-      },
-    };
+    const config: RalphConfig = { ...baseConfig };
 
     const result = await validateConfig(config);
     expect(result.valid).toBe(true);
@@ -599,20 +615,8 @@ describe('validateConfig', () => {
 
   test('reports error for unknown agent plugin', async () => {
     const config: RalphConfig = {
+      ...baseConfig,
       agent: { name: 'unknown', plugin: 'nonexistent-plugin', options: {} },
-      tracker: { name: 'beads-bv', plugin: 'beads-bv', options: {} },
-      maxIterations: 10,
-      iterationDelay: 1000,
-      cwd: process.cwd(),
-      outputDir: '.ralph-tui/iterations',
-      progressFile: '.ralph-tui/progress.md',
-      showTui: true,
-      errorHandling: {
-        strategy: 'skip',
-        maxRetries: 3,
-        retryDelayMs: 5000,
-        continueOnNonZeroExit: false,
-      },
     };
 
     const result = await validateConfig(config);
@@ -622,20 +626,8 @@ describe('validateConfig', () => {
 
   test('reports error for unknown tracker plugin', async () => {
     const config: RalphConfig = {
-      agent: { name: 'claude', plugin: 'claude', options: {} },
+      ...baseConfig,
       tracker: { name: 'unknown', plugin: 'nonexistent-tracker', options: {} },
-      maxIterations: 10,
-      iterationDelay: 1000,
-      cwd: process.cwd(),
-      outputDir: '.ralph-tui/iterations',
-      progressFile: '.ralph-tui/progress.md',
-      showTui: true,
-      errorHandling: {
-        strategy: 'skip',
-        maxRetries: 3,
-        retryDelayMs: 5000,
-        continueOnNonZeroExit: false,
-      },
     };
 
     const result = await validateConfig(config);
@@ -645,20 +637,8 @@ describe('validateConfig', () => {
 
   test('reports error for negative iterations', async () => {
     const config: RalphConfig = {
-      agent: { name: 'claude', plugin: 'claude', options: {} },
-      tracker: { name: 'beads-bv', plugin: 'beads-bv', options: {} },
+      ...baseConfig,
       maxIterations: -1,
-      iterationDelay: 1000,
-      cwd: process.cwd(),
-      outputDir: '.ralph-tui/iterations',
-      progressFile: '.ralph-tui/progress.md',
-      showTui: true,
-      errorHandling: {
-        strategy: 'skip',
-        maxRetries: 3,
-        retryDelayMs: 5000,
-        continueOnNonZeroExit: false,
-      },
     };
 
     const result = await validateConfig(config);
@@ -668,20 +648,8 @@ describe('validateConfig', () => {
 
   test('reports error for negative delay', async () => {
     const config: RalphConfig = {
-      agent: { name: 'claude', plugin: 'claude', options: {} },
-      tracker: { name: 'beads-bv', plugin: 'beads-bv', options: {} },
-      maxIterations: 10,
+      ...baseConfig,
       iterationDelay: -1000,
-      cwd: process.cwd(),
-      outputDir: '.ralph-tui/iterations',
-      progressFile: '.ralph-tui/progress.md',
-      showTui: true,
-      errorHandling: {
-        strategy: 'skip',
-        maxRetries: 3,
-        retryDelayMs: 5000,
-        continueOnNonZeroExit: false,
-      },
     };
 
     const result = await validateConfig(config);
@@ -690,22 +658,7 @@ describe('validateConfig', () => {
   });
 
   test('warns about missing epic ID for beads tracker', async () => {
-    const config: RalphConfig = {
-      agent: { name: 'claude', plugin: 'claude', options: {} },
-      tracker: { name: 'beads-bv', plugin: 'beads-bv', options: {} },
-      maxIterations: 10,
-      iterationDelay: 1000,
-      cwd: process.cwd(),
-      outputDir: '.ralph-tui/iterations',
-      progressFile: '.ralph-tui/progress.md',
-      showTui: true,
-      errorHandling: {
-        strategy: 'skip',
-        maxRetries: 3,
-        retryDelayMs: 5000,
-        continueOnNonZeroExit: false,
-      },
-    };
+    const config: RalphConfig = { ...baseConfig };
 
     const result = await validateConfig(config);
     expect(result.valid).toBe(true);
@@ -714,20 +667,8 @@ describe('validateConfig', () => {
 
   test('reports warning for json tracker without prdPath (TUI will prompt)', async () => {
     const config: RalphConfig = {
-      agent: { name: 'claude', plugin: 'claude', options: {} },
+      ...baseConfig,
       tracker: { name: 'json', plugin: 'json', options: {} },
-      maxIterations: 10,
-      iterationDelay: 1000,
-      cwd: process.cwd(),
-      outputDir: '.ralph-tui/iterations',
-      progressFile: '.ralph-tui/progress.md',
-      showTui: true,
-      errorHandling: {
-        strategy: 'skip',
-        maxRetries: 3,
-        retryDelayMs: 5000,
-        continueOnNonZeroExit: false,
-      },
     };
 
     // Now valid - TUI will show file prompt dialog instead of erroring

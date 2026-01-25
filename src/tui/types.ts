@@ -10,8 +10,9 @@ import type {
   ActiveAgentState,
   RateLimitState,
   TrackerRealtimeStatus,
+  ValidationStatus,
 } from '../engine/types.js';
-import type { TaskPriority } from '../plugins/trackers/types.js';
+import type { TaskPriority, TrackerTaskStatus } from '../plugins/trackers/types.js';
 import type { SubagentDetailLevel, SandboxConfig, SandboxMode } from '../config/types.js';
 import type { FormattedSegment } from '../plugins/agents/output-formatting.js';
 
@@ -19,6 +20,8 @@ import type { FormattedSegment } from '../plugins/agents/output-formatting.js';
 export type { TaskPriority };
 export type { SubagentDetailLevel };
 export type { SubagentTreeNode };
+
+export type BlockerStatus = TaskStatus | TrackerTaskStatus | 'unknown';
 
 /**
  * Blocker task info for display purposes
@@ -29,7 +32,7 @@ export interface BlockerInfo {
   /** Blocker task title */
   title: string;
   /** Blocker task status */
-  status: string;
+  status: BlockerStatus;
 }
 
 /**
@@ -75,6 +78,8 @@ export interface TaskItem {
   pendingMainSync?: boolean;
   /** Worker ID assigned in parallel execution (e.g., "worker-1") for stable slot display */
   workerId?: string;
+  /** Validation status for quality gates (parallel merges) */
+  validationStatus?: ValidationStatus;
   /** Tracker-specific metadata (varies by plugin) */
   metadata?: Record<string, unknown>;
 }

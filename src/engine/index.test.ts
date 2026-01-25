@@ -10,6 +10,7 @@
 import { describe, test, expect } from 'bun:test';
 import type { TrackerPlugin, TrackerTask, TaskFilter } from '../plugins/trackers/types.js';
 import type { RalphConfig } from '../config/types.js';
+import { DEFAULT_CHECKS_CONFIG, DEFAULT_IMPACT_CONFIG, DEFAULT_MERGE_CONFIG, DEFAULT_PARALLEL_CONFIG, DEFAULT_QUALITY_GATES_CONFIG, DEFAULT_RESOLVER_CONFIG } from '../config/types.js';
 import { ExecutionEngine } from './index.js';
 
 /**
@@ -75,6 +76,12 @@ function createMockConfig(): RalphConfig {
       retryDelayMs: 5000,
       continueOnNonZeroExit: false,
     },
+    parallel: DEFAULT_PARALLEL_CONFIG,
+    impact: DEFAULT_IMPACT_CONFIG,
+    merge: DEFAULT_MERGE_CONFIG,
+    resolver: DEFAULT_RESOLVER_CONFIG,
+    checks: DEFAULT_CHECKS_CONFIG,
+    qualityGates: DEFAULT_QUALITY_GATES_CONFIG,
   };
 }
 

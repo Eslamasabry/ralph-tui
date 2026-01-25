@@ -35,6 +35,7 @@ import {
 } from '../../src/templates/builtin.js';
 import type { TrackerTask } from '../../src/plugins/trackers/types.js';
 import type { RalphConfig } from '../../src/config/types.js';
+import { DEFAULT_QUALITY_GATES_CONFIG } from '../../src/config/types.js';
 
 // ============================================================================
 // Helper Functions
@@ -93,6 +94,7 @@ function createMockConfig(overrides: Partial<RalphConfig> = {}): RalphConfig {
     model: 'claude-sonnet-4-20250514',
     cwd: process.cwd(),
     maxIterations: 10,
+    qualityGates: DEFAULT_QUALITY_GATES_CONFIG,
     ...overrides,
   } as RalphConfig;
 }
@@ -317,6 +319,38 @@ describe('Template Engine - Variables and Context', () => {
       const vars = buildTemplateVariables(task, config);
 
       expect(vars.notes).toBe('Important note');
+    });
+
+    test('includes impact plan when provided', () => {
+      const task = createMockTask({
+        metadata: {
+          impactPlan: {
+            version: 1,
+            create: [{ path: 'src/new.ts', reason: 'add file', risk: 'low' }],
+            modify: [],
+            delete: [],
+            rename: [],
+            expectedChecks: [{ name: 'test', command: 'bun test' }],
+            moduleTags: ['core'],
+          },
+        },
+      });
+      const config = createMockConfig();
+      const vars = buildTemplateVariables(task, config, undefined, {
+        impactPlan: [
+          '## Task Impact Table (Required)',
+          '| create | src/new.ts | low | add file |',
+          '',
+          'Module tags: core',
+          'Expected checks:',
+          '- test: `bun test`',
+        ].join('\n'),
+      });
+
+      expect(vars.impactPlan).toContain('Task Impact Table (Required)');
+      expect(vars.impactPlan).toContain('| create | src/new.ts | low | add file |');
+      expect(vars.impactPlan).toContain('Module tags: core');
+      expect(vars.impactPlan).toContain('- test: `bun test`');
     });
 
     test('handles metadata.acceptanceCriteria', () => {

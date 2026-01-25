@@ -24,8 +24,8 @@ export interface FailureInfo {
 	reason: string;
 	/** Conflict files (for merge failures) */
 	conflictFiles?: string[];
-	/** Phase when failure occurred: 'merge' | 'sync' | 'recovery' | 'execution' */
-	phase: 'merge' | 'sync' | 'recovery' | 'execution';
+	/** Phase when failure occurred: 'merge' | 'sync' | 'recovery' | 'execution' | 'validation' */
+	phase: 'merge' | 'sync' | 'recovery' | 'execution' | 'validation';
 	/** Iteration number when failure occurred */
 	iteration?: number;
 }
@@ -399,6 +399,11 @@ export function RunSummaryOverlay({
 												Try: cd worktrees/merge && git mergetool
 											</text>
 										</>
+									)}
+									{failure.phase === 'validation' && (
+										<text fg={colors.fg.muted} style={{ paddingLeft: 2 }}>
+											Check: .ralph-tui/logs/validations for details
+										</text>
 									)}
 								</box>
 							))}

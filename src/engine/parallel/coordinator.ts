@@ -4,7 +4,8 @@
 
 import type { RalphConfig } from '../../config/types.js';
 import { spawn } from 'node:child_process';
-import { join } from 'node:path';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import type { TrackerPlugin, TrackerTask } from '../../plugins/trackers/types.js';
 import type { AgentPlugin, AgentExecutionResult } from '../../plugins/agents/types.js';
 import { getAgentRegistry } from '../../plugins/agents/registry.js';
@@ -14,9 +15,21 @@ import { WorktreeManager } from './worktree-manager.js';
 import { ParallelWorker } from './worker.js';
 import type { ParallelEvent, ParallelTaskResult, CommitMetadata } from './types.js';
 import { MainSyncWorktree } from '../../git/main-sync-worktree.js';
+import { getImpactPlan, getImpactTable } from '../impact.js';
+import type { ImpactEntry, TaskImpactPlan, ValidationCheck, ValidationPlan, ValidationStatus } from '../types.js';
+import { stripAnsiCodes } from '../../plugins/agents/output-formatting.js';
 
 export interface ParallelCoordinatorOptions {
   maxWorkers: number;
+}
+
+interface ValidationCheckOutcome {
+  id: string;
+  command: string;
+  exitCode: number;
+  durationMs: number;
+  outputPath?: string;
+  rerunExitCodes: number[];
 }
 
 export class ParallelCoordinator {
@@ -29,9 +42,18 @@ export class ParallelCoordinator {
   private paused = false;
   private mergeQueue: Array<{ task: TrackerTask; workerId: string; commit: string; filesChanged?: string[] }> = [];
   private merging = false;
+  private validationQueue: Array<{
+    entry: { task: TrackerTask; workerId: string; commit: string; filesChanged?: string[] };
+    plan: ValidationPlan;
+    remaining: number;
+  }> = [];
+  private validationRunning = false;
+  private validationBatchTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingMergeCounts = new Map<string, number>();
   private workerBaseCommits = new Map<string, string>();
   private blockedTaskIds = new Set<string>();
+  private activeTaskPlans = new Map<string, TaskImpactPlan>();
+  private activeImpactTables = new Map<string, ImpactEntry[]>();
   private pendingMainSyncTasks = new Map<string, { task: TrackerTask; workerId: string }>();
   private commitRecoveryAttempts = new Map<string, number>();
   private lastMainSyncAttemptAt = 0;
@@ -39,6 +61,8 @@ export class ParallelCoordinator {
   private readonly maxMainSyncRetries = 10;
   private mainSyncWorktree: MainSyncWorktree | null = null;
   private mergeWorktreePath: string | null = null;
+  private validatorWorktreePath: string | null = null;
+  private validatorBranch: string | null = null;
   private mergeBranch = 'parallel/integration';
   private baseBranch = 'main';
   private snapshotCreated = false;
@@ -83,8 +107,20 @@ export class ParallelCoordinator {
 
     await this.worktreeManager.pruneWorktrees();
     this.baseBranch = await this.getCurrentBranch();
-    this.mergeBranch = `parallel/integration/${this.baseBranch}`;
-    await this.ensureBranchAt(this.mergeBranch, this.baseBranch);
+    const target = this.config.merge.targetBranch;
+    if (target === 'main') {
+      this.mergeBranch = this.baseBranch;
+    } else if (target === 'ralph/integration') {
+      this.mergeBranch = `ralph/integration/${this.baseBranch}`;
+    } else {
+      this.mergeBranch = target;
+    }
+    if (this.config.qualityGates.integrationBranch) {
+      this.mergeBranch = this.config.qualityGates.integrationBranch;
+    }
+    if (this.mergeBranch !== this.baseBranch) {
+      await this.ensureBranchAt(this.mergeBranch, this.baseBranch);
+    }
 
     // Create merge worktree and initialize workers in parallel for faster startup
     const [mergeWorktreePath] = (
@@ -99,6 +135,35 @@ export class ParallelCoordinator {
     ).values();
 
     this.mergeWorktreePath = mergeWorktreePath;
+
+    if (this.config.qualityGates.enabled) {
+      const safeBranch = this.baseBranch.replace(/[^\w.-]/g, '_');
+      this.validatorBranch = `ralph/validator/${safeBranch}`;
+      if (this.config.qualityGates.validatorWorktreePath) {
+        const validatorPath = resolve(this.config.qualityGates.validatorWorktreePath);
+        await this.execGitIn(this.config.cwd, [
+          'worktree',
+          'add',
+          '-B',
+          this.validatorBranch,
+          validatorPath,
+          this.mergeBranch,
+        ]);
+        this.validatorWorktreePath = validatorPath;
+      } else {
+        const [validatorWorktreePath] = (
+          await this.worktreeManager.createWorktrees([
+            {
+              workerId: 'validator',
+              branchName: this.validatorBranch,
+              baseRef: this.mergeBranch,
+              lockReason: 'validation',
+            },
+          ])
+        ).values();
+        this.validatorWorktreePath = validatorWorktreePath;
+      }
+    }
 
     // Initialize all workers in parallel
     await this.initializeWorkers();
@@ -246,6 +311,15 @@ export class ParallelCoordinator {
       this.mergeWorktreePath = null;
     }
 
+    if (this.validatorWorktreePath) {
+      if (this.config.qualityGates.validatorWorktreePath) {
+        await this.execGitIn(this.config.cwd, ['worktree', 'remove', '--force', this.validatorWorktreePath]);
+      } else {
+        await this.worktreeManager.removeWorktree('validator');
+      }
+      this.validatorWorktreePath = null;
+    }
+
     if (this.mainSyncWorktree) {
       await this.mainSyncWorktree.cleanup();
       this.mainSyncWorktree = null;
@@ -388,7 +462,35 @@ export class ParallelCoordinator {
   private async getNextReadyTask(): Promise<TrackerTask | undefined> {
     if (!this.tracker) return undefined;
     const excludeIds = Array.from(this.blockedTaskIds);
-    return this.tracker.getNextTask({ status: 'open', ready: true, excludeIds });
+    const task = await this.tracker.getNextTask({ status: 'open', ready: true, excludeIds });
+    if (!task) return undefined;
+
+    const plan = getImpactPlan(task);
+    const table = getImpactTable(task);
+
+    if (this.config.qualityGates.enabled && this.config.qualityGates.requireImpactTable) {
+      if (!plan && !table) {
+        this.blockedTaskIds.add(task.id);
+        await this.tracker.updateTaskStatus(task.id, 'blocked');
+        this.emit({
+          type: 'parallel:impact-missing',
+          timestamp: new Date().toISOString(),
+          task,
+          reason: 'Task Impact Table is required for parallel execution.',
+        });
+        return undefined;
+      }
+    }
+
+    if (plan) {
+      this.activeTaskPlans.set(task.id, plan);
+    }
+    if (table) {
+      this.activeImpactTables.set(task.id, table);
+      task.metadata = { ...(task.metadata ?? {}), impactTable: table };
+    }
+
+    return task;
   }
 
   private async isTaskReady(task: TrackerTask): Promise<boolean> {
@@ -524,15 +626,37 @@ export class ParallelCoordinator {
     if (entry.commit === 'none') {
       if (remaining <= 0) {
         await this.tracker?.completeTask(entry.task.id, 'Completed by parallel worker');
+        this.activeTaskPlans.delete(entry.task.id);
+        this.activeImpactTables.delete(entry.task.id);
       }
       return;
     }
 
+    if (!this.config.qualityGates.enabled) {
+      await this.finalizeMergeSuccess(entry, remaining);
+      return;
+    }
+
+    const plan = this.buildValidationPlan(entry, filesChanged);
+    if (!plan) {
+      await this.finalizeMergeSuccess(entry, remaining);
+      return;
+    }
+
+    this.enqueueValidation({ entry: { ...entry, filesChanged }, plan, remaining });
+  }
+
+  private async finalizeMergeSuccess(
+    entry: { task: TrackerTask; workerId: string; commit: string },
+    remaining: number
+  ): Promise<void> {
     const syncResult = await this.syncMainBranch();
 
     if (remaining <= 0) {
       if (syncResult.success) {
         await this.tracker?.completeTask(entry.task.id, 'Completed by parallel worker');
+        this.activeTaskPlans.delete(entry.task.id);
+        this.activeImpactTables.delete(entry.task.id);
       } else {
         this.pendingMainSyncTasks.set(entry.task.id, { task: entry.task, workerId: entry.workerId });
         this.blockedTaskIds.add(entry.task.id);
@@ -544,13 +668,630 @@ export class ParallelCoordinator {
           task: entry.task,
           reason: syncResult.reason ?? 'Main sync failed',
         });
-        // Mark as pending-main in tracker (if supported)
         if (this.tracker && 'markTaskPendingMain' in this.tracker && typeof this.tracker.markTaskPendingMain === 'function') {
           const pendingCount = this.pendingMergeCounts.get(entry.task.id) ?? 1;
           await this.tracker.markTaskPendingMain(entry.task.id, pendingCount, [entry.commit]);
         }
+        this.activeTaskPlans.delete(entry.task.id);
+        this.activeImpactTables.delete(entry.task.id);
       }
     }
+  }
+
+  private buildValidationPlan(
+    entry: { task: TrackerTask; workerId: string; commit: string },
+    filesChanged?: string[]
+  ): ValidationPlan | null {
+    const checksConfig = this.getQualityGateChecks();
+    const checkIds = Object.keys(checksConfig);
+    if (checkIds.length === 0) {
+      return null;
+    }
+
+    const taskPlan = this.activeTaskPlans.get(entry.task.id) ?? getImpactPlan(entry.task);
+    const impactTable = this.activeImpactTables.get(entry.task.id) ?? getImpactTable(entry.task);
+    const impact = impactTable ?? this.buildImpactEntries(taskPlan, filesChanged);
+    const selectedChecks = this.selectChecks(impact, checksConfig, filesChanged);
+
+    if (selectedChecks.length === 0) {
+      return null;
+    }
+
+    const planId = `plan-${new Date().toISOString().replace(/[:.]/g, '-')}-${entry.commit.slice(0, 7)}`;
+    const rationale = this.buildValidationRationale(impact, selectedChecks);
+
+    return {
+      planId,
+      taskIds: [entry.task.id],
+      commits: [entry.commit],
+      checks: selectedChecks,
+      createdAt: new Date().toISOString(),
+      rationale,
+      impact,
+    };
+  }
+
+  private getQualityGateChecks(): Record<string, { command: string; required?: boolean; timeoutMs?: number; retryOnFailure?: boolean; maxReruns?: number }> {
+    if (Object.keys(this.config.qualityGates.checks).length > 0) {
+      return this.config.qualityGates.checks;
+    }
+
+    if (this.config.checks.commands.length === 0) {
+      return {};
+    }
+
+    const fallback: Record<string, { command: string; required?: boolean }> = {};
+    for (const command of this.config.checks.commands) {
+      const id = this.normalizeCheckId(command.name);
+      fallback[id] = { command: command.command, required: true };
+    }
+    return fallback;
+  }
+
+  private normalizeCheckId(name: string): string {
+    return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  }
+
+  private buildImpactEntries(taskPlan?: TaskImpactPlan, filesChanged?: string[]): ImpactEntry[] {
+    if (taskPlan) {
+      return [
+        ...taskPlan.create.map((entry) => ({ path: entry.path, change: 'create' as const, purpose: entry.reason })),
+        ...taskPlan.modify.map((entry) => ({ path: entry.path, change: 'modify' as const, purpose: entry.reason })),
+        ...taskPlan.delete.map((entry) => ({ path: entry.path, change: 'delete' as const, purpose: entry.reason })),
+        ...taskPlan.rename.map((entry) => ({
+          path: `${entry.from} -> ${entry.to}`,
+          change: 'rename' as const,
+          purpose: entry.reason,
+        })),
+      ];
+    }
+
+    if (filesChanged && filesChanged.length > 0) {
+      return filesChanged.map((path) => ({ path, change: 'modify' as const, purpose: 'Detected change' }));
+    }
+
+    return [];
+  }
+
+  private selectChecks(
+    impact: ImpactEntry[],
+    checksConfig: Record<string, { command: string; required?: boolean; timeoutMs?: number; retryOnFailure?: boolean; maxReruns?: number }>,
+    filesChanged?: string[]
+  ): ValidationCheck[] {
+    const selected = new Set<string>();
+    const rules = Object.keys(this.config.qualityGates.rules).length > 0
+      ? this.config.qualityGates.rules
+      : this.buildDefaultQualityGateRules(Object.keys(checksConfig));
+
+    for (const [id, check] of Object.entries(checksConfig)) {
+      if (check.required) {
+        selected.add(id);
+      }
+    }
+    if (checksConfig.sanity) {
+      selected.add('sanity');
+    }
+
+    const matchPaths = impact.length > 0 ? impact.map((entry) => entry.path) : filesChanged ?? [];
+    for (const path of matchPaths) {
+      for (const [prefix, ruleChecks] of Object.entries(rules)) {
+        if (path.startsWith(prefix)) {
+          for (const checkId of ruleChecks) {
+            selected.add(checkId);
+          }
+        }
+      }
+    }
+
+    if (selected.size === 0) {
+      for (const id of Object.keys(checksConfig)) {
+        selected.add(id);
+      }
+    }
+
+    const ordered = Array.from(selected);
+    const checks: ValidationCheck[] = [];
+    for (const id of ordered) {
+      const check = checksConfig[id];
+      if (!check) continue;
+      checks.push({
+        id,
+        command: check.command,
+        timeoutMs: check.timeoutMs,
+        retryOnFailure: check.retryOnFailure,
+        maxReruns: check.maxReruns,
+        required: Boolean(check.required),
+      });
+    }
+    return checks;
+  }
+
+  private buildDefaultQualityGateRules(checkIds: string[]): Record<string, string[]> {
+    const hasSanity = checkIds.includes('sanity');
+    const hasUnit = checkIds.includes('unit');
+    const defaultChecks = [
+      ...(hasSanity ? ['sanity'] : []),
+      ...(hasUnit ? ['unit'] : []),
+    ];
+    const fallback = defaultChecks.length > 0 ? defaultChecks : checkIds;
+
+    return {
+      'package.json': fallback,
+      'pnpm-lock.yaml': fallback,
+      'package-lock.json': fallback,
+      'yarn.lock': fallback,
+      'bun.lock': fallback,
+      'tsconfig': fallback,
+      'vite.config': fallback,
+      'next.config': fallback,
+      'src/ui/': fallback,
+      'src/engine/': fallback,
+      'src/': fallback,
+      'infra/': fallback,
+    };
+  }
+
+  private buildValidationRationale(impact: ImpactEntry[], checks: ValidationCheck[]): string {
+    const impactSummary = impact.length > 0 ? impact.map((entry) => entry.path).join(', ') : 'no impact entries';
+    const checkSummary = checks.map((check) => check.id).join(', ');
+    return `Selected checks (${checkSummary}) based on impact: ${impactSummary}`;
+  }
+
+  private enqueueValidation(item: { entry: { task: TrackerTask; workerId: string; commit: string; filesChanged?: string[] }; plan: ValidationPlan; remaining: number }): void {
+    const mode = this.config.qualityGates.mode;
+
+    if (mode === 'coalesce') {
+      this.validationQueue = [item];
+    } else {
+      this.validationQueue.push(item);
+    }
+
+    this.emit({
+      type: 'parallel:validation-queued',
+      timestamp: new Date().toISOString(),
+      plan: item.plan,
+      queueDepth: this.validationQueue.length,
+    });
+
+    if (mode === 'batch-window') {
+      if (!this.validationBatchTimer) {
+        this.validationBatchTimer = setTimeout(() => {
+          this.validationBatchTimer = null;
+          void this.processValidationQueue();
+        }, this.config.qualityGates.batchWindowMs);
+      }
+      return;
+    }
+
+    void this.processValidationQueue();
+  }
+
+  private async processValidationQueue(): Promise<void> {
+    if (this.validationRunning) return;
+    this.validationRunning = true;
+
+    while (this.validationQueue.length > 0) {
+      const item = this.validationQueue.shift();
+      if (!item) break;
+      await this.runValidationPlan(item);
+    }
+
+    this.validationRunning = false;
+  }
+
+  private async runValidationPlan(item: { entry: { task: TrackerTask; workerId: string; commit: string; filesChanged?: string[] }; plan: ValidationPlan; remaining: number }): Promise<void> {
+    if (!this.validatorWorktreePath) {
+      this.emit({
+        type: 'parallel:validation-blocked',
+        timestamp: new Date().toISOString(),
+        planId: item.plan.planId,
+        reason: 'Validator worktree unavailable.',
+      });
+      return;
+    }
+
+    const plan = item.plan;
+    this.emit({ type: 'parallel:validation-started', timestamp: new Date().toISOString(), plan });
+
+    const logDir = join(this.config.cwd, '.ralph-tui', 'logs', 'validations', plan.planId);
+    await mkdir(logDir, { recursive: true });
+    await writeFile(join(logDir, 'plan.json'), `${JSON.stringify(plan, null, 2)}\n`, 'utf-8');
+
+    const resetResult = await this.execGitIn(this.validatorWorktreePath, ['reset', '--hard', this.mergeBranch]);
+    if (resetResult.exitCode !== 0) {
+      this.emit({
+        type: 'parallel:validation-blocked',
+        timestamp: new Date().toISOString(),
+        planId: plan.planId,
+        reason: resetResult.stderr.trim() || 'Failed to reset validator worktree',
+      });
+      return;
+    }
+
+    if (this.config.qualityGates.cleanBeforeRun) {
+      await this.execGitIn(this.validatorWorktreePath, ['clean', '-fdx']);
+    }
+
+    const checkResult = await this.runValidationChecks(plan, logDir);
+
+    if (checkResult.status === 'passed' || checkResult.status === 'flaky') {
+      this.emit({
+        type: 'parallel:validation-passed',
+        timestamp: new Date().toISOString(),
+        planId: plan.planId,
+        status: checkResult.status,
+      });
+      await this.writeValidationSummary(logDir, {
+        planId: plan.planId,
+        status: checkResult.status,
+        failedCheckId: checkResult.failedCheckId,
+        reason: checkResult.reason,
+        checks: checkResult.checks,
+        fixAttempts: 0,
+      });
+      await this.finalizeMergeSuccess(item.entry, item.remaining);
+      return;
+    }
+
+    const failureReason = checkResult.reason ?? 'Validation checks failed';
+    const failedCheckId = checkResult.failedCheckId ?? 'unknown';
+    this.emit({
+      type: 'parallel:validation-failed',
+      timestamp: new Date().toISOString(),
+      planId: plan.planId,
+      status: 'failed',
+      failedCheckId,
+      reason: failureReason,
+    });
+
+    const fixResult = await this.attemptValidationFix(plan, logDir, failureReason, failedCheckId);
+    if (fixResult.healed) {
+      this.emit({
+        type: 'parallel:validation-passed',
+        timestamp: new Date().toISOString(),
+        planId: plan.planId,
+        status: 'healed',
+      });
+      await this.writeValidationSummary(logDir, {
+        planId: plan.planId,
+        status: 'healed',
+        failedCheckId: checkResult.failedCheckId,
+        reason: failureReason,
+        checks: checkResult.checks,
+        fixAttempts: fixResult.attemptsUsed,
+      });
+      await this.finalizeMergeSuccess(item.entry, item.remaining);
+      return;
+    }
+
+    await this.writeValidationSummary(logDir, {
+      planId: plan.planId,
+      status: 'failed',
+      failedCheckId: checkResult.failedCheckId,
+      reason: failureReason,
+      checks: checkResult.checks,
+      fixAttempts: fixResult.attemptsUsed,
+    });
+    await this.handleValidationFailure(item.entry, plan, failureReason);
+  }
+
+  private async runValidationChecks(
+    plan: ValidationPlan,
+    logDir: string
+  ): Promise<{ status: ValidationStatus; failedCheckId?: string; reason?: string; checks: ValidationCheckOutcome[] }> {
+    let sawFlake = false;
+    const outcomes: ValidationCheckOutcome[] = [];
+
+    for (const check of plan.checks) {
+      this.emit({
+        type: 'parallel:validation-check-started',
+        timestamp: new Date().toISOString(),
+        planId: plan.planId,
+        checkId: check.id,
+      });
+
+      const result = await this.runValidationCheck(check, logDir);
+
+      this.emit({
+        type: 'parallel:validation-check-finished',
+        timestamp: new Date().toISOString(),
+        planId: plan.planId,
+        checkId: check.id,
+        exitCode: result.exitCode,
+        durationMs: result.durationMs,
+        outputPath: result.outputPath,
+      });
+
+      let rerunExitCodes: number[] = [];
+      if (result.exitCode === 0) {
+        outcomes.push({
+          id: check.id,
+          command: check.command,
+          exitCode: 0,
+          durationMs: result.durationMs,
+          outputPath: result.outputPath,
+          rerunExitCodes,
+        });
+        continue;
+      }
+
+      const maxReruns = check.maxReruns ?? (check.retryOnFailure ? this.config.qualityGates.maxTestReruns : 0);
+      let rerunSucceeded = false;
+      for (let attempt = 0; attempt < maxReruns; attempt += 1) {
+        const rerunResult = await this.runValidationCheck(check, logDir, attempt + 1);
+        rerunExitCodes.push(rerunResult.exitCode);
+        if (rerunResult.exitCode === 0) {
+          rerunSucceeded = true;
+          break;
+        }
+      }
+
+      if (rerunSucceeded) {
+        sawFlake = true;
+        outcomes.push({
+          id: check.id,
+          command: check.command,
+          exitCode: 0,
+          durationMs: result.durationMs,
+          outputPath: result.outputPath,
+          rerunExitCodes,
+        });
+        continue;
+      }
+
+      outcomes.push({
+        id: check.id,
+        command: check.command,
+        exitCode: result.exitCode,
+        durationMs: result.durationMs,
+        outputPath: result.outputPath,
+        rerunExitCodes,
+      });
+
+      if (check.required) {
+        return { status: 'failed', failedCheckId: check.id, reason: `Check '${check.id}' failed`, checks: outcomes };
+      }
+    }
+
+    return { status: sawFlake ? 'flaky' : 'passed', checks: outcomes };
+  }
+
+  private async runValidationCheck(
+    check: ValidationCheck,
+    logDir: string,
+    rerunAttempt = 0
+  ): Promise<{ exitCode: number; durationMs: number; outputPath?: string }> {
+    const startedAt = Date.now();
+    const outputPath = join(logDir, `${check.id}${rerunAttempt > 0 ? `-rerun-${rerunAttempt}` : ''}.log`);
+
+    const result = await this.runCommand(check.command, this.validatorWorktreePath ?? this.config.cwd, check.timeoutMs);
+    const output = stripAnsiCodes(`${result.stdout}\n${result.stderr}`).trimEnd();
+    await writeFile(outputPath, `${output}\n`, 'utf-8');
+
+    return { exitCode: result.exitCode, durationMs: Date.now() - startedAt, outputPath };
+  }
+
+  private async attemptValidationFix(
+    plan: ValidationPlan,
+    logDir: string,
+    failureReason: string,
+    failedCheckId: string
+  ): Promise<{ healed: boolean; attemptsUsed: number }> {
+    if (this.config.qualityGates.maxFixAttempts <= 0) {
+      return { healed: false, attemptsUsed: 0 };
+    }
+
+    const agentRegistry = getAgentRegistry();
+    for (let attempt = 1; attempt <= this.config.qualityGates.maxFixAttempts; attempt += 1) {
+      this.emit({
+        type: 'parallel:validation-fix-started',
+        timestamp: new Date().toISOString(),
+        planId: plan.planId,
+        attempt,
+      });
+
+      const agent = await agentRegistry.getInstance(this.config.agent);
+      const workerId = `validator-fix-${plan.planId}-${attempt}`;
+      const worker = new ParallelWorker(workerId, this.validatorWorktreePath ?? this.config.cwd, agent, this.config);
+
+      try {
+        const prompt = await this.buildValidationFixPrompt(plan, failureReason, logDir, failedCheckId);
+        const fixTask: TrackerTask = {
+          id: `validation-fix-${plan.planId}`,
+          title: `Fix validation ${plan.planId}`,
+          status: 'open',
+          priority: 1,
+          description: failureReason,
+          labels: ['validation', 'fix'],
+          type: 'task',
+        };
+        const fixResult = await worker.executeTask(fixTask, prompt, {});
+        if (!fixResult.completed) {
+          this.emit({
+            type: 'parallel:validation-fix-failed',
+            timestamp: new Date().toISOString(),
+            planId: plan.planId,
+            attempt,
+            reason: 'Fix agent did not signal completion',
+          });
+          continue;
+        }
+      } finally {
+        await worker.dispose();
+      }
+
+      const status = await this.execGitIn(this.validatorWorktreePath ?? this.config.cwd, ['status', '--porcelain']);
+      if (status.stdout.trim().length === 0) {
+        this.emit({
+          type: 'parallel:validation-fix-failed',
+          timestamp: new Date().toISOString(),
+          planId: plan.planId,
+          attempt,
+          reason: 'Fix attempt produced no changes',
+        });
+        continue;
+      }
+
+      await this.execGitIn(this.validatorWorktreePath ?? this.config.cwd, ['add', '-A']);
+      const commitMessage = `chore(quality-gate): fix ${plan.planId} attempt ${attempt}`;
+      await this.execGitIn(this.validatorWorktreePath ?? this.config.cwd, ['commit', '-m', commitMessage]);
+      const fixCommit = await this.execGitIn(this.validatorWorktreePath ?? this.config.cwd, ['rev-parse', 'HEAD']);
+
+      const checkResult = await this.runValidationChecks(plan, logDir);
+      if (checkResult.status === 'passed' || checkResult.status === 'flaky') {
+        if (this.mergeWorktreePath && fixCommit.exitCode === 0) {
+          const cherry = await this.execGitIn(this.mergeWorktreePath, ['cherry-pick', fixCommit.stdout.trim()]);
+          if (cherry.exitCode !== 0) {
+            await this.execGitIn(this.mergeWorktreePath, ['cherry-pick', '--abort']);
+            this.emit({
+              type: 'parallel:validation-fix-failed',
+              timestamp: new Date().toISOString(),
+              planId: plan.planId,
+              attempt,
+              reason: cherry.stderr.trim() || 'Failed to apply fix to integration branch',
+            });
+            continue;
+          }
+        }
+        this.emit({
+          type: 'parallel:validation-fix-succeeded',
+          timestamp: new Date().toISOString(),
+          planId: plan.planId,
+          attempt,
+        });
+        return { healed: true, attemptsUsed: attempt };
+      }
+
+      this.emit({
+        type: 'parallel:validation-fix-failed',
+        timestamp: new Date().toISOString(),
+        planId: plan.planId,
+        attempt,
+        reason: checkResult.reason ?? 'Fix attempt did not pass validation',
+      });
+    }
+
+    return { healed: false, attemptsUsed: this.config.qualityGates.maxFixAttempts };
+  }
+
+  private async buildValidationFixPrompt(
+    plan: ValidationPlan,
+    failureReason: string,
+    logDir: string,
+    failedCheckId: string
+  ): Promise<string> {
+    const impactPlan = plan.impact.length
+      ? plan.impact.map((entry) => `- ${entry.change} ${entry.path}: ${entry.purpose}`).join('\n')
+      : 'No impact entries provided.';
+    const logTail = await this.readLogTail(join(logDir, `${failedCheckId}.log`), 200);
+
+    return [
+      'You are fixing a failed validation in a local integration worktree.',
+      '',
+      `Plan ID: ${plan.planId}`,
+      `Failure: ${failureReason}`,
+      `Failed check: ${failedCheckId}`,
+      '',
+      'Impact entries:',
+      impactPlan,
+      '',
+      'Log tail:',
+      logTail || '(no log output found)',
+      '',
+      `Logs directory: ${logDir}`,
+      '',
+      'Constraints:',
+      '- Make the minimal changes required to pass validation.',
+      '- Do not refactor unrelated code.',
+      '- Do not run git commands; only edit files.',
+      '- Do not modify task scope beyond the impact entries.',
+    ].join('\n');
+  }
+
+  private async writeValidationSummary(
+    logDir: string,
+    summary: {
+      planId: string;
+      status: ValidationStatus;
+      failedCheckId?: string;
+      reason?: string;
+      checks: ValidationCheckOutcome[];
+      fixAttempts: number;
+    }
+  ): Promise<void> {
+    const payload = {
+      ...summary,
+      endedAt: new Date().toISOString(),
+    };
+    await mkdir(logDir, { recursive: true });
+    await writeFile(join(logDir, 'summary.json'), `${JSON.stringify(payload, null, 2)}\n`, 'utf-8');
+  }
+
+  private async readLogTail(filePath: string, maxLines: number): Promise<string> {
+    try {
+      const contents = await import('node:fs/promises').then((fs) => fs.readFile(filePath, 'utf-8'));
+      const lines = contents.split('\n');
+      return lines.slice(Math.max(0, lines.length - maxLines)).join('\n').trim();
+    } catch {
+      return '';
+    }
+  }
+
+  private async handleValidationFailure(
+    entry: { task: TrackerTask; workerId: string; commit: string },
+    plan: ValidationPlan,
+    reason: string
+  ): Promise<void> {
+    switch (this.config.qualityGates.fallbackStrategy) {
+      case 'revert':
+        await this.revertCommits(plan.commits, plan.planId, reason);
+        await this.blockTaskForValidation(entry, reason);
+        return;
+      case 'quarantine':
+        await this.blockTaskForValidation(entry, reason);
+        return;
+      case 'pause':
+        this.pause();
+        this.emit({
+          type: 'parallel:validation-blocked',
+          timestamp: new Date().toISOString(),
+          planId: plan.planId,
+          reason,
+        });
+        return;
+    }
+  }
+
+  private async revertCommits(commits: string[], planId: string, reason: string): Promise<void> {
+    const targetPath = this.mergeWorktreePath ?? this.validatorWorktreePath;
+    if (!targetPath) {
+      return;
+    }
+    for (const commit of commits) {
+      await this.execGitIn(targetPath, ['revert', '--no-edit', commit]);
+      this.emit({
+        type: 'parallel:validation-reverted',
+        timestamp: new Date().toISOString(),
+        planId,
+        commit,
+        reason,
+      });
+    }
+  }
+
+  private async blockTaskForValidation(
+    entry: { task: TrackerTask; workerId: string; commit: string },
+    reason: string
+  ): Promise<void> {
+    this.blockedTaskIds.add(entry.task.id);
+    await this.tracker?.updateTaskStatus(entry.task.id, 'blocked');
+    await this.tracker?.releaseTask?.(entry.task.id, entry.workerId);
+    this.emit({
+      type: 'parallel:validation-blocked',
+      timestamp: new Date().toISOString(),
+      planId: `task-${entry.task.id}`,
+      reason,
+    });
   }
 
   private async syncMainBranch(): Promise<{ success: boolean; reason?: string; commit?: string }> {
@@ -786,10 +1527,10 @@ export class ParallelCoordinator {
       '%B',
       '%an',
       '%ae',
-      '%ad',
+      '%aI',
       '%cn',
       '%ce',
-      '%cd',
+      '%cI',
       '%P',
       '%T',
     ].join('%x00');
@@ -1446,6 +2187,48 @@ export class ParallelCoordinator {
       });
 
       proc.on('error', (err: Error) => {
+        resolve({ stdout, stderr: err.message, exitCode: 1 });
+      });
+    });
+  }
+
+  private runCommand(
+    command: string,
+    cwd: string,
+    timeoutMs?: number
+  ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+    return new Promise((resolve) => {
+      const proc = spawn(command, {
+        cwd,
+        env: { ...process.env },
+        shell: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+
+      let stdout = '';
+      let stderr = '';
+
+      const timer = timeoutMs
+        ? setTimeout(() => {
+            proc.kill('SIGKILL');
+          }, timeoutMs)
+        : null;
+
+      proc.stdout.on('data', (data: Buffer) => {
+        stdout += data.toString();
+      });
+
+      proc.stderr.on('data', (data: Buffer) => {
+        stderr += data.toString();
+      });
+
+      proc.on('close', (code: number | null) => {
+        if (timer) clearTimeout(timer);
+        resolve({ stdout, stderr, exitCode: code ?? 1 });
+      });
+
+      proc.on('error', (err: Error) => {
+        if (timer) clearTimeout(timer);
         resolve({ stdout, stderr: err.message, exitCode: 1 });
       });
     });

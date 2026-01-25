@@ -100,6 +100,9 @@ export interface TemplateVariables {
 
   /** Why this task was selected (for beads-bv, includes PageRank info) */
   selectionReason: string;
+
+  /** Required impact plan table for this task */
+  impactPlan: string;
 }
 
 /**

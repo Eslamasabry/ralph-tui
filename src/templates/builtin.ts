@@ -28,6 +28,9 @@ export const DEFAULT_TEMPLATE = `## Task
 **Dependencies**: {{dependsOn}}
 {{/if}}
 
+## Task Impact Table (Required)
+{{impactPlan}}
+
 {{#if recentProgress}}
 ## Previous Progress
 {{recentProgress}}
@@ -91,6 +94,9 @@ export const BEADS_TEMPLATE = `{{!-- Full PRD for project context (agent studies
 {{#if dependsOn}}
 **Prerequisites**: {{dependsOn}}
 {{/if}}
+
+## Task Impact Table (Required)
+{{impactPlan}}
 
 {{#if recentProgress}}
 ## Recent Progress
@@ -185,6 +191,9 @@ export const BEADS_BV_TEMPLATE = `{{!-- Full PRD for project context (agent stud
 ## Dependencies
 This task depends on: {{dependsOn}}
 {{/if}}
+
+## Task Impact Table (Required)
+{{impactPlan}}
 
 {{#if blocks}}
 ## Impact
