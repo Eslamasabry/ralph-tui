@@ -155,6 +155,7 @@ function TaskCard({
   isFocused,
   pulseOn,
   cardWidth,
+  allowStretch,
   titleMaxWidth,
   timing,
   nowMs,
@@ -165,6 +166,7 @@ function TaskCard({
   isFocused: boolean;
   pulseOn: boolean;
   cardWidth: number;
+  allowStretch: boolean;
   titleMaxWidth: number;
   timing?: IterationTimingInfo;
   nowMs: number;
@@ -196,8 +198,9 @@ function TaskCard({
       style={{
         width: cardWidth,
         minWidth: 28,
-        height: 8,
-        flexGrow: 0,
+        height: '100%',
+        minHeight: 8,
+        flexGrow: allowStretch ? 1 : 0,
         flexShrink: 0,
         flexDirection: 'row',
         paddingLeft: 0,
@@ -275,84 +278,6 @@ function TaskCard({
 }
 
 /**
- * Enhanced summary stats component with better visual hierarchy
- */
-function TaskSummary({ tasks }: { tasks: TaskItem[] }): ReactNode {
-  const stats = useMemo(() => {
-    const active = tasks.filter(t => t.status === 'active').length;
-    const queued = tasks.filter(t => t.status === 'actionable').length;
-    const pending = tasks.filter(t => t.status === 'pending').length;
-    const blocked = tasks.filter(t => t.status === 'blocked').length;
-    const done = tasks.filter(t => t.status === 'done').length;
-    const closed = tasks.filter(t => t.status === 'closed').length;
-    const failed = tasks.filter(t => t.status === 'error').length;
-
-    // Find unique blockers for blocked tasks
-    const blockerIds = new Set<string>();
-    tasks.filter(t => t.status === 'blocked' && t.blockedByTasks).forEach(t => {
-      t.blockedByTasks?.forEach(b => blockerIds.add(b.id));
-    });
-
-    return {
-      active,
-      queued,
-      pending,
-      blocked,
-      done,
-      closed,
-      failed,
-      blockerIds: Array.from(blockerIds),
-      total: tasks.length,
-      completed: done + closed,
-    };
-  }, [tasks]);
-
-  const progressPercent = stats.total > 0
-    ? Math.round((stats.completed / stats.total) * 100)
-    : 0;
-
-  return (
-    <box style={{ flexDirection: 'row', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
-      {/* Progress bar */}
-      <box style={{ flexDirection: 'row', gap: 0, alignItems: 'center' }}>
-        <text fg={colors.fg.muted}>[</text>
-        <text fg={colors.status.success}>
-          {'▓'.repeat(Math.floor(progressPercent / 10))}
-        </text>
-        <text fg={colors.fg.dim}>
-          {'░'.repeat(10 - Math.floor(progressPercent / 10))}
-        </text>
-        <text fg={colors.fg.muted}>]</text>
-        <text fg={colors.fg.secondary}> {String(progressPercent)}%</text>
-      </box>
-
-      {/* Status counts with color coding */}
-      <text>
-        <span fg={colors.task.active}>●{String(stats.active)}</span>
-        <span fg={colors.fg.muted}> </span>
-        <span fg={colors.task.actionable}>▶{String(stats.queued)}</span>
-        <span fg={colors.fg.muted}> </span>
-        <span fg={colors.status.warning}>○{String(stats.pending)}</span>
-        <span fg={colors.fg.muted}> </span>
-        <span fg={colors.task.blocked}>⊘{String(stats.blocked)}</span>
-        <span fg={colors.fg.muted}>{stats.blockerIds.length > 0 ? ' by ' : ''}</span>
-        <span fg={colors.task.blocked}>
-          {stats.blockerIds.length > 0
-            ? `${stats.blockerIds.slice(0, 2).join(', ')}${stats.blockerIds.length > 2 ? '...' : ''}`
-            : ''}
-        </span>
-        <span fg={colors.fg.muted}> </span>
-        <span fg={colors.status.success}>✓{String(stats.done)}</span>
-        <span fg={colors.fg.muted}>{stats.closed > 0 ? '/' : ''}</span>
-        <span fg={colors.fg.dim}>{stats.closed > 0 ? `✓${String(stats.closed)}` : ''}</span>
-        <span fg={colors.fg.muted}>{stats.failed > 0 ? ' ' : ''}</span>
-        <span fg={colors.status.error}>{stats.failed > 0 ? `✗${String(stats.failed)}` : ''}</span>
-      </text>
-    </box>
-  );
-}
-
-/**
  * Task cards row showing ALL tasks in a scrollable horizontal grid layout.
  * Tasks are displayed as selectable cards with clear status distinction.
  * Selected card has prominent highlight; active tasks have warmer colors.
@@ -395,7 +320,8 @@ export function TaskCardsRow({
   // Auto-scroll to keep selected task visible
   const baseDimensions = getCardDimensions(width);
   const cardSlot = baseDimensions.cardWidth + 1; // card width + gap
-  const visibleCards = Math.min(5, Math.max(1, Math.floor((width - 10) / cardSlot)));
+  const maxVisibleCards = Math.min(5, tasks.length);
+  const visibleCards = Math.min(maxVisibleCards, Math.max(1, Math.floor((width - 10) / cardSlot)));
 
   useEffect(() => {
     if (selectedIndex < internalScrollOffset) {
@@ -444,12 +370,14 @@ export function TaskCardsRow({
   const showScrollIndicators = tasks.length > visibleCards;
   const scrollGutter = showScrollIndicators ? 4 : 0;
   const availableWidth = Math.max(20, width - 6 - scrollGutter);
-  const gapWidth = visibleCards > 1 ? (visibleCards - 1) : 0;
+  const effectiveVisibleCount = Math.max(1, Math.min(visibleCards, visibleTasks.length));
+  const gapWidth = effectiveVisibleCount > 1 ? (effectiveVisibleCount - 1) : 0;
   const stretchedWidth = Math.max(
     baseDimensions.cardWidth,
-    Math.floor((availableWidth - gapWidth) / Math.max(1, visibleCards))
+    Math.floor((availableWidth - gapWidth) / effectiveVisibleCount)
   );
-  const dynamicCardWidth = Math.min(36, stretchedWidth);
+  const allowStretch = tasks.length < 5;
+  const dynamicCardWidth = Math.max(28, allowStretch ? stretchedWidth : Math.min(36, stretchedWidth));
   const dynamicTitleWidth = Math.max(16, dynamicCardWidth - 8);
 
   const canScrollLeft = internalScrollOffset > 0;
@@ -462,7 +390,7 @@ export function TaskCardsRow({
         flexGrow: 1,
         minHeight: panelMinHeight,
         flexDirection: 'column',
-        backgroundColor: colors.bg.primary,
+        backgroundColor: colors.bg.secondary,
         border: true,
         borderStyle: 'rounded',
         borderColor: isFocused ? colors.accent.primary : colors.border.normal,
@@ -470,7 +398,6 @@ export function TaskCardsRow({
         gap: 0,
       }}
     >
-      {/* Summary header */}
       <box
         style={{
           flexDirection: 'row',
@@ -478,12 +405,10 @@ export function TaskCardsRow({
           alignItems: 'center',
           paddingLeft: 1,
           paddingRight: 1,
-          paddingTop: 0,
-          paddingBottom: 0,
           backgroundColor: colors.bg.secondary,
         }}
       >
-        <TaskSummary tasks={tasks} />
+        <text fg={colors.fg.secondary}>Tasks</text>
         {showScrollIndicators && (
           <text fg={colors.fg.muted}>
             {canScrollLeft ? '◀ ' : '  '}
@@ -492,14 +417,13 @@ export function TaskCardsRow({
           </text>
         )}
       </box>
-
       {/* Task cards with horizontal scroll */}
       <box
         style={{
           width: '100%',
           flexGrow: 1,
           flexDirection: 'row',
-          padding: 1,
+          padding: 0,
           gap: 1,
           overflow: 'hidden',
           alignItems: 'stretch',
@@ -529,6 +453,7 @@ export function TaskCardsRow({
             isFocused={isFocused}
             pulseOn={pulseOn}
             cardWidth={dynamicCardWidth}
+            allowStretch={allowStretch}
             titleMaxWidth={dynamicTitleWidth}
             timing={timingByTaskId?.get(task.id)}
             nowMs={nowMs}

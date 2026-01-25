@@ -2675,14 +2675,14 @@ export function RunApp({
   );
   const isCompact = width < 80;
   const minBottomHeight = 8;
-  const preferredTopHeight = Math.floor(contentHeight * (isCompact ? 0.5 : 0.4));
+  const preferredTopHeight = Math.floor(contentHeight * (isCompact ? 0.45 : 0.35));
   const maxTopHeight = Math.max(8, contentHeight - minBottomHeight);
   const headerRows = 2;
-  const bannerRows = 5;
-  const taskBoardRows = isCompact ? 7 : 8;
+  const bannerRows = 4;
+  const taskBoardRows = isCompact ? 6 : 7;
   const topSectionFloor = Math.min(
     maxTopHeight,
-    Math.max(10, headerRows + bannerRows + taskBoardRows + 3)
+    Math.max(9, headerRows + bannerRows + taskBoardRows + 1)
   );
   const topSectionHeight = Math.max(topSectionFloor, Math.min(preferredTopHeight, maxTopHeight));
 
@@ -3335,8 +3335,8 @@ export function RunApp({
           flexShrink: 1,
           minHeight: 1,
           flexDirection: isCompact || viewMode === 'tasks' ? 'column' : 'row',
-          padding: layout.padding.small,
-          gap: 1,
+          padding: viewMode === 'tasks' ? 0 : layout.padding.small,
+          gap: viewMode === 'tasks' ? 0 : 1,
         }}
       >
         {viewMode === 'iteration-detail' && detailIteration ? (
@@ -3479,7 +3479,7 @@ export function RunApp({
                 flexDirection: 'column',
                 minHeight: topSectionHeight,
                 flexShrink: 0,
-                gap: 1,
+                gap: 0,
               }}
             >
               {/* Dashboard Banner - shows task counts */}
@@ -3520,7 +3520,7 @@ export function RunApp({
               style={{
                 flexGrow: 1,
                 flexDirection: !isCompact && subagentPanelVisible ? 'row' : 'column',
-                gap: 1,
+                gap: 0,
               }}
             >
               <box

@@ -1,1 +1,0 @@
-E2E demo fixture for logging verification
