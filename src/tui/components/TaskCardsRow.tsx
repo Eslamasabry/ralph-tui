@@ -154,6 +154,8 @@ function TaskCard({
   isSelected,
   isFocused,
   pulseOn,
+  cardWidth,
+  titleMaxWidth,
   timing,
   nowMs,
 }: {
@@ -162,6 +164,8 @@ function TaskCard({
   isSelected: boolean;
   isFocused: boolean;
   pulseOn: boolean;
+  cardWidth: number;
+  titleMaxWidth: number;
   timing?: IterationTimingInfo;
   nowMs: number;
 }): ReactNode {
@@ -171,9 +175,6 @@ function TaskCard({
   const backgroundColor = getCardBackgroundColor(isSelected);
   const isRunning = task.status === 'active' || timing?.isRunning === true;
   const borderColor = getCardBorderColor(isSelected, isFocused, isRunning, pulseOn);
-
-  const { width: terminalWidth } = useTerminalDimensions();
-  const { cardWidth, titleMaxWidth } = getCardDimensions(terminalWidth);
 
   const statusLabel = getStatusLabel(task.status, task.blockedByTasks);
   const durationDisplay = useMemo(() => getDurationDisplay(timing, nowMs), [timing, nowMs]);
@@ -195,7 +196,7 @@ function TaskCard({
       style={{
         width: cardWidth,
         minWidth: 28,
-        height: 6,
+        height: 8,
         flexGrow: 0,
         flexShrink: 0,
         flexDirection: 'row',
@@ -239,6 +240,13 @@ function TaskCard({
         <box>
           <text fg={titleColor}>{displayTitle}</text>
         </box>
+
+        {/* Status line for active tasks to keep row parity */}
+        {isRunning && (
+          <box>
+            <text fg={statusColor}>{statusLabel}</text>
+          </box>
+        )}
 
         {/* Status label for non-active tasks */}
         {!isRunning && (
@@ -363,7 +371,7 @@ export function TaskCardsRow({
   const hasActive = tasks.some((task) => task.status === 'active');
   const { width } = useTerminalDimensions();
   const isCompact = width < 80;
-  const panelMinHeight = isCompact ? 7 : 8;
+  const panelMinHeight = isCompact ? 9 : 10;
 
   // Sync internal scroll offset with prop
   useEffect(() => {
@@ -385,9 +393,9 @@ export function TaskCardsRow({
   }, [hasActive]);
 
   // Auto-scroll to keep selected task visible
-  const { cardWidth } = getCardDimensions(width);
-  const cardSlot = cardWidth + 1; // card width + gap
-  const visibleCards = Math.max(1, Math.floor((width - 6) / cardSlot));
+  const baseDimensions = getCardDimensions(width);
+  const cardSlot = baseDimensions.cardWidth + 1; // card width + gap
+  const visibleCards = Math.min(5, Math.max(1, Math.floor((width - 10) / cardSlot)));
 
   useEffect(() => {
     if (selectedIndex < internalScrollOffset) {
@@ -434,6 +442,16 @@ export function TaskCardsRow({
   }
 
   const showScrollIndicators = tasks.length > visibleCards;
+  const scrollGutter = showScrollIndicators ? 4 : 0;
+  const availableWidth = Math.max(20, width - 6 - scrollGutter);
+  const gapWidth = visibleCards > 1 ? (visibleCards - 1) : 0;
+  const stretchedWidth = Math.max(
+    baseDimensions.cardWidth,
+    Math.floor((availableWidth - gapWidth) / Math.max(1, visibleCards))
+  );
+  const dynamicCardWidth = Math.min(36, stretchedWidth);
+  const dynamicTitleWidth = Math.max(16, dynamicCardWidth - 8);
+
   const canScrollLeft = internalScrollOffset > 0;
   const canScrollRight = internalScrollOffset + visibleCards < tasks.length;
 
@@ -487,6 +505,21 @@ export function TaskCardsRow({
           alignItems: 'stretch',
         }}
       >
+        {showScrollIndicators && (
+          <box
+            style={{
+              width: 2,
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: colors.bg.secondary,
+              border: true,
+              borderColor: colors.border.muted,
+            }}
+          >
+            <text fg={canScrollLeft ? colors.accent.primary : colors.fg.dim}>◀</text>
+          </box>
+        )}
         {visibleTasks.map(({ task, originalIndex }) => (
           <TaskCard
             key={task.id}
@@ -495,10 +528,27 @@ export function TaskCardsRow({
             isSelected={originalIndex === selectedIndex}
             isFocused={isFocused}
             pulseOn={pulseOn}
+            cardWidth={dynamicCardWidth}
+            titleMaxWidth={dynamicTitleWidth}
             timing={timingByTaskId?.get(task.id)}
             nowMs={nowMs}
           />
         ))}
+        {showScrollIndicators && (
+          <box
+            style={{
+              width: 2,
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: colors.bg.secondary,
+              border: true,
+              borderColor: colors.border.muted,
+            }}
+          >
+            <text fg={canScrollRight ? colors.accent.primary : colors.fg.dim}>▶</text>
+          </box>
+        )}
       </box>
     </box>
   );
