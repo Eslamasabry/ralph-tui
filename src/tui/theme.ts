@@ -9,177 +9,178 @@
 export type ThemeMode = 'dark' | 'light';
 
 /**
- * Dark theme color palette - Tokyo Night inspired with modern enhancements
- * Optimized for high contrast and readability in terminal environments
+ * Dark theme color palette - "Deep Cosmos"
+ * High contrast, saturated accents against a deep slate background.
  */
 export const darkColors = {
-  // Background colors - layered depth for visual hierarchy
+  // Background colors - moved to deeper, richer blacks/slates for better depth
   bg: {
-    primary: '#1a1b26',
-    secondary: '#24283b',
-    tertiary: '#2f3449',
-    highlight: '#3d4259',
-    overlay: '#16161e',
+    primary: '#0f1117',    // Deepest background
+    secondary: '#181b25',  // Panel background
+    tertiary: '#232736',   // Inactive tabs / borders
+    highlight: '#2f3549',  // Hover states
+    overlay: '#090a0f',    // Modals/Dropdowns
   },
 
-  // Foreground (text) colors - optimized contrast ratios
+  // Foreground (text) colors - significantly brighter for readability
   fg: {
-    primary: '#c0caf5',
-    secondary: '#a9b1d6',
-    muted: '#565f89',
-    dim: '#414868',
-    inverse: '#15161e',
+    primary: '#e4e7eb',    // Bright white-ish grey
+    secondary: '#9aa5ce',  // Soft blue-grey
+    muted: '#636da6',      // Comments/Meta
+    dim: '#464f72',        // Disabled text
+    inverse: '#0f1117',    // Text on bright backgrounds
   },
 
-  // Status colors - universally recognizable semantic colors
+  // Status colors - vibrant neon tones for immediate recognition
   status: {
-    success: '#9ece6a',
-    warning: '#e0af68',
-    error: '#f7768e',
-    info: '#7aa2f7',
+    success: '#4ade80', // Neon Green
+    warning: '#fbbf24', // Amber
+    error: '#f87171',   // Soft Red
+    info: '#38bdf8',    // Sky Blue
   },
 
-  // Task status colors - specific to task lifecycle
+  // Task status colors - optimized for scanning lists quickly
   task: {
-    done: '#9ece6a',
-    active: '#7aa2f7',
-    actionable: '#9ece6a',
-    pending: '#565f89',
-    blocked: '#f7768e',
-    error: '#f7768e',
-    closed: '#414868',
+    done: '#4ade80',       // Green
+    active: '#60a5fa',     // Blue
+    actionable: '#34d399', // Emerald (distinct from done)
+    pending: '#636da6',    // Muted Blue
+    blocked: '#f472b6',    // Pink (distinct from error)
+    error: '#ef4444',      // Red
+    closed: '#475569',     // Slate (faded)
   },
 
-  // Accent colors - for emphasis and branding
+  // Accent colors - pop colors for UI elements
   accent: {
-    primary: '#7aa2f7',
-    secondary: '#bb9af7',
-    tertiary: '#7dcfff',
-    quaternary: '#f9e2af',
+    primary: '#818cf8',    // Indigo
+    secondary: '#c084fc',  // Violet
+    tertiary: '#22d3ee',   // Cyan
+    quaternary: '#fcd34d', // Yellow
   },
 
-  // Border colors - for separation and structure
+  // Border colors - subtle but distinct structure
   border: {
-    normal: '#3d4259',
-    active: '#7aa2f7',
-    muted: '#2f3449',
-    highlight: '#565f89',
-  },
-
-  // Interaction states - for user feedback
-  interaction: {
-    hover: '#3d4259',
-    focus: '#7aa2f7',
-    active: '#2f3449',
-    selected: '#3d4259',
-    disabled: '#414868',
-  },
-
-  // Link and reference colors
-  link: {
-    default: '#7aa2f7',
-    hover: '#bb9af7',
-    visited: '#9ece6a',
-  },
-
-  // Code and syntax colors - for code blocks and technical content
-  code: {
-    keyword: '#bb9af7',
-    string: '#9ece6a',
-    number: '#ff9e64',
-    comment: '#565f89',
-    function: '#7aa2f7',
-    type: '#7dcfff',
-    operator: '#c0caf5',
-    variable: '#c0caf5',
-    attribute: '#e0af68',
-  },
-};
-
-/**
- * Light theme color palette - Clean and readable for bright environments
- */
-export const lightColors = {
-  // Background colors - clean, light palette
-  bg: {
-    primary: '#fafafa',
-    secondary: '#ffffff',
-    tertiary: '#f0f0f5',
-    highlight: '#e0e0eb',
-    overlay: '#f5f5fa',
-  },
-
-  // Foreground (text) colors - high contrast on light backgrounds
-  fg: {
-    primary: '#1a1b26',
-    secondary: '#414868',
-    muted: '#565f89',
-    dim: '#787c99',
-    inverse: '#ffffff',
-  },
-
-  // Status colors - same recognizability, adjusted for light backgrounds
-  status: {
-    success: '#2d7d46',
-    warning: '#b45309',
-    error: '#dc2626',
-    info: '#1d4ed8',
-  },
-
-  // Task status colors
-  task: {
-    done: '#2d7d46',
-    active: '#1d4ed8',
-    actionable: '#2d7d46',
-    pending: '#565f89',
-    blocked: '#dc2626',
-    error: '#dc2626',
-    closed: '#787c99',
-  },
-
-  // Accent colors - adjusted for light theme visibility
-  accent: {
-    primary: '#2563eb',
-    secondary: '#7c3aed',
-    tertiary: '#0891b2',
-    quaternary: '#d97706',
-  },
-
-  // Border colors
-  border: {
-    normal: '#e0e0eb',
-    active: '#2563eb',
-    muted: '#f0f0f5',
-    highlight: '#787c99',
+    normal: '#232736',
+    active: '#818cf8',     // Matches primary accent
+    muted: '#181b25',
+    highlight: '#636da6',
   },
 
   // Interaction states
   interaction: {
-    hover: '#e0e0eb',
-    focus: '#2563eb',
-    active: '#f0f0f5',
-    selected: '#e0e0eb',
-    disabled: '#d1d5db',
+    hover: '#2f3549',
+    focus: '#818cf8',
+    active: '#232736',
+    selected: '#2f3549',
+    disabled: '#334155',
+  },
+
+  // Link and reference colors
+  link: {
+    default: '#60a5fa',
+    hover: '#c084fc',
+    visited: '#a78bfa',
+  },
+
+  // Code syntax highlighting
+  code: {
+    keyword: '#c084fc',   // Purple
+    string: '#4ade80',    // Green
+    number: '#fbbf24',    // Orange/Yellow
+    comment: '#636da6',   // Muted Blue
+    function: '#60a5fa',  // Blue
+    type: '#22d3ee',      // Cyan
+    operator: '#e4e7eb',  // White
+    variable: '#e4e7eb',  // White
+    attribute: '#f472b6', // Pink
+  },
+};
+
+/**
+ * Light theme color palette - "Crisp Day"
+ * Sharp contrast to prevent the "washed out" look common in light TUI themes.
+ */
+export const lightColors = {
+  // Background colors - warmer whites/greys
+  bg: {
+    primary: '#ffffff',
+    secondary: '#f8fafc',  // Very subtle grey
+    tertiary: '#f1f5f9',
+    highlight: '#e2e8f0',
+    overlay: '#ffffff',
+  },
+
+  // Foreground (text) colors - Dark slate/navy for sharpness
+  fg: {
+    primary: '#0f172a',    // Almost black navy
+    secondary: '#334155',  // Slate
+    muted: '#64748b',
+    dim: '#94a3b8',
+    inverse: '#ffffff',
+  },
+
+  // Status colors - darker shades for visibility on light bg
+  status: {
+    success: '#16a34a',
+    warning: '#d97706',
+    error: '#dc2626',
+    info: '#0284c7',
+  },
+
+  // Task status colors
+  task: {
+    done: '#16a34a',
+    active: '#2563eb',
+    actionable: '#059669',
+    pending: '#64748b',
+    blocked: '#db2777',
+    error: '#dc2626',
+    closed: '#94a3b8',
+  },
+
+  // Accent colors
+  accent: {
+    primary: '#4f46e5',    // Indigo
+    secondary: '#9333ea',  // Purple
+    tertiary: '#0891b2',   // Cyan
+    quaternary: '#d97706', // Amber
+  },
+
+  // Border colors
+  border: {
+    normal: '#e2e8f0',
+    active: '#4f46e5',
+    muted: '#f1f5f9',
+    highlight: '#94a3b8',
+  },
+
+  // Interaction states
+  interaction: {
+    hover: '#f1f5f9',
+    focus: '#4f46e5',
+    active: '#e2e8f0',
+    selected: '#f1f5f9',
+    disabled: '#cbd5e1',
   },
 
   // Link colors
   link: {
     default: '#2563eb',
     hover: '#7c3aed',
-    visited: '#2d7d46',
+    visited: '#166534',
   },
 
   // Code and syntax colors
   code: {
     keyword: '#7c3aed',
-    string: '#2d7d46',
-    number: '#b45309',
-    comment: '#787c99',
+    string: '#16a34a',
+    number: '#ea580c',
+    comment: '#94a3b8',
     function: '#2563eb',
     type: '#0891b2',
-    operator: '#1a1b26',
-    variable: '#1a1b26',
-    attribute: '#b45309',
+    operator: '#0f172a',
+    variable: '#0f172a',
+    attribute: '#c026d3',
   },
 };
 
@@ -355,28 +356,11 @@ export const layout = {
 
 /**
  * Ralph status types
- * - 'ready': Waiting for user to start execution (interactive mode)
- * - 'running': Actively executing iterations (generic running state)
- * - 'selecting': Selecting next task to work on
- * - 'executing': Executing agent on current task
- * - 'pausing': Pause requested, waiting for current iteration to complete
- * - 'paused': Paused, waiting to resume
- * - 'stopped': Not running (generic)
- * - 'complete': All tasks finished successfully
- * - 'idle': Stopped, no more tasks available
- * - 'error': Stopped due to error
  */
 export type RalphStatus = 'ready' | 'running' | 'selecting' | 'executing' | 'pausing' | 'paused' | 'stopped' | 'complete' | 'idle' | 'error';
 
 /**
- * Task status types matching the acceptance criteria
- * - 'done': Task completed in current session (green checkmark)
- * - 'active': Task currently being worked on (blue arrow)
- * - 'actionable': Task ready to work on with no blocking dependencies (green arrow)
- * - 'pending': Task waiting to be worked on (grey circle) - legacy, prefer actionable
- * - 'blocked': Task blocked by dependencies (red symbol)
- * - 'error': Task execution failed (red X)
- * - 'closed': Previously completed task (greyed out checkmark for historical tasks)
+ * Task status types
  */
 export type TaskStatus = 'done' | 'active' | 'actionable' | 'pending' | 'blocked' | 'error' | 'closed';
 
@@ -427,7 +411,6 @@ export function getRalphStatusIndicator(status: RalphStatus): string {
 
 /**
  * Generic status color lookup - works for both task and ralph statuses
- * Useful for components that need to display status colors generically
  */
 export function getStatusColor(status: TaskStatus | RalphStatus, isRalphStatus?: boolean): string {
   if (isRalphStatus || (status in ralphStatusColors)) {
