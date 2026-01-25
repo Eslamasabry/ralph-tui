@@ -1724,7 +1724,7 @@ export function RunApp({
                 taskId,
                 taskTitle: tasksRef.current.find((task) => task.id === taskId)?.title ?? taskId,
                 reason: parallelEvent.reason,
-                phase: 'validation',
+                phase: 'validation' as const,
               })),
             ]);
             validationPlanTasksRef.current.delete(parallelEvent.planId);

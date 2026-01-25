@@ -82,7 +82,6 @@ export class ParallelCoordinator {
   private summaryLogDir: string;
   private summaryCounts = new Map<string, number>();
   private summaryStartAt: string | null = null;
-  private fatalAgentError: string | null = null;
 
   constructor(config: RalphConfig, options: ParallelCoordinatorOptions) {
     this.config = config;
@@ -167,16 +166,6 @@ export class ParallelCoordinator {
     const maxDelayMs = 15000;
     const delayMs = Math.min(baseDelayMs * Math.pow(2, attemptCount - 1), maxDelayMs);
     this.notReadyCooldowns.set(taskId, Date.now() + delayMs);
-  }
-
-  private isTaskCoolingDown(taskId: string): boolean {
-    const until = this.notReadyCooldowns.get(taskId);
-    if (!until) return false;
-    if (Date.now() >= until) {
-      this.notReadyCooldowns.delete(taskId);
-      return false;
-    }
-    return true;
   }
 
   private logEvent(event: ParallelEvent): void {
@@ -774,7 +763,6 @@ export class ParallelCoordinator {
       this.blockedTaskIds.add(taskId);
       await this.tracker.updateTaskStatus(taskId, 'blocked');
       await this.tracker.releaseTask?.(taskId, workerId);
-      this.fatalAgentError = reason;
       this.paused = true;
       this.logWarn(`Task blocked due to agent credit exhaustion: ${taskId}.`);
       this.logWarn(`Parallel execution paused: ${reason}`);
