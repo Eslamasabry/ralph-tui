@@ -4,6 +4,18 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_dir="${repo_root}/.ralph-tui/opencode/tmp"
 fixtures_dir="${repo_root}/demo-fixtures"
+use_tui=0
+
+for arg in "$@"; do
+  case "${arg}" in
+    --tui)
+      use_tui=1
+      ;;
+    --no-tui)
+      use_tui=0
+      ;;
+  esac
+done
 
 mkdir -p "${tmp_dir}"
 mkdir -p "${fixtures_dir}"
@@ -114,4 +126,4 @@ bun run dev -- run \
   --agent "${agent_plugin}" \
   --model "${agent_model}" \
   --force \
-  --no-tui
+  $( [ "${use_tui}" -eq 1 ] && printf '%s' '' || printf '%s' '--no-tui' )
