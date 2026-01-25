@@ -5,6 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_dir="${repo_root}/.ralph-tui/opencode/tmp"
 fixtures_dir="${repo_root}/demo-fixtures"
 use_tui=0
+use_direct=0
 
 for arg in "$@"; do
   case "${arg}" in
@@ -13,6 +14,9 @@ for arg in "$@"; do
       ;;
     --no-tui)
       use_tui=0
+      ;;
+    --direct)
+      use_direct=1
       ;;
   esac
 done
@@ -120,10 +124,24 @@ bd list --parent "${epic_id}"
 agent_plugin="${RALPH_AGENT_PLUGIN:-opencode}"
 agent_model="${RALPH_MODEL:-minimax/MiniMax-M2.1}"
 
-bun run dev -- run \
+run_cmd=(bun run dev -- run \
   --tracker beads \
   --epic "${epic_id}" \
   --agent "${agent_plugin}" \
   --model "${agent_model}" \
-  --force \
-  $( [ "${use_tui}" -eq 1 ] && printf '%s' '' || printf '%s' '--no-tui' )
+  --force)
+
+if [ "${use_direct}" -eq 1 ]; then
+  run_cmd=(bun run ./src/cli.tsx run \
+    --tracker beads \
+    --epic "${epic_id}" \
+    --agent "${agent_plugin}" \
+    --model "${agent_model}" \
+    --force)
+fi
+
+if [ "${use_tui}" -eq 0 ]; then
+  run_cmd+=("--no-tui")
+fi
+
+ "${run_cmd[@]}"
