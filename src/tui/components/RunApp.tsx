@@ -3304,8 +3304,9 @@ export function RunApp({
       <box
         style={{
           flexGrow: 1,
+          flexShrink: 1,
+          minHeight: 1,
           flexDirection: isCompact || viewMode === 'tasks' ? 'column' : 'row',
-          height: contentHeight,
         }}
       >
         {viewMode === 'iteration-detail' && detailIteration ? (

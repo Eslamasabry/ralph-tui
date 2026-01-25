@@ -95,6 +95,8 @@ export function Footer({
       style={{
         width: '100%',
         height: layout.footer.height,
+        minHeight: layout.footer.height,
+        flexShrink: 0,
         flexDirection: 'column',
         backgroundColor: footerColors.bg.secondary,
         border: true,

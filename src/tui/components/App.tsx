@@ -153,8 +153,9 @@ export function App({ initialState, onQuit }: AppProps): ReactNode {
       <box
         style={{
           flexGrow: 1,
+          flexShrink: 1,
+          minHeight: 1,
           flexDirection: isCompact ? 'column' : 'row',
-          height: contentHeight,
         }}
       >
         <LeftPanel
