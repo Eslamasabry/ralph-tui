@@ -69,6 +69,7 @@ export class ParallelCoordinator {
   private readonly maxMainSyncRetries = 10;
   private lastMainSyncSkipAt = 0;
   private mainSyncWorktree: MainSyncWorktree | null = null;
+  private mainSyncRunning = false;
   private mergeWorktreePath: string | null = null;
   private validatorWorktreePath: string | null = null;
   private validatorBranch: string | null = null;
@@ -472,6 +473,10 @@ export class ParallelCoordinator {
           }
 
           if (this.pendingMainSyncTasks.size > 0) {
+            await this.delay(250);
+            continue;
+          }
+          if (this.mainSyncRunning) {
             await this.delay(250);
             continue;
           }
@@ -882,7 +887,16 @@ export class ParallelCoordinator {
   private async hasPendingWork(): Promise<boolean> {
     if (!this.tracker) return false;
     const tasks = await this.tracker.getTasks({ status: ['open', 'in_progress'] });
-    return tasks.length > 0 || this.pendingMainSyncTasks.size > 0;
+    return (
+      tasks.length > 0 ||
+      this.pendingMainSyncTasks.size > 0 ||
+      this.mainSyncRunning ||
+      this.mergeQueue.length > 0 ||
+      this.pendingMergeCounts.size > 0 ||
+      this.validationRunning ||
+      this.validationQueue.length > 0 ||
+      this.validationBatchTimer !== null
+    );
   }
 
   private async handleMergeFailure(
@@ -1722,38 +1736,43 @@ export class ParallelCoordinator {
       return { success: false, reason: 'Main sync worktree unavailable.' };
     }
 
-    const integrationCommit = await this.resolveCommit(this.mergeBranch);
-    this.logInfo(`Syncing main from ${this.mergeBranch} (${integrationCommit.slice(0, 7)}).`);
-    const syncResult = await this.mainSyncWorktree.fastForwardTo(integrationCommit);
-    if (!syncResult.success) {
-      const reason = syncResult.error ?? 'Main sync failed';
-      this.logWarn(`Main sync failed: ${reason}.`);
-      this.emitMainSyncSkipped(reason);
-      return { success: false, reason };
-    }
+    this.mainSyncRunning = true;
+    try {
+      const integrationCommit = await this.resolveCommit(this.mergeBranch);
+      this.logInfo(`Syncing main from ${this.mergeBranch} (${integrationCommit.slice(0, 7)}).`);
+      const syncResult = await this.mainSyncWorktree.fastForwardTo(integrationCommit);
+      if (!syncResult.success) {
+        const reason = syncResult.error ?? 'Main sync failed';
+        this.logWarn(`Main sync failed: ${reason}.`);
+        this.emitMainSyncSkipped(reason);
+        return { success: false, reason };
+      }
 
-    // Now update the repo root main ref to match integration
-    const rootResult = await this.fastForwardRootMain(integrationCommit);
-    if (!rootResult.success) {
-      const reason = rootResult.reason ?? 'Failed to update main ref';
-      this.logWarn(`Main ref update failed: ${reason}.`);
-      this.emitMainSyncSkipped(reason);
-      return { success: false, reason };
-    }
+      // Now update the repo root main ref to match integration
+      const rootResult = await this.fastForwardRootMain(integrationCommit);
+      if (!rootResult.success) {
+        const reason = rootResult.reason ?? 'Failed to update main ref';
+        this.logWarn(`Main ref update failed: ${reason}.`);
+        this.emitMainSyncSkipped(reason);
+        return { success: false, reason };
+      }
 
-    const head = await this.execGitIn(this.config.cwd, ['rev-parse', 'HEAD']);
-    if (head.exitCode === 0) {
-      this.logInfo(`Main sync succeeded at ${head.stdout.trim().slice(0, 7)}.`);
-      this.emit({
-        type: 'parallel:main-sync-succeeded',
-        timestamp: new Date().toISOString(),
-        commit: head.stdout.trim(),
-      });
-      await this.completePendingMainSyncTasks();
-      return { success: true, commit: head.stdout.trim() };
-    }
+      const head = await this.execGitIn(this.config.cwd, ['rev-parse', 'HEAD']);
+      if (head.exitCode === 0) {
+        this.logInfo(`Main sync succeeded at ${head.stdout.trim().slice(0, 7)}.`);
+        this.emit({
+          type: 'parallel:main-sync-succeeded',
+          timestamp: new Date().toISOString(),
+          commit: head.stdout.trim(),
+        });
+        await this.completePendingMainSyncTasks();
+        return { success: true, commit: head.stdout.trim() };
+      }
 
-    return { success: false, reason: 'Unable to resolve main HEAD after sync.' };
+      return { success: false, reason: 'Unable to resolve main HEAD after sync.' };
+    } finally {
+      this.mainSyncRunning = false;
+    }
   }
 
   private emitMainSyncSkipped(reason: string): void {

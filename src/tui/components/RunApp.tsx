@@ -1912,6 +1912,21 @@ export function RunApp({
             next.set(parallelEvent.task.id, parallelEvent.workerId);
             return next;
           });
+          // Ensure task exists in list (parallel may start before tracker refresh)
+          setTasks((prev) => {
+            if (prev.some((t) => t.id === parallelEvent.task.id)) {
+              return prev;
+            }
+            return [
+              ...prev,
+              {
+                id: parallelEvent.task.id,
+                title: parallelEvent.task.title,
+                status: 'pending',
+                description: parallelEvent.task.description,
+              },
+            ];
+          });
           break;
         case 'parallel:task-started':
           // Map task to worker and set status to active when execution begins
@@ -1921,11 +1936,23 @@ export function RunApp({
             return next;
           });
           // Set task status to active so it appears in running tasks
-          setTasks((prev) =>
-            prev.map((t) =>
+          setTasks((prev) => {
+            const exists = prev.some((t) => t.id === parallelEvent.task.id);
+            if (!exists) {
+              return [
+                ...prev,
+                {
+                  id: parallelEvent.task.id,
+                  title: parallelEvent.task.title,
+                  status: 'active',
+                  description: parallelEvent.task.description,
+                },
+              ];
+            }
+            return prev.map((t) =>
               t.id === parallelEvent.task.id ? { ...t, status: 'active' } : t
-            )
-          );
+            );
+          });
           break;
         case 'parallel:task-finished':
           // Clear task-worker mapping when task finishes
@@ -1943,6 +1970,12 @@ export function RunApp({
               // Recalculate blocked/actionable status for dependent tasks
               return recalculateDependencyStatus(updated);
             });
+          }
+          break;
+        case 'parallel:started':
+          // Ensure task list is populated at parallel start (uses preloaded task list)
+          if (tasksRef.current.length > 0) {
+            setTasks(tasksRef.current);
           }
           break;
         // Note: parallel:task-output is already converted to agent:output by ParallelEngine
