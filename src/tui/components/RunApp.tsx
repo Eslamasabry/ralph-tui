@@ -52,6 +52,7 @@ import type {
 } from '../../engine/types.js';
 import type { ParallelEvent } from '../../engine/parallel/types.js';
 import { WorktreeManager } from '../../engine/parallel/worktree-manager.js';
+import { stripAnsiCodes } from '../../plugins/agents/output-formatting.js';
 import type { TrackerTask } from '../../plugins/trackers/types.js';
 import type { StoredConfig, SubagentDetailLevel, SandboxConfig, SandboxMode } from '../../config/types.js';
 import type { AgentPluginMeta } from '../../plugins/agents/types.js';
@@ -384,6 +385,10 @@ export function RunApp({
     }
     return [];
   });
+  const tasksRef = useRef<TaskItem[]>([]);
+  useEffect(() => {
+    tasksRef.current = tasks;
+  }, [tasks]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   // Start in 'ready' state if we have onStart callback (waiting for user to start)
   const [status, setStatus] = useState<RalphStatus>(onStart ? 'ready' : 'running');
@@ -578,6 +583,13 @@ export function RunApp({
   const pendingCliOutputRef = useRef('');
   const pendingOutputRefreshRef = useRef(false);
   const pendingParallelOutputsRef = useRef(false);
+  const MAX_MAIN_OUTPUT_CHARS = 250_000;
+  const MAX_TASK_OUTPUT_CHARS = 150_000;
+  const appendBounded = (prev: string, chunk: string, maxChars: number): string => {
+    const next = prev + chunk;
+    if (next.length <= maxChars) return next;
+    return next.slice(next.length - maxChars);
+  };
 
   const scheduleOutputFlush = useCallback(() => {
     if (outputFlushTimerRef.current) {
@@ -585,7 +597,9 @@ export function RunApp({
     }
     outputFlushTimerRef.current = setTimeout(() => {
       if (pendingCliOutputRef.current) {
-        setCurrentCliOutput((prev) => prev + pendingCliOutputRef.current);
+        setCurrentCliOutput((prev) =>
+          appendBounded(prev, pendingCliOutputRef.current, MAX_MAIN_OUTPUT_CHARS)
+        );
         pendingCliOutputRef.current = '';
       }
       if (pendingOutputRefreshRef.current) {
@@ -866,7 +880,8 @@ export function RunApp({
           break;
         case 'agent:output':
           if (event.stream === 'stdout') {
-            setRemoteOutput((prev) => prev + event.data);
+            const cleaned = stripAnsiCodes(event.data);
+            setRemoteOutput((prev) => appendBounded(prev, cleaned, MAX_MAIN_OUTPUT_CHARS));
           }
           // Refresh remote state to get updated subagent tree
           instanceManager.getRemoteState().then((state) => {
@@ -1291,18 +1306,26 @@ export function RunApp({
         case 'agent:output':
           if (event.stream === 'stdout' || event.stream === 'stderr') {
             const taskId = event.taskId;
+            const cleaned = stripAnsiCodes(event.data);
             if (taskId) {
               const existing = parallelOutputsRef.current.get(taskId) ?? '';
               const prefix = event.stream === 'stderr' ? '[stderr] ' : '';
-              parallelOutputsRef.current.set(taskId, existing + prefix + event.data);
+              parallelOutputsRef.current.set(
+                taskId,
+                appendBounded(existing, prefix + cleaned, MAX_TASK_OUTPUT_CHARS)
+              );
               pendingParallelOutputsRef.current = true;
               scheduleOutputFlush();
             } else {
               const prefix = event.stream === 'stderr' ? '[stderr] ' : '';
-              pendingCliOutputRef.current += `${prefix}${event.data}`;
+              pendingCliOutputRef.current = appendBounded(
+                pendingCliOutputRef.current,
+                `${prefix}${cleaned}`,
+                MAX_MAIN_OUTPUT_CHARS
+              );
               if (event.stream === 'stdout') {
                 // Use streaming parser to extract readable content (filters out verbose JSONL)
-                outputParserRef.current.push(event.data);
+                outputParserRef.current.push(cleaned);
                 pendingOutputRefreshRef.current = true;
               }
               scheduleOutputFlush();
@@ -1665,16 +1688,17 @@ export function RunApp({
                 taskIds.includes(task.id) ? { ...task, validationStatus: 'failed' } : task
               )
             );
+            const failureTasks = taskIds.length > 0 ? taskIds : [parallelEvent.planId];
+            setRunFailures((prev) => [
+              ...prev,
+              ...failureTasks.map((taskId) => ({
+                taskId,
+                taskTitle: tasksRef.current.find((task) => task.id === taskId)?.title ?? taskId,
+                reason: parallelEvent.reason,
+                phase: 'validation',
+              })),
+            ]);
           }
-          setRunFailures((prev) => [
-            ...prev,
-            {
-              taskId: parallelEvent.planId,
-              taskTitle: parallelEvent.planId,
-              reason: parallelEvent.reason,
-              phase: 'validation',
-            },
-          ]);
           appendActivityEvent({
             category: 'system',
             eventType: 'failed',
