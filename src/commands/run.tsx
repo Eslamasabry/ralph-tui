@@ -1671,7 +1671,7 @@ export async function executeRunCommand(args: string[]): Promise<void> {
   // Detect and recover stale sessions EARLY (before any prompts)
   // This fixes the issue where killing the TUI mid-task leaves activeTaskIds populated
   const staleRecovery = await detectAndRecoverStaleSession(config.cwd, checkLock);
-  if (staleRecovery.wasStale) {
+  if (staleRecovery.wasStale && staleRecovery.clearedTaskCount > 0) {
     console.log('');
     console.log('⚠️  Recovered stale session');
     if (staleRecovery.clearedTaskCount > 0) {

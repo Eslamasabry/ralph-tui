@@ -80,6 +80,8 @@ export interface TaskItem {
   workerId?: string;
   /** Validation status for quality gates (parallel merges) */
   validationStatus?: ValidationStatus;
+  /** Merge status for parallel execution */
+  mergeStatus?: 'queued' | 'merged' | 'resolved' | 'failed';
   /** Tracker-specific metadata (varies by plugin) */
   metadata?: Record<string, unknown>;
 }

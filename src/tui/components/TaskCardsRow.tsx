@@ -180,6 +180,22 @@ function getValidationBadge(status?: TaskItem['validationStatus']): { label: str
   }
 }
 
+function getMergeBadge(status?: TaskItem['mergeStatus']): { label: string; color: string } | null {
+  if (!status) return null;
+  switch (status) {
+    case 'queued':
+      return { label: 'Merge Queued', color: colors.fg.muted };
+    case 'merged':
+      return { label: 'Merged ✓', color: colors.status.success };
+    case 'resolved':
+      return { label: 'Resolved ↩', color: colors.status.info };
+    case 'failed':
+      return { label: 'Merge Failed', color: colors.status.error };
+    default:
+      return null;
+  }
+}
+
 /**
  * Get priority display with icon and color
  */
@@ -255,6 +271,7 @@ function TaskCard({
   const isRunning = task.status === 'active';
   const statusLabel = getStatusLabel(task.status, task.blockedByTasks);
   const validationBadge = getValidationBadge(task.validationStatus);
+  const mergeBadge = getMergeBadge(task.mergeStatus);
   const durationDisplay = useMemo(() => getDurationDisplay(timing, nowMs), [timing, nowMs]);
   const startedDisplay = timing?.startedAt ? formatTimestamp(timing.startedAt) : '—';
   const endedDisplay = timing?.endedAt ? formatTimestamp(timing.endedAt) : '—';
@@ -333,6 +350,12 @@ function TaskCard({
       {validationBadge && (
         <box style={{ marginTop: 0 }}>
           <text fg={validationBadge.color}>{validationBadge.label}</text>
+        </box>
+      )}
+
+      {mergeBadge && (
+        <box style={{ marginTop: 0 }}>
+          <text fg={mergeBadge.color}>{mergeBadge.label}</text>
         </box>
       )}
 

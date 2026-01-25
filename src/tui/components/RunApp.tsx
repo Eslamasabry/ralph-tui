@@ -879,9 +879,10 @@ export function RunApp({
           );
           break;
         case 'agent:output':
-          if (event.stream === 'stdout') {
+          if (event.stream === 'stdout' || event.stream === 'stderr') {
             const cleaned = stripAnsiCodes(event.data);
-            setRemoteOutput((prev) => appendBounded(prev, cleaned, MAX_MAIN_OUTPUT_CHARS));
+            const prefix = event.stream === 'stderr' ? '[stderr] ' : '';
+            setRemoteOutput((prev) => appendBounded(prev, prefix + cleaned, MAX_MAIN_OUTPUT_CHARS));
           }
           // Refresh remote state to get updated subagent tree
           instanceManager.getRemoteState().then((state) => {
@@ -1389,6 +1390,14 @@ export function RunApp({
                   workerId: prevTask?.workerId,
                 };
               }
+              const prevTask = prev.find((t) => t.id === freshTask.id);
+              if (prevTask?.mergeStatus || prevTask?.validationStatus) {
+                return {
+                  ...freshTask,
+                  mergeStatus: prevTask.mergeStatus,
+                  validationStatus: prevTask.validationStatus,
+                };
+              }
               return freshTask;
             });
           });
@@ -1557,6 +1566,11 @@ export function RunApp({
           break;
         case 'parallel:merge-queued':
           setMergeStats((prev) => ({ ...prev, queued: prev.queued + 1 }));
+          setTasks((prev) =>
+            prev.map((t) =>
+              t.id === parallelEvent.task.id ? { ...t, mergeStatus: 'queued' } : t
+            )
+          );
           break;
         case 'parallel:merge-succeeded':
           setMergeStats((prev) => ({
@@ -1565,6 +1579,13 @@ export function RunApp({
             merged: prev.merged + 1,
             resolved: parallelEvent.resolved ? prev.resolved + 1 : prev.resolved,
           }));
+          setTasks((prev) =>
+            prev.map((t) =>
+              t.id === parallelEvent.task.id
+                ? { ...t, mergeStatus: parallelEvent.resolved ? 'resolved' : 'merged' }
+                : t
+            )
+          );
           break;
         case 'parallel:merge-failed':
           setMergeStats((prev) => ({
@@ -1572,6 +1593,11 @@ export function RunApp({
             queued: Math.max(0, prev.queued - 1),
             failed: prev.failed + 1,
           }));
+          setTasks((prev) =>
+            prev.map((t) =>
+              t.id === parallelEvent.task.id ? { ...t, mergeStatus: 'failed' } : t
+            )
+          );
           // Track merge failure for run summary (US-002)
           setRunFailures((prev) => [
             ...prev,
@@ -1643,13 +1669,15 @@ export function RunApp({
           });
           break;
         case 'parallel:validation-check-finished':
-          appendActivityEvent({
-            category: 'system',
-            eventType: parallelEvent.exitCode === 0 ? 'completed' : 'failed',
-            timestamp: parallelEvent.timestamp,
-            severity: parallelEvent.exitCode === 0 ? 'info' : 'warning',
-            description: `Check ${parallelEvent.checkId}: exit ${parallelEvent.exitCode}`,
-          });
+          if (parallelEvent.exitCode !== 0) {
+            appendActivityEvent({
+              category: 'system',
+              eventType: 'failed',
+              timestamp: parallelEvent.timestamp,
+              severity: 'warning',
+              description: `Check ${parallelEvent.checkId}: exit ${parallelEvent.exitCode}`,
+            });
+          }
           break;
         case 'parallel:validation-passed':
           setValidationStats((prev) => ({
@@ -1665,6 +1693,7 @@ export function RunApp({
                 taskIds.includes(task.id) ? { ...task, validationStatus: parallelEvent.status } : task
               )
             );
+            validationPlanTasksRef.current.delete(parallelEvent.planId);
           }
           appendActivityEvent({
             category: 'system',
@@ -1698,6 +1727,7 @@ export function RunApp({
                 phase: 'validation',
               })),
             ]);
+            validationPlanTasksRef.current.delete(parallelEvent.planId);
           }
           appendActivityEvent({
             category: 'system',
@@ -1759,6 +1789,7 @@ export function RunApp({
                 taskIds.includes(task.id) ? { ...task, validationStatus: 'reverted' } : task
               )
             );
+            validationPlanTasksRef.current.delete(parallelEvent.planId);
           }
           appendActivityEvent({
             category: 'system',
@@ -1781,6 +1812,7 @@ export function RunApp({
                 taskIds.includes(task.id) ? { ...task, validationStatus: 'blocked' } : task
               )
             );
+            validationPlanTasksRef.current.delete(parallelEvent.planId);
           }
           appendActivityEvent({
             category: 'system',
