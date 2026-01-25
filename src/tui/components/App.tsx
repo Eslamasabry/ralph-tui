@@ -124,8 +124,6 @@ export function App({ initialState, onQuit }: AppProps): ReactNode {
   useKeyboard(handleKeyboard);
 
   // Calculate content area height (total height minus header and footer)
-  const contentHeight = Math.max(1, height - layout.header.height - layout.footer.height);
-
   // Determine if we should use a compact layout for narrow terminals
   const isCompact = width < 80;
 
