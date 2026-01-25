@@ -40,12 +40,13 @@ export async function buildParallelPrompt(
       '- Do NOT merge, rebase, or push to main.',
       '- Do NOT switch branches (no `git checkout main`).',
       '- Do NOT use `bd` or modify `.beads`.',
+      '- Ignore any template instructions to close beads or run `bd`; Ralph handles tracking.',
       '- You may append to `.ralph-tui/progress.md` for local context, but do NOT stage or commit it.',
       '- Do NOT modify other `.ralph-tui` files.',
       '- Do NOT run tests or lint unless explicitly asked.',
       '- Do NOT run `git add .` or `git add -A`. Stage only relevant task files.',
       '- After finishing, ensure your changes are committed in THIS worktree.',
-      '- Commit message format: "<task-id>: <short title>".',
+      '- Commit subject MUST start with "<task-id>:" and include a trailer line: "Ralph-Task: <task-id>".',
       '- The coordinator will cherry-pick your commit into main.',
       '',
       '## Completion',
@@ -77,12 +78,13 @@ export async function buildParallelPrompt(
   lines.push('- Do NOT merge, rebase, or push to main.');
   lines.push('- Do NOT switch branches (no `git checkout main`).');
   lines.push('- Do NOT use `bd` or modify `.beads`.');
+  lines.push('- Ignore any template instructions to close beads or run `bd`; Ralph handles tracking.');
   lines.push('- You may append to `.ralph-tui/progress.md` for local context, but do NOT stage or commit it.');
   lines.push('- Do NOT modify other `.ralph-tui` files.');
   lines.push('- Do NOT run tests or lint unless explicitly asked.');
   lines.push('- Do NOT run `git add .` or `git add -A`. Stage only relevant task files.');
   lines.push('- After finishing, ensure your changes are committed in THIS worktree.');
-  lines.push('- Commit message format: "<task-id>: <short title>".');
+  lines.push('- Commit subject MUST start with "<task-id>:" and include a trailer line: "Ralph-Task: <task-id>".');
   lines.push('- The coordinator will cherry-pick your commit into main.');
 
   return lines.join('\n');

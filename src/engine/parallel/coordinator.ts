@@ -4,8 +4,8 @@
 
 import type { RalphConfig } from '../../config/types.js';
 import { spawn } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { appendFile, mkdir, writeFile } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
 import type { TrackerPlugin, TrackerTask } from '../../plugins/trackers/types.js';
 import type { AgentPlugin, AgentExecutionResult } from '../../plugins/agents/types.js';
 import { getAgentRegistry } from '../../plugins/agents/registry.js';
@@ -41,6 +41,8 @@ export class ParallelCoordinator {
   private running = false;
   private paused = false;
   private mergeQueue: Array<{ task: TrackerTask; workerId: string; commit: string; filesChanged?: string[] }> = [];
+  private queuedMergeKeys = new Set<string>();
+  private processedCommits = new Set<string>();
   private merging = false;
   private validationQueue: Array<{
     entry: { task: TrackerTask; workerId: string; commit: string; filesChanged?: string[] };
@@ -56,9 +58,16 @@ export class ParallelCoordinator {
   private activeImpactTables = new Map<string, ImpactEntry[]>();
   private pendingMainSyncTasks = new Map<string, { task: TrackerTask; workerId: string }>();
   private commitRecoveryAttempts = new Map<string, number>();
+  private taskFailureCounts = new Map<string, number>();
+  private notReadyCooldowns = new Map<string, number>();
+  private notReadyAttempts = new Map<string, number>();
+  private activeTaskLeases = new Map<string, { workerId: string; claimedAt: number }>();
+  private readonly staleInProgressTimeoutMs = 30 * 60 * 1000;
+  private lastValidationSkipLogAt = 0;
   private lastMainSyncAttemptAt = 0;
   private pendingMainSyncRetryCount = 0;
   private readonly maxMainSyncRetries = 10;
+  private lastMainSyncSkipAt = 0;
   private mainSyncWorktree: MainSyncWorktree | null = null;
   private mergeWorktreePath: string | null = null;
   private validatorWorktreePath: string | null = null;
@@ -67,11 +76,22 @@ export class ParallelCoordinator {
   private baseBranch = 'main';
   private snapshotCreated = false;
   private snapshotTag: string | null = null;
+  private runtimeLogPath: string;
+  private eventLogPath: string;
+  private taskLogRoot: string;
+  private summaryLogDir: string;
+  private summaryCounts = new Map<string, number>();
+  private summaryStartAt: string | null = null;
+  private fatalAgentError: string | null = null;
 
   constructor(config: RalphConfig, options: ParallelCoordinatorOptions) {
     this.config = config;
     this.worktreeManager = new WorktreeManager({ repoRoot: config.cwd });
     this.maxWorkers = options.maxWorkers;
+    this.runtimeLogPath = join(this.config.cwd, '.ralph-tui', 'logs', 'parallel-runtime.log');
+    this.eventLogPath = join(this.config.cwd, '.ralph-tui', 'logs', 'parallel-events.jsonl');
+    this.taskLogRoot = join(this.config.cwd, '.ralph-tui', 'logs', 'parallel-tasks');
+    this.summaryLogDir = join(this.config.cwd, '.ralph-tui', 'logs', 'parallel-summary');
   }
 
   private maxWorkers: number;
@@ -91,12 +111,188 @@ export class ParallelCoordinator {
   }
 
   private emit(event: ParallelEvent): void {
+    this.countEvent(event);
+    this.logEvent(event);
     for (const listener of this.listeners) {
       try {
         listener(event);
       } catch {
         // ignore listener errors
       }
+    }
+  }
+
+  private logInfo(message: string): void {
+    console.log(`[parallel] ${message}`);
+    this.logToFile('INFO', message);
+  }
+
+  private logWarn(message: string): void {
+    console.warn(`[parallel] ${message}`);
+    this.logToFile('WARN', message);
+  }
+
+  private logToFile(level: 'INFO' | 'WARN', message: string): void {
+    const line = `${new Date().toISOString()} [${level}] ${message}\n`;
+    void this.appendRuntimeLog(line);
+  }
+
+  private countEvent(event: ParallelEvent): void {
+    const key = event.type;
+    const current = this.summaryCounts.get(key) ?? 0;
+    this.summaryCounts.set(key, current + 1);
+    if (event.type === 'parallel:started') {
+      this.summaryStartAt = event.timestamp;
+    }
+  }
+
+  private async writeSummary(): Promise<void> {
+    const summary = {
+      startedAt: this.summaryStartAt,
+      endedAt: new Date().toISOString(),
+      counts: Object.fromEntries(this.summaryCounts.entries()),
+    };
+
+    try {
+      await mkdir(this.summaryLogDir, { recursive: true });
+      const filename = `summary-${Date.now()}.json`;
+      await writeFile(join(this.summaryLogDir, filename), JSON.stringify(summary, null, 2), 'utf-8');
+    } catch {
+      // ignore summary failures
+    }
+  }
+
+  private setNotReadyCooldown(taskId: string, attemptCount: number): void {
+    const baseDelayMs = 1000;
+    const maxDelayMs = 15000;
+    const delayMs = Math.min(baseDelayMs * Math.pow(2, attemptCount - 1), maxDelayMs);
+    this.notReadyCooldowns.set(taskId, Date.now() + delayMs);
+  }
+
+  private isTaskCoolingDown(taskId: string): boolean {
+    const until = this.notReadyCooldowns.get(taskId);
+    if (!until) return false;
+    if (Date.now() >= until) {
+      this.notReadyCooldowns.delete(taskId);
+      return false;
+    }
+    return true;
+  }
+
+  private logEvent(event: ParallelEvent): void {
+    void this.appendEventLog(event);
+  }
+
+  private async appendRuntimeLog(line: string): Promise<void> {
+    try {
+      await mkdir(dirname(this.runtimeLogPath), { recursive: true });
+      await appendFile(this.runtimeLogPath, line, 'utf-8');
+    } catch {
+      // ignore logging failures
+    }
+  }
+
+  private sanitizeEventForLog(event: ParallelEvent): Record<string, unknown> {
+    if (event.type === 'parallel:task-output') {
+      const cleaned = stripAnsiCodes(event.data);
+      return {
+        ...event,
+        dataLength: cleaned.length,
+        dataPreview: cleaned.slice(0, 240),
+      };
+    }
+
+    if (event.type === 'parallel:task-segments') {
+      return {
+        ...event,
+        segmentCount: event.segments.length,
+      };
+    }
+
+    if (event.type === 'parallel:task-finished') {
+      return {
+        ...event,
+        resultSummary: this.summarizeAgentResult(event.result),
+      };
+    }
+
+    return event;
+  }
+
+  private isInsufficientCredit(result: AgentExecutionResult): boolean {
+    const payload = `${result.stdout ?? ''}\n${result.stderr ?? ''}`.toLowerCase();
+    return (
+      payload.includes('insufficient_credit') ||
+      payload.includes('account overdue') ||
+      payload.includes('non-negative balance')
+    );
+  }
+
+  private summarizeAgentResult(result: AgentExecutionResult): Record<string, unknown> {
+    return {
+      status: result.status,
+      exitCode: result.exitCode,
+      durationMs: result.durationMs,
+      error: result.error,
+      stdoutLength: result.stdout.length,
+      stderrLength: result.stderr.length,
+      stdoutTail: stripAnsiCodes(result.stdout).slice(-400),
+      stderrTail: stripAnsiCodes(result.stderr).slice(-400),
+    };
+  }
+
+  private async appendTaskOutput(
+    logPath: string,
+    stream: 'stdout' | 'stderr',
+    data: string
+  ): Promise<void> {
+    const cleaned = stripAnsiCodes(data);
+    if (!cleaned) return;
+
+    const timestamp = new Date().toISOString();
+    const lines = cleaned.split(/\r?\n/).filter(Boolean);
+    if (lines.length === 0) return;
+
+    const payload =
+      lines.map((line) => `${timestamp} [${stream}] ${line}`).join('\n') + '\n';
+
+    try {
+      await mkdir(dirname(logPath), { recursive: true });
+      await appendFile(logPath, payload, 'utf-8');
+    } catch {
+      // ignore logging failures
+    }
+  }
+
+  private async createTaskLog(
+    task: TrackerTask,
+    workerId: string,
+    prompt: string
+  ): Promise<string> {
+    const safeTaskId = task.id.replace(/[^\w.-]/g, '_');
+    const logPath = join(this.taskLogRoot, `${safeTaskId}-${Date.now()}-${workerId}.log`);
+    const header =
+      `Task: ${task.id}\n` +
+      `Title: ${task.title}\n` +
+      `Worker: ${workerId}\n` +
+      `Started: ${new Date().toISOString()}\n` +
+      `PromptChars: ${prompt.length}\n\n`;
+    try {
+      await mkdir(dirname(logPath), { recursive: true });
+      await writeFile(logPath, header, 'utf-8');
+    } catch {
+      // ignore logging failures
+    }
+    return logPath;
+  }
+
+  private async appendEventLog(event: ParallelEvent): Promise<void> {
+    try {
+      await mkdir(dirname(this.eventLogPath), { recursive: true });
+      const sanitized = this.sanitizeEventForLog(event);
+      await appendFile(this.eventLogPath, `${JSON.stringify(sanitized)}\n`, 'utf-8');
+    } catch {
+      // ignore logging failures
     }
   }
 
@@ -118,6 +314,9 @@ export class ParallelCoordinator {
     if (this.config.qualityGates.integrationBranch) {
       this.mergeBranch = this.config.qualityGates.integrationBranch;
     }
+    this.logInfo(
+      `Initialized (base=${this.baseBranch}, merge=${this.mergeBranch}, workers=${this.maxWorkers}).`
+    );
     if (this.mergeBranch !== this.baseBranch) {
       await this.ensureBranchAt(this.mergeBranch, this.baseBranch);
     }
@@ -135,6 +334,7 @@ export class ParallelCoordinator {
     ).values();
 
     this.mergeWorktreePath = mergeWorktreePath;
+    this.logInfo(`Merge worktree ready (${this.mergeWorktreePath}).`);
 
     if (this.config.qualityGates.enabled) {
       const safeBranch = this.baseBranch.replace(/[^\w.-]/g, '_');
@@ -163,6 +363,9 @@ export class ParallelCoordinator {
         ).values();
         this.validatorWorktreePath = validatorWorktreePath;
       }
+      this.logInfo(
+        `Validator worktree ready (${this.validatorWorktreePath ?? 'unknown'}) on ${this.validatorBranch}.`
+      );
     }
 
     // Initialize all workers in parallel
@@ -172,6 +375,7 @@ export class ParallelCoordinator {
   private async initializeWorkers(): Promise<void> {
     const agentRegistry = getAgentRegistry();
     const baseCommit = await this.resolveCommit(this.mergeBranch);
+    this.logInfo(`Provisioning ${this.maxWorkers} worker worktrees from ${this.mergeBranch}.`);
 
     // Create all worker worktrees in parallel
     const workerOptions = [];
@@ -196,6 +400,7 @@ export class ParallelCoordinator {
       this.workerBaseCommits.set(workerId, baseCommit);
       this.workers.push(worker);
     }
+    this.logInfo(`Worker pool ready (${this.workers.length}).`);
   }
 
   private async createAgentInstance(agentRegistry: ReturnType<typeof getAgentRegistry>): Promise<AgentPlugin> {
@@ -212,6 +417,9 @@ export class ParallelCoordinator {
     };
 
     await instance.initialize(initConfig);
+    this.logInfo(
+      `Agent instance created (${this.config.agent.plugin}) model=${this.config.model ?? 'default'}.`
+    );
     return instance;
   }
 
@@ -221,6 +429,9 @@ export class ParallelCoordinator {
     }
 
     this.running = true;
+    this.summaryCounts.clear();
+    this.summaryStartAt = null;
+    this.logInfo('Parallel execution started.');
     this.mainSyncWorktree = new MainSyncWorktree({
       repoRoot: this.config.cwd,
       mainBranch: this.baseBranch,
@@ -253,6 +464,18 @@ export class ParallelCoordinator {
             await this.delay(150);
             continue;
           }
+          if (this.validationRunning || this.validationQueue.length > 0 || this.validationBatchTimer) {
+            const now = Date.now();
+            if (now - this.lastValidationSkipLogAt > 5000) {
+              this.logInfo(
+                `Skipping stale reset while validation is active ` +
+                  `(running=${this.validationRunning}, queued=${this.validationQueue.length}).`
+              );
+              this.lastValidationSkipLogAt = now;
+            }
+            await this.delay(150);
+            continue;
+          }
           const resetCount = await this.resetStaleInProgressTasks();
           if (resetCount > 0) {
             await this.delay(100);
@@ -273,32 +496,53 @@ export class ParallelCoordinator {
         continue;
       }
 
+      if (!idleWorker.tryReserve()) {
+        this.logWarn(`Worker ${idleWorker.workerId} became busy before claim for ${task.id}.`);
+        await this.delay(50);
+        continue;
+      }
+
+      this.logInfo(`Task selected: ${task.id} -> ${idleWorker.workerId}.`);
       const claimed = await this.claimTask(task, idleWorker.workerId);
       if (!claimed) {
+        this.logInfo(`Claim failed for ${task.id} by ${idleWorker.workerId}; retrying.`);
+        idleWorker.releaseReservation();
         await this.delay(50);
         continue;
       }
 
       if (!(await this.isTaskReady(task))) {
+        this.logInfo(`Task not ready after claim: ${task.id}. Releasing.`);
         await this.tracker.updateTaskStatus(task.id, 'open');
         await this.tracker.releaseTask?.(task.id, idleWorker.workerId);
+        idleWorker.releaseReservation();
+        const attempts = (this.notReadyAttempts.get(task.id) ?? 0) + 1;
+        this.notReadyAttempts.set(task.id, attempts);
+        this.setNotReadyCooldown(task.id, attempts);
         await this.delay(50);
         continue;
       }
 
+      this.notReadyAttempts.delete(task.id);
+      this.notReadyCooldowns.delete(task.id);
+      this.activeTaskLeases.set(task.id, { workerId: idleWorker.workerId, claimedAt: Date.now() });
       this.emit({ type: 'parallel:task-claimed', timestamp: new Date().toISOString(), workerId: idleWorker.workerId, task });
       void this.runTaskOnWorker(idleWorker, task);
     }
 
     this.emit({ type: 'parallel:stopped', timestamp: new Date().toISOString() });
+    this.logInfo('Parallel execution stopped.');
+    await this.writeSummary();
   }
 
   async stop(): Promise<void> {
     this.running = false;
+    this.logInfo('Parallel execution stop requested.');
   }
 
   async dispose(): Promise<void> {
     this.running = false;
+    this.logInfo('Disposing parallel coordinator.');
     const removals = this.workers.map(async (worker) => {
       await worker.dispose();
       await this.worktreeManager.removeWorktree(worker.workerId);
@@ -328,68 +572,90 @@ export class ParallelCoordinator {
 
   pause(): void {
     this.paused = true;
+    this.logInfo('Parallel execution paused.');
   }
 
   resume(): void {
     this.paused = false;
+    this.logInfo('Parallel execution resumed.');
   }
 
   private async runTaskOnWorker(worker: ParallelWorker, task: TrackerTask): Promise<void> {
     if (!this.tracker) return;
+    try {
+      const prompt = await buildParallelPrompt(task, this.config, this.tracker, worker.worktreePath);
+      this.logInfo(`Worker ${worker.workerId} starting ${task.id}.`);
 
-    const prompt = await buildParallelPrompt(task, this.config, this.tracker, worker.worktreePath);
+      this.emit({ type: 'parallel:task-started', timestamp: new Date().toISOString(), workerId: worker.workerId, task });
 
-    this.emit({ type: 'parallel:task-started', timestamp: new Date().toISOString(), workerId: worker.workerId, task });
+      const taskLogPath = await this.createTaskLog(task, worker.workerId, prompt);
+      const { result, completed } = await worker.executeTask(task, prompt, {
+        onStdout: (data) => {
+          this.emit({
+            type: 'parallel:task-output',
+            timestamp: new Date().toISOString(),
+            workerId: worker.workerId,
+            taskId: task.id,
+            data,
+            stream: 'stdout',
+          });
+          void this.appendTaskOutput(taskLogPath, 'stdout', data);
+        },
+        onStdoutSegments: (segments) => {
+          this.emit({
+            type: 'parallel:task-segments',
+            timestamp: new Date().toISOString(),
+            workerId: worker.workerId,
+            taskId: task.id,
+            segments,
+          });
+        },
+        onStderr: (data) => {
+          this.emit({
+            type: 'parallel:task-output',
+            timestamp: new Date().toISOString(),
+            workerId: worker.workerId,
+            taskId: task.id,
+            data,
+            stream: 'stderr',
+          });
+          void this.appendTaskOutput(taskLogPath, 'stderr', data);
+        },
+      });
 
-    const { result, completed } = await worker.executeTask(task, prompt, {
-      onStdout: (data) => {
-        this.emit({
-          type: 'parallel:task-output',
-          timestamp: new Date().toISOString(),
-          workerId: worker.workerId,
-          taskId: task.id,
-          data,
-          stream: 'stdout',
-        });
-      },
-      onStdoutSegments: (segments) => {
-        this.emit({
-          type: 'parallel:task-segments',
-          timestamp: new Date().toISOString(),
-          workerId: worker.workerId,
-          taskId: task.id,
-          segments,
-        });
-      },
-      onStderr: (data) => {
-        this.emit({
-          type: 'parallel:task-output',
-          timestamp: new Date().toISOString(),
-          workerId: worker.workerId,
-          taskId: task.id,
-          data,
-          stream: 'stderr',
-        });
-      },
-    });
+      const taskResult: ParallelTaskResult = { task, result, completed };
+      this.logInfo(
+        `Task result ${task.id}: ${JSON.stringify(this.summarizeAgentResult(result))} output=${taskLogPath}`
+      );
+      if (!completed) {
+        this.logWarn(
+          `Task ${task.id} did not emit COMPLETE sentinel. ` +
+            `status=${result.status} exitCode=${result.exitCode ?? 'n/a'} error=${result.error ?? 'none'}`
+        );
+      }
+      await this.handleTaskResult(taskResult, worker);
 
-    const taskResult: ParallelTaskResult = { task, result, completed };
-    await this.handleTaskResult(taskResult, worker);
+      this.emit({
+        type: 'parallel:task-finished',
+        timestamp: new Date().toISOString(),
+        workerId: worker.workerId,
+        task,
+        result,
+        completed,
+      });
+      this.logInfo(`Worker ${worker.workerId} finished ${task.id} completed=${completed}.`);
 
-    this.emit({
-      type: 'parallel:task-finished',
-      timestamp: new Date().toISOString(),
-      workerId: worker.workerId,
-      task,
-      result,
-      completed,
-    });
-
-    this.emit({
-      type: 'parallel:worker-idle',
-      timestamp: new Date().toISOString(),
-      workerId: worker.workerId,
-    });
+      this.emit({
+        type: 'parallel:worker-idle',
+        timestamp: new Date().toISOString(),
+        workerId: worker.workerId,
+      });
+    } finally {
+      this.activeTaskLeases.delete(task.id);
+      if (worker.isBusy()) {
+        worker.releaseReservation();
+      }
+    }
   }
 
   private async handleTaskResult(taskResult: ParallelTaskResult, worker: ParallelWorker): Promise<void> {
@@ -397,10 +663,18 @@ export class ParallelCoordinator {
     const workerId = worker.workerId;
 
     if (taskResult.completed) {
+      this.taskFailureCounts.delete(taskResult.task.id);
       const commits = await this.collectCommits(taskResult.task, workerId);
+      this.logInfo(
+        `Task completed ${taskResult.task.id}; collected ${commits.length} commit(s).`
+      );
       if (commits.length === 0) {
         const statusLines = await this.getRepoStatusLines(worker.worktreePath);
+        this.logInfo(
+          `No commits for ${taskResult.task.id}; statusLines=${statusLines.length}.`
+        );
         if (statusLines.length > 0) {
+          this.logWarn(`Attempting commit recovery for ${taskResult.task.id}.`);
           const recovered = await this.attemptCommitRecovery(worker, taskResult.task, statusLines, taskResult.result);
           if (!recovered) {
             const fallbackCommits = await this.collectCommits(taskResult.task, workerId);
@@ -412,8 +686,22 @@ export class ParallelCoordinator {
               return;
             }
 
-            this.pendingMergeCounts.set(taskResult.task.id, fallbackCommits.length);
-            for (const commit of fallbackCommits) {
+            const newFallbackCommits = this.filterNewCommits(taskResult.task.id, fallbackCommits);
+            if (fallbackCommits.length > 0 && newFallbackCommits.length === 0) {
+              this.logInfo(
+                `No new fallback commits to merge for ${taskResult.task.id}; ` +
+                  `all ${fallbackCommits.length} commit(s) already processed or queued.`
+              );
+              await this.markMergeSuccess({ task: taskResult.task, workerId, commit: 'none' }, false, []);
+              this.commitRecoveryAttempts.delete(taskResult.task.id);
+              return;
+            }
+
+            this.pendingMergeCounts.set(taskResult.task.id, newFallbackCommits.length);
+            this.logInfo(
+              `Recovered commits for ${taskResult.task.id}: ${newFallbackCommits.length}.`
+            );
+            for (const commit of newFallbackCommits) {
               void this.enqueueMerge({ task: taskResult.task, workerId, commit });
             }
             this.commitRecoveryAttempts.delete(taskResult.task.id);
@@ -435,8 +723,22 @@ export class ParallelCoordinator {
             return;
           }
 
-          this.pendingMergeCounts.set(taskResult.task.id, retryCommits.length);
-          for (const commit of retryCommits) {
+          const newRetryCommits = this.filterNewCommits(taskResult.task.id, retryCommits);
+          if (retryCommits.length > 0 && newRetryCommits.length === 0) {
+            this.logInfo(
+              `No new recovery commits to merge for ${taskResult.task.id}; ` +
+                `all ${retryCommits.length} commit(s) already processed or queued.`
+            );
+            await this.markMergeSuccess({ task: taskResult.task, workerId, commit: 'none' }, false, []);
+            this.commitRecoveryAttempts.delete(taskResult.task.id);
+            return;
+          }
+
+          this.pendingMergeCounts.set(taskResult.task.id, newRetryCommits.length);
+          this.logInfo(
+            `Commit recovery produced ${newRetryCommits.length} commit(s) for ${taskResult.task.id}.`
+          );
+          for (const commit of newRetryCommits) {
             void this.enqueueMerge({ task: taskResult.task, workerId, commit });
           }
           this.commitRecoveryAttempts.delete(taskResult.task.id);
@@ -448,49 +750,122 @@ export class ParallelCoordinator {
         return;
       }
 
-      this.pendingMergeCounts.set(taskResult.task.id, commits.length);
-      for (const commit of commits) {
+      const newCommits = this.filterNewCommits(taskResult.task.id, commits);
+      if (commits.length > 0 && newCommits.length === 0) {
+        this.logInfo(
+          `No new commits to merge for ${taskResult.task.id}; ` +
+            `all ${commits.length} commit(s) already processed or queued.`
+        );
+        await this.markMergeSuccess({ task: taskResult.task, workerId, commit: 'none' }, false, []);
+        return;
+      }
+
+      this.pendingMergeCounts.set(taskResult.task.id, newCommits.length);
+      this.logInfo(`Queued ${newCommits.length} commit(s) for ${taskResult.task.id}.`);
+      for (const commit of newCommits) {
         void this.enqueueMerge({ task: taskResult.task, workerId, commit });
       }
       return;
     }
 
-    await this.tracker.updateTaskStatus(taskResult.task.id, 'open');
-    await this.tracker.releaseTask?.(taskResult.task.id, workerId);
+    const taskId = taskResult.task.id;
+    if (this.isInsufficientCredit(taskResult.result)) {
+      const reason = 'Agent credit exhausted. Blocking task and pausing parallel execution.';
+      this.blockedTaskIds.add(taskId);
+      await this.tracker.updateTaskStatus(taskId, 'blocked');
+      await this.tracker.releaseTask?.(taskId, workerId);
+      this.fatalAgentError = reason;
+      this.paused = true;
+      this.logWarn(`Task blocked due to agent credit exhaustion: ${taskId}.`);
+      this.logWarn(`Parallel execution paused: ${reason}`);
+      return;
+    }
+
+    const failures = (this.taskFailureCounts.get(taskId) ?? 0) + 1;
+    this.taskFailureCounts.set(taskId, failures);
+    const maxFailures = 3;
+
+    if (failures >= maxFailures) {
+      const reason = `Agent failed ${failures} times without COMPLETE.`;
+      this.blockedTaskIds.add(taskId);
+      await this.tracker.updateTaskStatus(taskId, 'blocked');
+      await this.tracker.releaseTask?.(taskId, workerId);
+      this.logWarn(`Task blocked after repeated failures: ${taskId} (${reason}).`);
+      return;
+    }
+
+    await this.tracker.updateTaskStatus(taskId, 'open');
+    await this.tracker.releaseTask?.(taskId, workerId);
+    this.logWarn(`Task retry scheduled after failure ${failures}/${maxFailures}: ${taskId}.`);
   }
 
   private async getNextReadyTask(): Promise<TrackerTask | undefined> {
     if (!this.tracker) return undefined;
-    const excludeIds = Array.from(this.blockedTaskIds);
-    const task = await this.tracker.getNextTask({ status: 'open', ready: true, excludeIds });
-    if (!task) return undefined;
-
-    const plan = getImpactPlan(task);
-    const table = getImpactTable(task);
-
-    if (this.config.qualityGates.enabled && this.config.qualityGates.requireImpactTable) {
-      if (!plan && !table) {
-        this.blockedTaskIds.add(task.id);
-        await this.tracker.updateTaskStatus(task.id, 'blocked');
-        this.emit({
-          type: 'parallel:impact-missing',
-          timestamp: new Date().toISOString(),
-          task,
-          reason: 'Task Impact Table is required for parallel execution.',
-        });
-        return undefined;
+    const now = Date.now();
+    const cooldownIds: string[] = [];
+    for (const [taskId, until] of this.notReadyCooldowns.entries()) {
+      if (until > now) {
+        cooldownIds.push(taskId);
+      } else {
+        this.notReadyCooldowns.delete(taskId);
       }
     }
+    const excludeIds = new Set<string>([
+      ...this.blockedTaskIds,
+      ...cooldownIds,
+      ...this.activeTaskLeases.keys(),
+    ]);
 
-    if (plan) {
-      this.activeTaskPlans.set(task.id, plan);
-    }
-    if (table) {
-      this.activeImpactTables.set(task.id, table);
-      task.metadata = { ...(task.metadata ?? {}), impactTable: table };
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const task = await this.tracker.getNextTask({
+        status: 'open',
+        ready: true,
+        excludeIds: Array.from(excludeIds),
+      });
+      if (!task) return undefined;
+
+      if (this.activeTaskLeases.has(task.id)) {
+        excludeIds.add(task.id);
+        continue;
+      }
+
+      if (await this.isTaskReady(task)) {
+        const plan = getImpactPlan(task);
+        const table = getImpactTable(task);
+
+        if (this.config.qualityGates.enabled && this.config.qualityGates.requireImpactTable) {
+          if (!plan && !table) {
+            this.blockedTaskIds.add(task.id);
+            await this.tracker.updateTaskStatus(task.id, 'blocked');
+            this.logWarn(`Blocked ${task.id}: Task Impact Table is required for parallel execution.`);
+            this.emit({
+              type: 'parallel:impact-missing',
+              timestamp: new Date().toISOString(),
+              task,
+              reason: 'Task Impact Table is required for parallel execution.',
+            });
+            return undefined;
+          }
+        }
+
+        if (plan) {
+          this.activeTaskPlans.set(task.id, plan);
+        }
+        if (table) {
+          this.activeImpactTables.set(task.id, table);
+          task.metadata = { ...(task.metadata ?? {}), impactTable: table };
+        }
+
+        return task;
+      }
+
+      const attempts = (this.notReadyAttempts.get(task.id) ?? 0) + 1;
+      this.notReadyAttempts.set(task.id, attempts);
+      this.setNotReadyCooldown(task.id, attempts);
+      excludeIds.add(task.id);
     }
 
-    return task;
+    return undefined;
   }
 
   private async isTaskReady(task: TrackerTask): Promise<boolean> {
@@ -527,6 +902,13 @@ export class ParallelCoordinator {
     reason: string,
     conflictFiles?: string[]
   ): Promise<void> {
+    this.queuedMergeKeys.delete(this.buildMergeKey(entry.task.id, entry.commit));
+    if (entry.commit !== 'none') {
+      this.processedCommits.add(entry.commit);
+    }
+    this.logWarn(
+      `Merge failed for ${entry.task.id} (${entry.commit.slice(0, 7)}): ${reason}`
+    );
     const commitMetadata = await this.getCommitMetadata(entry.commit, this.config.cwd);
     const shortCommit = entry.commit.slice(0, 7);
 
@@ -601,6 +983,14 @@ export class ParallelCoordinator {
     filesChanged?: string[],
     conflictFiles?: string[]
   ): Promise<void> {
+    this.queuedMergeKeys.delete(this.buildMergeKey(entry.task.id, entry.commit));
+    if (entry.commit !== 'none') {
+      this.processedCommits.add(entry.commit);
+    }
+    this.logInfo(
+      `Merge succeeded for ${entry.task.id} (${entry.commit.slice(0, 7)}), ` +
+        `resolved=${resolved}.`
+    );
     const commitMetadata = await this.getCommitMetadata(entry.commit, this.config.cwd);
     this.emit({
       type: 'parallel:merge-succeeded',
@@ -852,6 +1242,10 @@ export class ParallelCoordinator {
       plan: item.plan,
       queueDepth: this.validationQueue.length,
     });
+    this.logInfo(
+      `Validation queued (${item.plan.planId}) for ${item.plan.taskIds.join(', ')} ` +
+        `checks=${item.plan.checks.map((check) => check.id).join(', ')}.`
+    );
 
     if (mode === 'batch-window') {
       if (!this.validationBatchTimer) {
@@ -873,10 +1267,12 @@ export class ParallelCoordinator {
     while (this.validationQueue.length > 0) {
       const item = this.validationQueue.shift();
       if (!item) break;
+      this.logInfo(`Validation dequeued (${item.plan.planId}).`);
       await this.runValidationPlan(item);
     }
 
     this.validationRunning = false;
+    this.logInfo('Validation queue drained.');
   }
 
   private async runValidationPlan(item: { entry: { task: TrackerTask; workerId: string; commit: string; filesChanged?: string[] }; plan: ValidationPlan; remaining: number }): Promise<void> {
@@ -887,10 +1283,15 @@ export class ParallelCoordinator {
         planId: item.plan.planId,
         reason: 'Validator worktree unavailable.',
       });
+      this.logWarn(`Validation blocked (${item.plan.planId}): validator worktree unavailable.`);
       return;
     }
 
     const plan = item.plan;
+    this.logInfo(
+      `Validation started (${plan.planId}) for ${plan.taskIds.join(', ')} ` +
+        `checks=${plan.checks.map((check) => check.id).join(', ')}.`
+    );
     this.emit({ type: 'parallel:validation-started', timestamp: new Date().toISOString(), plan });
 
     const logDir = join(this.config.cwd, '.ralph-tui', 'logs', 'validations', plan.planId);
@@ -905,11 +1306,15 @@ export class ParallelCoordinator {
         planId: plan.planId,
         reason: resetResult.stderr.trim() || 'Failed to reset validator worktree',
       });
+      this.logWarn(
+        `Validation blocked (${plan.planId}): ${resetResult.stderr.trim() || 'failed to reset validator worktree'}.`
+      );
       return;
     }
 
     if (this.config.qualityGates.cleanBeforeRun) {
       await this.execGitIn(this.validatorWorktreePath, ['clean', '-fdx']);
+      this.logInfo(`Validation workspace cleaned (${plan.planId}).`);
     }
 
     const checkResult = await this.runValidationChecks(plan, logDir);
@@ -921,6 +1326,7 @@ export class ParallelCoordinator {
         planId: plan.planId,
         status: checkResult.status,
       });
+      this.logInfo(`Validation ${checkResult.status} (${plan.planId}).`);
       await this.writeValidationSummary(logDir, {
         planId: plan.planId,
         status: checkResult.status,
@@ -943,6 +1349,9 @@ export class ParallelCoordinator {
       failedCheckId,
       reason: failureReason,
     });
+    this.logWarn(
+      `Validation failed (${plan.planId}) check=${failedCheckId}: ${failureReason}`
+    );
 
     const fixResult = await this.attemptValidationFix(plan, logDir, failureReason, failedCheckId);
     if (fixResult.healed) {
@@ -952,6 +1361,7 @@ export class ParallelCoordinator {
         planId: plan.planId,
         status: 'healed',
       });
+      this.logInfo(`Validation healed (${plan.planId}) after ${fixResult.attemptsUsed} attempt(s).`);
       await this.writeValidationSummary(logDir, {
         planId: plan.planId,
         status: 'healed',
@@ -983,6 +1393,7 @@ export class ParallelCoordinator {
     const outcomes: ValidationCheckOutcome[] = [];
 
     for (const check of plan.checks) {
+      this.logInfo(`Validation check start (${plan.planId}): ${check.id} (${check.command}).`);
       this.emit({
         type: 'parallel:validation-check-started',
         timestamp: new Date().toISOString(),
@@ -1001,6 +1412,10 @@ export class ParallelCoordinator {
         durationMs: result.durationMs,
         outputPath: result.outputPath,
       });
+      this.logInfo(
+        `Validation check finished (${plan.planId}): ${check.id} ` +
+          `exitCode=${result.exitCode} durationMs=${result.durationMs}.`
+      );
 
       let rerunExitCodes: number[] = [];
       if (result.exitCode === 0) {
@@ -1018,6 +1433,7 @@ export class ParallelCoordinator {
       const maxReruns = check.maxReruns ?? (check.retryOnFailure ? this.config.qualityGates.maxTestReruns : 0);
       let rerunSucceeded = false;
       for (let attempt = 0; attempt < maxReruns; attempt += 1) {
+        this.logInfo(`Validation rerun (${plan.planId}): ${check.id} attempt ${attempt + 1}/${maxReruns}.`);
         const rerunResult = await this.runValidationCheck(check, logDir, attempt + 1);
         rerunExitCodes.push(rerunResult.exitCode);
         if (rerunResult.exitCode === 0) {
@@ -1028,6 +1444,7 @@ export class ParallelCoordinator {
 
       if (rerunSucceeded) {
         sawFlake = true;
+        this.logWarn(`Validation flake detected (${plan.planId}): ${check.id} passed on rerun.`);
         outcomes.push({
           id: check.id,
           command: check.command,
@@ -1078,11 +1495,13 @@ export class ParallelCoordinator {
     failedCheckId: string
   ): Promise<{ healed: boolean; attemptsUsed: number }> {
     if (this.config.qualityGates.maxFixAttempts <= 0) {
+      this.logInfo(`Validation fix disabled for ${plan.planId} (maxFixAttempts=0).`);
       return { healed: false, attemptsUsed: 0 };
     }
 
     const agentRegistry = getAgentRegistry();
     for (let attempt = 1; attempt <= this.config.qualityGates.maxFixAttempts; attempt += 1) {
+      this.logInfo(`Validation fix attempt ${attempt}/${this.config.qualityGates.maxFixAttempts} for ${plan.planId}.`);
       this.emit({
         type: 'parallel:validation-fix-started',
         timestamp: new Date().toISOString(),
@@ -1114,6 +1533,7 @@ export class ParallelCoordinator {
             attempt,
             reason: 'Fix agent did not signal completion',
           });
+          this.logWarn(`Validation fix failed (${plan.planId}): agent did not signal completion.`);
           continue;
         }
       } finally {
@@ -1129,6 +1549,7 @@ export class ParallelCoordinator {
           attempt,
           reason: 'Fix attempt produced no changes',
         });
+        this.logWarn(`Validation fix failed (${plan.planId}): no changes produced.`);
         continue;
       }
 
@@ -1150,6 +1571,9 @@ export class ParallelCoordinator {
               attempt,
               reason: cherry.stderr.trim() || 'Failed to apply fix to integration branch',
             });
+            this.logWarn(
+              `Validation fix failed (${plan.planId}): failed to apply fix to integration branch.`
+            );
             continue;
           }
         }
@@ -1159,6 +1583,7 @@ export class ParallelCoordinator {
           planId: plan.planId,
           attempt,
         });
+        this.logInfo(`Validation fix succeeded (${plan.planId}) attempt ${attempt}.`);
         return { healed: true, attemptsUsed: attempt };
       }
 
@@ -1169,6 +1594,10 @@ export class ParallelCoordinator {
         attempt,
         reason: checkResult.reason ?? 'Fix attempt did not pass validation',
       });
+      this.logWarn(
+        `Validation fix failed (${plan.planId}) attempt ${attempt}: ` +
+          `${checkResult.reason ?? 'Fix attempt did not pass validation'}.`
+      );
     }
 
     return { healed: false, attemptsUsed: this.config.qualityGates.maxFixAttempts };
@@ -1242,6 +1671,9 @@ export class ParallelCoordinator {
     plan: ValidationPlan,
     reason: string
   ): Promise<void> {
+    this.logWarn(
+      `Validation fallback (${plan.planId}) strategy=${this.config.qualityGates.fallbackStrategy}: ${reason}`
+    );
     switch (this.config.qualityGates.fallbackStrategy) {
       case 'revert':
         await this.revertCommits(plan.commits, plan.planId, reason);
@@ -1265,9 +1697,11 @@ export class ParallelCoordinator {
   private async revertCommits(commits: string[], planId: string, reason: string): Promise<void> {
     const targetPath = this.mergeWorktreePath ?? this.validatorWorktreePath;
     if (!targetPath) {
+      this.logWarn(`Validation revert skipped (${planId}): no merge/validator worktree available.`);
       return;
     }
     for (const commit of commits) {
+      this.logInfo(`Reverting commit ${commit.slice(0, 7)} for validation plan ${planId}.`);
       await this.execGitIn(targetPath, ['revert', '--no-edit', commit]);
       this.emit({
         type: 'parallel:validation-reverted',
@@ -1286,6 +1720,7 @@ export class ParallelCoordinator {
     this.blockedTaskIds.add(entry.task.id);
     await this.tracker?.updateTaskStatus(entry.task.id, 'blocked');
     await this.tracker?.releaseTask?.(entry.task.id, entry.workerId);
+    this.logWarn(`Task blocked for validation: ${entry.task.id} (${reason}).`);
     this.emit({
       type: 'parallel:validation-blocked',
       timestamp: new Date().toISOString(),
@@ -1300,14 +1735,12 @@ export class ParallelCoordinator {
     }
 
     const integrationCommit = await this.resolveCommit(this.mergeBranch);
+    this.logInfo(`Syncing main from ${this.mergeBranch} (${integrationCommit.slice(0, 7)}).`);
     const syncResult = await this.mainSyncWorktree.fastForwardTo(integrationCommit);
     if (!syncResult.success) {
       const reason = syncResult.error ?? 'Main sync failed';
-      this.emit({
-        type: 'parallel:main-sync-skipped',
-        timestamp: new Date().toISOString(),
-        reason,
-      });
+      this.logWarn(`Main sync failed: ${reason}.`);
+      this.emitMainSyncSkipped(reason);
       return { success: false, reason };
     }
 
@@ -1315,16 +1748,14 @@ export class ParallelCoordinator {
     const rootResult = await this.fastForwardRootMain(integrationCommit);
     if (!rootResult.success) {
       const reason = rootResult.reason ?? 'Failed to update main ref';
-      this.emit({
-        type: 'parallel:main-sync-skipped',
-        timestamp: new Date().toISOString(),
-        reason,
-      });
+      this.logWarn(`Main ref update failed: ${reason}.`);
+      this.emitMainSyncSkipped(reason);
       return { success: false, reason };
     }
 
     const head = await this.execGitIn(this.config.cwd, ['rev-parse', 'HEAD']);
     if (head.exitCode === 0) {
+      this.logInfo(`Main sync succeeded at ${head.stdout.trim().slice(0, 7)}.`);
       this.emit({
         type: 'parallel:main-sync-succeeded',
         timestamp: new Date().toISOString(),
@@ -1335,6 +1766,20 @@ export class ParallelCoordinator {
     }
 
     return { success: false, reason: 'Unable to resolve main HEAD after sync.' };
+  }
+
+  private emitMainSyncSkipped(reason: string): void {
+    const now = Date.now();
+    const throttleMs = 5000;
+    if (now - this.lastMainSyncSkipAt < throttleMs) {
+      return;
+    }
+    this.lastMainSyncSkipAt = now;
+    this.emit({
+      type: 'parallel:main-sync-skipped',
+      timestamp: new Date().toISOString(),
+      reason,
+    });
   }
 
   private async trySyncPendingMainTasks(): Promise<void> {
@@ -1359,6 +1804,10 @@ export class ParallelCoordinator {
 
     // Increment retry count (will be reset on success)
     this.pendingMainSyncRetryCount++;
+    this.logInfo(
+      `Retrying main sync (attempt ${this.pendingMainSyncRetryCount}, ` +
+        `pending=${this.pendingMainSyncTasks.size}).`
+    );
 
     const result = await this.syncMainBranch();
 
@@ -1433,7 +1882,7 @@ export class ParallelCoordinator {
       const result = await this.execGitIn(this.config.cwd, ['merge', '--ff-only', commit]);
       if (result.exitCode !== 0) {
         // Fast-forward failed - reset main branch to integration commit
-        console.warn('Fast-forward merge failed, resetting main branch to integration commit');
+        this.logWarn('Fast-forward merge failed, resetting main branch to integration commit.');
         const resetResult = await this.execGitIn(this.config.cwd, ['reset', '--hard', commit]);
         if (resetResult.exitCode !== 0) {
           return { success: false, reason: resetResult.stderr.trim() || 'Failed to reset main branch' };
@@ -1456,7 +1905,7 @@ export class ParallelCoordinator {
     const mergeResult = await this.execGitIn(this.config.cwd, ['merge', '--ff-only', commit]);
     if (mergeResult.exitCode !== 0) {
       // Fast-forward failed - reset main branch to integration commit
-      console.warn('Fast-forward merge failed, resetting main branch to integration commit');
+      this.logWarn('Fast-forward merge failed, resetting main branch to integration commit.');
       const resetResult = await this.execGitIn(this.config.cwd, ['reset', '--hard', commit]);
       if (resetResult.exitCode !== 0) {
         if (stashRef) {
@@ -1650,7 +2099,20 @@ export class ParallelCoordinator {
     if (tasks.length === 0) return 0;
 
     let resetCount = 0;
+    const cutoff = Date.now() - this.staleInProgressTimeoutMs;
     for (const task of tasks) {
+      if (this.activeTaskLeases.has(task.id)) {
+        continue;
+      }
+      if (task.updatedAt) {
+        const updatedAt = Date.parse(task.updatedAt);
+        if (!Number.isNaN(updatedAt) && updatedAt > cutoff) {
+          continue;
+        }
+      } else {
+        // No updatedAt signal; avoid reopening in-session tasks.
+        continue;
+      }
       try {
         await this.tracker.updateTaskStatus(task.id, 'open');
         await this.tracker.releaseTask?.(task.id, 'stale');
@@ -1661,7 +2123,7 @@ export class ParallelCoordinator {
     }
 
     if (resetCount > 0) {
-      console.warn(`Reset ${resetCount} stale in_progress task(s) to open.`);
+      this.logWarn(`Reset ${resetCount} stale in_progress task(s) to open.`);
     }
 
     return resetCount;
@@ -1691,13 +2153,13 @@ export class ParallelCoordinator {
     ]);
 
     if (result.exitCode !== 0) {
-      console.warn(`Snapshot tag failed: ${result.stderr.trim() || tagName}`);
+      this.logWarn(`Snapshot tag failed: ${result.stderr.trim() || tagName}`);
       return;
     }
 
     this.snapshotCreated = true;
     this.snapshotTag = tagName;
-    console.log(`Snapshot created: ${tagName} (${commit.slice(0, 7)})`);
+    this.logInfo(`Snapshot created: ${tagName} (${commit.slice(0, 7)}).`);
   }
 
   getSnapshotTag(): string | null {
@@ -1711,10 +2173,20 @@ export class ParallelCoordinator {
   }
 
   private async enqueueMerge(entry: { task: TrackerTask; workerId: string; commit: string }): Promise<void> {
+    const mergeKey = this.buildMergeKey(entry.task.id, entry.commit);
+    if (this.queuedMergeKeys.has(mergeKey) || this.processedCommits.has(entry.commit)) {
+      this.logInfo(`Skipping duplicate merge for ${entry.task.id} (${entry.commit.slice(0, 7)}).`);
+      return;
+    }
     const filesChanged = await this.getCommitFiles(entry.commit, this.config.cwd);
     const commitMetadata = await this.getCommitMetadata(entry.commit, this.config.cwd);
     const queuedEntry = { ...entry, filesChanged };
+    this.queuedMergeKeys.add(mergeKey);
     this.mergeQueue.push(queuedEntry);
+    this.logInfo(
+      `Merge queued for ${entry.task.id} (${entry.commit.slice(0, 7)}), ` +
+        `files=${filesChanged.length}.`
+    );
     this.emit({
       type: 'parallel:merge-queued',
       timestamp: new Date().toISOString(),
@@ -1746,6 +2218,7 @@ export class ParallelCoordinator {
         }
 
         const filesChanged = entry.filesChanged ?? (await this.getCommitFiles(entry.commit, mergePath));
+        this.logInfo(`Merging ${entry.task.id} (${entry.commit.slice(0, 7)})...`);
         const result = await this.execGitIn(mergePath, ['cherry-pick', entry.commit]);
         if (result.exitCode !== 0) {
           if (this.isEmptyCherryPick(result)) {
@@ -1753,6 +2226,7 @@ export class ParallelCoordinator {
             if (skipResult.exitCode !== 0) {
               await this.execGitIn(mergePath, ['cherry-pick', '--abort']);
             }
+            this.logInfo(`Cherry-pick empty for ${entry.task.id}; skipping commit.`);
             await this.markMergeSuccess(entry, false, filesChanged);
             continue;
           }
@@ -1773,6 +2247,7 @@ export class ParallelCoordinator {
               if (skipResult.exitCode !== 0) {
                 await this.execGitIn(mergePath, ['cherry-pick', '--abort']);
               }
+              this.logInfo(`Resolved cherry-pick empty for ${entry.task.id}; skipping commit.`);
               await this.markMergeSuccess({ ...entry, commit: resolved.commit }, false, filesChanged, resolved.conflictFiles);
               continue;
             }
@@ -1785,6 +2260,7 @@ export class ParallelCoordinator {
 
           const resolvedFiles = await this.getCommitFiles(resolved.commit, mergePath);
           const mergedFiles = resolvedFiles.length > 0 ? resolvedFiles : filesChanged;
+          this.logInfo(`Auto-resolved merge for ${entry.task.id} (${resolved.commit.slice(0, 7)}).`);
           await this.markMergeSuccess({ ...entry, commit: resolved.commit }, true, mergedFiles, resolved.conflictFiles);
           continue;
         }
@@ -1810,22 +2286,38 @@ export class ParallelCoordinator {
       await this.execGitIn(worktreePath, ['reset', '--', '.beads', '.ralph-tui', 'worktrees']);
       const staged = await this.execGitIn(worktreePath, ['diff', '--name-only', '--cached']);
       if (staged.stdout.trim().length > 0) {
-        const message = this.buildCommitMessage(task);
-        await this.execGitIn(worktreePath, ['commit', '-m', message]);
+        const subject = this.buildCommitMessage(task);
+        const trailer = this.buildCommitTrailer(task);
+        await this.execGitIn(worktreePath, ['commit', '-m', subject, '-m', trailer]);
       }
     }
 
     const baseCommit = this.workerBaseCommits.get(workerId) ?? (await this.resolveCommit('HEAD'));
+    await this.ensureHeadCommitFormat(task, worktreePath, baseCommit);
     const revList = await this.execGitIn(worktreePath, ['rev-list', '--reverse', `${baseCommit}..HEAD`]);
     const commits = revList.stdout.split('\n').map((line) => line.trim()).filter(Boolean);
     const headCommit = await this.execGitIn(worktreePath, ['rev-parse', 'HEAD']);
     if (headCommit.exitCode === 0) {
       this.workerBaseCommits.set(workerId, headCommit.stdout.trim());
     }
-    return commits;
+    return this.filterCommitsForTask(task, commits, worktreePath);
+  }
+
+  private buildMergeKey(taskId: string, commit: string): string {
+    return `${taskId}:${commit}`;
+  }
+
+  private filterNewCommits(taskId: string, commits: string[]): string[] {
+    if (commits.length === 0) return commits;
+    return commits.filter((commit) => {
+      if (this.processedCommits.has(commit)) return false;
+      const key = this.buildMergeKey(taskId, commit);
+      return !this.queuedMergeKeys.has(key);
+    });
   }
 
   private async attemptMergeResolution(entry: { task: TrackerTask; workerId: string; commit: string }): Promise<{ success: boolean; commit?: string; reason?: string; conflictFiles?: string[] }> {
+    this.logInfo(`Attempting merge resolution for ${entry.task.id} (${entry.commit.slice(0, 7)}).`);
     const mergeWorkerId = `merge-${entry.workerId}-${Date.now()}`;
     const branchName = `merge/${entry.task.id}/${Date.now()}`;
     const worktreePath = await this.worktreeManager.createWorktree({
@@ -1841,6 +2333,7 @@ export class ParallelCoordinator {
       const cherryResult = await this.execGitIn(worktreePath, ['cherry-pick', entry.commit]);
       if (cherryResult.exitCode === 0) {
         const headCommit = await this.execGitIn(worktreePath, ['rev-parse', 'HEAD']);
+        this.logInfo(`Merge resolution produced commit ${headCommit.stdout.trim().slice(0, 7)} for ${entry.task.id}.`);
         return { success: true, commit: headCommit.stdout.trim() };
       }
 
@@ -1859,7 +2352,7 @@ export class ParallelCoordinator {
       }
 
       // Fallback to LLM-based conflict resolution
-      console.warn(`[ParallelCoordinator] Programmatic conflict resolution failed for ${entry.task.id}, falling back to LLM`);
+      this.logWarn(`Programmatic conflict resolution failed for ${entry.task.id}; falling back to LLM.`);
       const prompt = this.buildMergePrompt(entry.task, entry.commit, conflicts.stdout.trim());
 
       const agentRegistry = getAgentRegistry();
@@ -1869,11 +2362,13 @@ export class ParallelCoordinator {
       await resolver.dispose();
 
       if (!result.completed) {
+        this.logWarn(`Merge resolution agent did not complete for ${entry.task.id}.`);
         return { success: false, reason: 'Merge resolution agent did not complete', conflictFiles };
       }
 
       const unresolved = await this.execGitIn(worktreePath, ['diff', '--name-only', '--diff-filter=U']);
       if (unresolved.stdout.trim().length > 0) {
+        this.logWarn(`Conflicts remain after auto-resolve for ${entry.task.id}.`);
         return { success: false, reason: 'Conflicts remain after auto-resolve', conflictFiles };
       }
 
@@ -1887,19 +2382,25 @@ export class ParallelCoordinator {
       }
 
       const headCommit = await this.execGitIn(worktreePath, ['rev-parse', 'HEAD']);
+      this.logInfo(`Merge resolution succeeded for ${entry.task.id} (${headCommit.stdout.trim().slice(0, 7)}).`);
       return { success: true, commit: headCommit.stdout.trim(), conflictFiles };
     } catch (error) {
+      this.logWarn(
+        `Merge resolution failed for ${entry.task.id}: ${error instanceof Error ? error.message : 'unknown error'}.`
+      );
       return { success: false, reason: error instanceof Error ? error.message : 'Merge resolution failed', conflictFiles };
     } finally {
       await this.worktreeManager.removeWorktree(mergeWorkerId).catch((err) => {
         // Log worktree cleanup errors - orphaned worktrees can accumulate
-        console.warn(`[ParallelCoordinator] Failed to remove merge worktree ${mergeWorkerId}: ${err instanceof Error ? err.message : 'unknown error'}`);
+        this.logWarn(
+          `Failed to remove merge worktree ${mergeWorkerId}: ${err instanceof Error ? err.message : 'unknown error'}.`
+        );
       });
     }
   }
 
   private async attemptProgrammaticConflictResolution(worktreePath: string, conflictFiles: string[]): Promise<boolean> {
-    console.log(`[ParallelCoordinator] Attempting programmatic conflict resolution for ${conflictFiles.length} files`);
+    this.logInfo(`Attempting programmatic conflict resolution for ${conflictFiles.length} file(s).`);
     
     // Try simple resolution strategies for each conflicting file
     for (const file of conflictFiles) {
@@ -1909,7 +2410,7 @@ export class ParallelCoordinator {
         // Strategy 1: Check if we can use git mergetool with auto-resolve (if configured)
         const mergetoolResult = await this.execGitIn(worktreePath, ['mergetool', '--no-prompt', file]);
         if (mergetoolResult.exitCode === 0) {
-          console.log(`[ParallelCoordinator] Auto-resolved conflict in ${file} using mergetool`);
+          this.logInfo(`Auto-resolved conflict in ${file} using mergetool.`);
           continue;
         }
 
@@ -1919,7 +2420,7 @@ export class ParallelCoordinator {
           const resolvedContent = this.resolveSimpleConflict(content);
           if (resolvedContent !== null) {
             await Bun.write(filePath, resolvedContent);
-            console.log(`[ParallelCoordinator] Auto-resolved simple conflict in ${file}`);
+            this.logInfo(`Auto-resolved simple conflict in ${file}.`);
             continue;
           }
           // If resolveSimpleConflict returns null, the conflict couldn't be cleanly
@@ -1930,22 +2431,22 @@ export class ParallelCoordinator {
         // For now, try accepting incoming changes (worker's changes)
         const theirsResult = await this.execGitIn(worktreePath, ['checkout', '--theirs', file]);
         if (theirsResult.exitCode === 0) {
-          console.log(`[ParallelCoordinator] Auto-resolved conflict in ${file} by accepting incoming changes`);
+          this.logInfo(`Auto-resolved conflict in ${file} by accepting incoming changes.`);
           continue;
         }
 
         // Strategy 4: Try accepting current changes (ours) if theirs failed
         const oursResult = await this.execGitIn(worktreePath, ['checkout', '--ours', file]);
         if (oursResult.exitCode === 0) {
-          console.log(`[ParallelCoordinator] Auto-resolved conflict in ${file} by accepting current changes`);
+          this.logInfo(`Auto-resolved conflict in ${file} by accepting current changes.`);
           continue;
         }
 
-        console.warn(`[ParallelCoordinator] Failed to auto-resolve conflict in ${file}`);
+        this.logWarn(`Failed to auto-resolve conflict in ${file}.`);
         return false;
         
       } catch (error) {
-        console.warn(`[ParallelCoordinator] Error resolving conflict in ${file}: ${error}`);
+        this.logWarn(`Error resolving conflict in ${file}: ${error}.`);
         return false;
       }
     }
@@ -2132,6 +2633,87 @@ export class ParallelCoordinator {
     const title = task.title.replace(/\s+/g, ' ').trim();
     const truncated = title.length > 60 ? `${title.slice(0, 57)}...` : title;
     return `${task.id}: ${truncated}`;
+  }
+
+  private buildCommitTrailer(task: TrackerTask): string {
+    return `Ralph-Task: ${task.id}`;
+  }
+
+  private async ensureHeadCommitFormat(
+    task: TrackerTask,
+    repoPath: string,
+    baseCommit: string
+  ): Promise<void> {
+    const revList = await this.execGitIn(repoPath, ['rev-list', `${baseCommit}..HEAD`]);
+    const commits = revList.stdout.split('\n').map((line) => line.trim()).filter(Boolean);
+    if (commits.length === 0) {
+      return;
+    }
+
+    const headMessage = await this.execGitIn(repoPath, ['log', '-1', '--format=%B', 'HEAD']);
+    const body = headMessage.stdout.trim();
+    const lines = body.split('\n');
+    const subject = lines[0] ?? '';
+    const trailer = this.buildCommitTrailer(task);
+    const hasTrailer = body.includes(trailer);
+    const hasPrefix = subject.startsWith(`${task.id}:`);
+
+    if (hasTrailer && hasPrefix) {
+      return;
+    }
+
+    const subjectText = subject.length > 0 ? subject : this.buildCommitMessage(task);
+    const nextSubject = hasPrefix ? subjectText : `${task.id}: ${subjectText.replace(/^[^:]+:\s*/i, '').trim()}`;
+    const rest = lines.slice(1).filter((line) => !line.startsWith('Ralph-Task:')).join('\n').trim();
+    const messageParts = [nextSubject];
+    if (rest.length > 0) {
+      messageParts.push('', rest);
+    }
+    messageParts.push('', trailer);
+    const newMessage = messageParts.join('\n');
+
+    const amendResult = await this.execGitIn(repoPath, ['commit', '--amend', '-m', newMessage]);
+    if (amendResult.exitCode !== 0) {
+      this.logWarn(`Failed to amend commit for ${task.id}: ${amendResult.stderr.trim() || amendResult.stdout}`);
+      return;
+    }
+    this.logInfo(`Amended HEAD commit for ${task.id} to include task prefix/trailer.`);
+  }
+
+  private async filterCommitsForTask(
+    task: TrackerTask,
+    commits: string[],
+    repoPath: string
+  ): Promise<string[]> {
+    const matches: string[] = [];
+    const prefix = `${task.id}:`;
+    const trailer = `Ralph-Task: ${task.id}`;
+
+    for (const commit of commits) {
+      const message = await this.execGitIn(repoPath, ['log', '-1', '--format=%B', commit]);
+      const body = message.stdout.trim();
+      const subject = body.split('\n')[0] ?? '';
+      if (body.startsWith(prefix) || body.includes(trailer)) {
+        matches.push(commit);
+        continue;
+      }
+      if (subject.includes(task.id)) {
+        this.logWarn(
+          `Commit ${commit.slice(0, 7)} for ${task.id} uses nonstandard prefix/trailer; accepting.`
+        );
+        matches.push(commit);
+        continue;
+      }
+      this.logWarn(
+        `Skipping commit ${commit.slice(0, 7)} for ${task.id}: missing task prefix/trailer.`
+      );
+    }
+
+    if (commits.length > 0 && matches.length === 0) {
+      this.logWarn(`No task-attributed commits found for ${task.id}.`);
+    }
+
+    return matches;
   }
 
   private async isRepoClean(repoPath: string): Promise<boolean> {

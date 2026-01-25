@@ -54,6 +54,7 @@ import {
 import type { AgentSwitchEntry } from '../logs/index.js';
 import { renderPrompt } from '../templates/index.js';
 import { formatImpactPlan, getImpactPlan } from './impact.js';
+import { buildAgentEnv } from './agent-env.js';
 import { BeadsRealtimeWatcher } from './beads-realtime.js';
 import { MainSyncWorktree } from '../git/index.js';
 import { join } from 'node:path';
@@ -1039,6 +1040,7 @@ export class ExecutionEngine {
           const handle = this.agent!.execute(prompt, [], {
             cwd: this.config.cwd,
             flags,
+            env: await buildAgentEnv({ cwd: this.config.cwd, agentId: this.config.agent.plugin }),
             sandbox: this.config.sandbox,
             subagentTracing: supportsTracing,
             onJsonlMessage: (message: Record<string, unknown>) => {
@@ -2448,6 +2450,7 @@ export class ExecutionEngine {
     const handle = this.agent!.execute(prompt, [], {
       cwd: this.config.cwd,
       flags,
+      env: await buildAgentEnv({ cwd: this.config.cwd, agentId: this.config.agent.plugin }),
       sandbox: this.config.sandbox,
     });
 

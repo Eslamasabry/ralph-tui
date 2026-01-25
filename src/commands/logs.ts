@@ -3,6 +3,8 @@
  * List, view, filter, and clean up iteration output logs.
  */
 
+import { readdir, readFile, stat } from 'node:fs/promises';
+import { join } from 'node:path';
 import {
   listIterationLogs,
   getIterationLogByNumber,
@@ -101,6 +103,9 @@ export interface LogsArgs {
 
   /** Show detailed output */
   verbose: boolean;
+
+  /** Show latest parallel summary */
+  parallelSummary: boolean;
 }
 
 /**
@@ -113,6 +118,7 @@ export function parseLogsArgs(args: string[]): LogsArgs {
     dryRun: false,
     cwd: process.cwd(),
     verbose: false,
+    parallelSummary: false,
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -148,10 +154,46 @@ export function parseLogsArgs(args: string[]): LogsArgs {
       }
     } else if (arg === '--verbose' || arg === '-v') {
       result.verbose = true;
+    } else if (arg === '--parallel-summary') {
+      result.parallelSummary = true;
     }
   }
 
   return result;
+}
+
+/**
+ * Return the latest parallel summary payload, if any.
+ */
+async function getLatestParallelSummary(
+  cwd: string
+): Promise<{ filePath: string; contents: string } | null> {
+  const summaryDir = join(cwd, '.ralph-tui', 'logs', 'parallel-summary');
+  let entries: string[];
+
+  try {
+    entries = await readdir(summaryDir);
+  } catch (_error) {
+    return null;
+  }
+
+  const files = entries.filter((entry) => entry.endsWith('.json'));
+  if (files.length === 0) {
+    return null;
+  }
+
+  const fileStats = await Promise.all(
+    files.map(async (file) => {
+      const filePath = join(summaryDir, file);
+      const info = await stat(filePath);
+      return { filePath, mtimeMs: info.mtimeMs };
+    })
+  );
+
+  fileStats.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  const latest = fileStats[0];
+  const contents = await readFile(latest.filePath, 'utf8');
+  return { filePath: latest.filePath, contents };
 }
 
 /**
@@ -280,7 +322,25 @@ function displayLogList(summaries: IterationLogSummary[]): void {
  */
 export async function executeLogsCommand(args: string[]): Promise<void> {
   const parsedArgs = parseLogsArgs(args);
-  const { cwd, iteration, taskId, clean, keep, dryRun, verbose } = parsedArgs;
+  const { cwd, iteration, taskId, clean, keep, dryRun, verbose, parallelSummary } =
+    parsedArgs;
+
+  if (parallelSummary) {
+    const summary = await getLatestParallelSummary(cwd);
+    if (!summary) {
+      console.log('');
+      console.log('No parallel summary logs found.');
+      console.log(`Expected in: ${join(cwd, '.ralph-tui', 'logs', 'parallel-summary')}`);
+      console.log('');
+      return;
+    }
+
+    console.log('');
+    console.log(`Parallel summary: ${summary.filePath}`);
+    console.log('');
+    console.log(summary.contents);
+    return;
+  }
 
   // Handle --clean operation
   if (clean) {
@@ -342,6 +402,7 @@ export async function executeLogsCommand(args: string[]): Promise<void> {
   console.log('    ralph-tui logs --iteration 5        View iteration 5');
   console.log('    ralph-tui logs --task US-005        View logs for task');
   console.log('    ralph-tui logs --clean --keep 10    Clean old logs');
+  console.log('    ralph-tui logs --parallel-summary  Show latest parallel summary');
   console.log('');
 }
 
@@ -396,6 +457,7 @@ Usage: ralph-tui logs [options]
 Options:
   --iteration, -i <n>   View a specific iteration by number
   --task, -t <id>       View all iterations for a task ID
+  --parallel-summary    Show latest parallel summary log
   --clean               Clean up old logs
   --keep <n>            Number of logs to keep when cleaning (default: 10)
   --dry-run             Show what would be deleted without deleting
@@ -416,6 +478,7 @@ Examples:
   ralph-tui logs -i 5                   # Shorthand for above
   ralph-tui logs --task US-005          # View all iterations for US-005
   ralph-tui logs -t US-005              # Shorthand for above
+  ralph-tui logs --parallel-summary     # Show latest parallel summary log
   ralph-tui logs --clean --keep 10      # Delete all but 10 most recent logs
   ralph-tui logs --clean --dry-run      # Preview cleanup without deleting
 `);

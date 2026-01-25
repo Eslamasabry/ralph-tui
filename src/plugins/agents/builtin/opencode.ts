@@ -6,6 +6,7 @@
  */
 
 import { spawn } from 'node:child_process';
+import { platform } from 'node:os';
 import { BaseAgentPlugin, findCommandPath } from '../base.js';
 import { processAgentEvents, processAgentEventsToSegments, type AgentDisplayEvent } from '../output-formatting.js';
 import type {
@@ -322,7 +323,7 @@ export class OpenCodeAgentPlugin extends BaseAgentPlugin {
   }
 
   protected buildArgs(
-    _prompt: string,
+    prompt: string,
     files?: AgentFileContext[],
     _options?: AgentExecuteOptions
   ): string[] {
@@ -357,9 +358,12 @@ export class OpenCodeAgentPlugin extends BaseAgentPlugin {
       }
     }
 
-    // NOTE: Prompt is NOT added here - it's passed via stdin to avoid
-    // shell interpretation of special characters on Windows where shell: true
-    // is required for wrapper script execution.
+    if (!this.shouldUseStdin() && prompt) {
+      args.push(prompt);
+    }
+
+    // NOTE: Prompt is passed via stdin on Windows to avoid shell interpretation
+    // issues when shell: true is required for wrapper script execution.
 
     return args;
   }
@@ -373,8 +377,15 @@ export class OpenCodeAgentPlugin extends BaseAgentPlugin {
     prompt: string,
     _files?: AgentFileContext[],
     _options?: AgentExecuteOptions
-  ): string {
+  ): string | undefined {
+    if (!this.shouldUseStdin()) {
+      return undefined;
+    }
     return prompt;
+  }
+
+  private shouldUseStdin(): boolean {
+    return platform() === 'win32';
   }
 
   /**

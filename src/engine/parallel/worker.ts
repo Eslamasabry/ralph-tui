@@ -7,6 +7,7 @@ import { delimiter, join } from 'node:path';
 import type { TrackerTask } from '../../plugins/trackers/types.js';
 import type { RalphConfig } from '../../config/types.js';
 import type { FormattedSegment } from '../../plugins/agents/output-formatting.js';
+import { buildAgentEnv } from '../agent-env.js';
 
 export interface WorkerCallbacks {
   onStdout?: (data: string) => void;
@@ -39,12 +40,26 @@ export class ParallelWorker {
     return this.busy;
   }
 
+  tryReserve(): boolean {
+    if (this.busy) {
+      return false;
+    }
+    this.busy = true;
+    return true;
+  }
+
+  releaseReservation(): void {
+    this.busy = false;
+  }
+
   async executeTask(
     _task: TrackerTask,
     prompt: string,
     callbacks: WorkerCallbacks = {}
   ): Promise<WorkerExecuteResult> {
-    this.busy = true;
+    if (!this.busy) {
+      this.busy = true;
+    }
     const flags: string[] = [];
 
     if (this.config.model) {
@@ -53,8 +68,12 @@ export class ParallelWorker {
 
     const supportsTracing = this.agent.meta.supportsSubagentTracing;
     const shimPath = join(this.worktreePath, '.ralph-tui', 'bin');
+    const baseEnv = await buildAgentEnv({
+      cwd: this.config.cwd,
+      agentId: this.config.agent.plugin,
+    });
     const env = {
-      ...process.env,
+      ...baseEnv,
       PATH: `${shimPath}${delimiter}${process.env.PATH ?? ''}`,
       RALPH_TUI_DISABLE_BD: '1',
     };

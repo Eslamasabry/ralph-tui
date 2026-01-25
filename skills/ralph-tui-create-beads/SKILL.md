@@ -46,51 +46,39 @@ Extract:
 
 ---
 
-## Step 2: Require Task Impact Tables (MANDATORY)
+## Step 2: Require Impact Tables (MANDATORY)
 
-Each story must include a **Task Impact Table** describing expected file operations. This is required for autonomous parallel execution.
+Each story must include an **Impact Table** describing expected file operations. This is required for autonomous parallel execution.
 
 If the PRD does not include an impact table per story, ask the user to provide one. Do not proceed without it unless explicitly told to.
 
-**Impact Table schema (per story):**
+**BRD-002 Impact Table schema (per story):**
 
-- `create[]`: `{ path, reason, risk }`
-- `modify[]`: `{ path, reason, risk }`
-- `delete[]`: `{ path, reason, risk }`
-- `rename[]`: `{ from, to, reason, risk }`
-- `expectedChecks[]`: optional `{ name, command }`
-- `moduleTags[]`: optional module labels
-
-**Risk levels:** `low | med | high`
+- `Path`: repo-relative file path
+- `Change`: `create | modify | delete | rename`
+- `Purpose`: required
+- `Notes`: optional
 
 Use this exact markdown table format inside the bead description:
 
 ```markdown
-## Task Impact Table (Required)
-| action | path | risk | rationale |
+### Impact Table
+| Path | Change | Purpose | Notes |
 |---|---|---|---|
-| create | src/new.ts | low | Add new API helper |
-| modify | src/app.tsx | med | Wire new UI hook |
-| delete | src/legacy.ts | low | Remove unused code |
-| rename | src/a.ts → src/b.ts | low | Clarify naming |
-
-Module tags: core, ui
-Expected checks:
-- test: `bun test`
+| src/new.ts | create | Add new API helper | |
+| src/app.tsx | modify | Wire new UI hook | |
+| src/legacy.ts | delete | Remove unused code | |
+| src/a.tsx | rename | Clarify naming | Rename to src/b.tsx |
 ```
 
-If there are no file changes, include a single `(none)` row and `Expected checks: - (none)` (do not omit the table).
+If there are no file changes, include a single `(none)` row (do not omit the table).
 
 **No file changes example (still required):**
 ```markdown
-## Task Impact Table (Required)
-| action | path | risk | rationale |
+### Impact Table
+| Path | Change | Purpose | Notes |
 |---|---|---|---|
-| (none) | (none) | low | No file changes declared |
-
-Module tags: (none)
-Expected checks:
-- (none)
+| (none) | (none) | No file changes declared | |
 ```
 
 ---
@@ -111,7 +99,7 @@ bd create --type=epic \
 bd create \
   --parent=EPIC_ID \
   --title="[Story Title]" \
-  --description="[Story description with Task Impact Table + acceptance criteria INCLUDING quality gates]" \
+  --description="[Story description with Impact Table + acceptance criteria INCLUDING quality gates]" \
   --priority=[1-4] \
   --labels="ralph,task"
 ```
@@ -188,7 +176,7 @@ ralph-tui will:
 ## Acceptance Criteria: Quality Gates + Story-Specific
 
 Each bead's description must include, in this order:
-1. **Task Impact Table** (required)
+1. **Impact Table** (required)
 2. **Acceptance Criteria** (story-specific + quality gates appended)
 
 Acceptance criteria should include:
@@ -218,7 +206,7 @@ Acceptance criteria should include:
 6. **Priority**: Based on dependency order, then document order (0=critical, 2=medium, 4=backlog)
 7. **Labels**: Epic gets `ralph,feature`; Tasks get `ralph,task`
 8. **All stories**: `status: "open"`
-9. **Description**: Task Impact Table + Acceptance Criteria (quality gates appended)
+9. **Description**: Impact Table + Acceptance Criteria (quality gates appended)
 10. **UI stories**: Also append UI-specific gates (browser verification)
 
 ---
@@ -300,16 +288,11 @@ bd create --parent=ralph-tui-abc \
   --title="US-001: Add investorType field to investor table" \
   --description="As a developer, I need to categorize investors as 'cold' or 'friend'.
 
-## Task Impact Table (Required)
-| action | path | risk | rationale |
+### Impact Table
+| Path | Change | Purpose | Notes |
 |---|---|---|---|
-| modify | prisma/schema.prisma | med | Add investorType enum field |
-| create | prisma/migrations/2024... | low | Migration for new column |
-
-Module tags: db
-Expected checks:
-- pnpm typecheck: `pnpm typecheck`
-- pnpm lint: `pnpm lint`
+| prisma/schema.prisma | modify | Add investorType enum field | |
+| prisma/migrations/2024... | create | Migration for new column | |
 
 ## Acceptance Criteria
 - [ ] Add investorType column: 'cold' | 'friend' (default 'cold')
@@ -324,16 +307,11 @@ bd create --parent=ralph-tui-abc \
   --title="US-002: Add type toggle to investor list rows" \
   --description="As Ryan, I want to toggle investor type directly from the list.
 
-## Task Impact Table (Required)
-| action | path | risk | rationale |
+### Impact Table
+| Path | Change | Purpose | Notes |
 |---|---|---|---|
-| modify | src/components/InvestorRow.tsx | med | Add toggle UI |
-| modify | src/actions/investors.ts | med | Update type mutation |
-
-Module tags: ui
-Expected checks:
-- pnpm typecheck: `pnpm typecheck`
-- pnpm lint: `pnpm lint`
+| src/components/InvestorRow.tsx | modify | Add toggle UI | |
+| src/actions/investors.ts | modify | Update type mutation | |
 
 ## Acceptance Criteria
 - [ ] Each row has Cold | Friend toggle
@@ -353,16 +331,11 @@ bd create --parent=ralph-tui-abc \
   --title="US-003: Filter investors by type" \
   --description="As Ryan, I want to filter the list to see just friends or cold.
 
-## Task Impact Table (Required)
-| action | path | risk | rationale |
+### Impact Table
+| Path | Change | Purpose | Notes |
 |---|---|---|---|
-| modify | src/components/InvestorList.tsx | med | Add filter dropdown |
-| modify | src/routes/investors.tsx | low | Persist filter in URL |
-
-Module tags: ui
-Expected checks:
-- pnpm typecheck: `pnpm typecheck`
-- pnpm lint: `pnpm lint`
+| src/components/InvestorList.tsx | modify | Add filter dropdown | |
+| src/routes/investors.tsx | modify | Persist filter in URL | |
 
 ## Acceptance Criteria
 - [ ] Filter dropdown: All | Cold | Friend
@@ -403,7 +376,7 @@ ralph-tui will:
 ## Checklist Before Creating Beads
 
 - [ ] Extracted Quality Gates from PRD (or asked user if missing)
-- [ ] Task Impact Table included for each story (required)
+- [ ] Impact Table included for each story (required)
 - [ ] Each story is completable in one iteration (small enough)
 - [ ] Stories are ordered by dependency (schema → backend → UI)
 - [ ] Quality gates appended to every bead's acceptance criteria

@@ -49,36 +49,26 @@ Use this playbook to plan the next development set in ralph-tui by creating a be
 - Avoid vague language ("works correctly")
 - Prefer concrete checks ("Header shows X", "Key Y toggles Z")
 
-## Task Impact Table (Required)
-Each child bead must include a Task Impact Table that declares expected file changes.
+## Impact Table (Required)
+Each child bead must include an Impact Table that declares expected file changes.
 
 **Required format:**
 ```
-## Task Impact Table (Required)
-| action | path | risk | rationale |
+### Impact Table
+| Path | Change | Purpose | Notes |
 |---|---|---|---|
-| create | src/new.ts | low | Add new helper |
-| modify | src/app.tsx | med | Wire up UI |
-| delete | src/legacy.ts | low | Remove unused code |
-| rename | src/a.ts → src/b.ts | low | Clarify naming |
-
-Module tags: core, ui
-Expected checks:
-- bun run typecheck: `bun run typecheck`
-- bun run lint: `bun run lint`
-- bun run build: `bun run build`
+| src/new.ts | create | Add new helper | |
+| src/app.tsx | modify | Wire up UI | |
+| src/legacy.ts | delete | Remove unused code | |
+| src/a.tsx | rename | Clarify naming | Rename to src/b.tsx |
 ```
 
 **No file changes example (still required):**
 ```
-## Task Impact Table (Required)
-| action | path | risk | rationale |
+### Impact Table
+| Path | Change | Purpose | Notes |
 |---|---|---|---|
-| (none) | (none) | low | No file changes declared |
-
-Module tags: (none)
-Expected checks:
-- (none)
+| (none) | (none) | No file changes declared | |
 ```
 
 ## Quality Gates (append to every task)
@@ -96,16 +86,10 @@ Expected checks:
 Title: PC-003: Metrics Bar Threshold Colors
 Description: As a power user, I want throughput and success metrics with clear thresholds so that I can identify unhealthy runs quickly.
 
-## Task Impact Table (Required)
-| action | path | risk | rationale |
+### Impact Table
+| Path | Change | Purpose | Notes |
 |---|---|---|---|
-| modify | src/tui/components/MetricsBar.tsx | med | Add thresholds and colors |
-
-Module tags: tui
-Expected checks:
-- bun run typecheck: `bun run typecheck`
-- bun run lint: `bun run lint`
-- bun run build: `bun run build`
+| src/tui/components/MetricsBar.tsx | modify | Add thresholds and colors | |
 
 Acceptance Criteria:
 - [ ] Metrics bar shows TPH, Success Rate, Efficiency, and Scheduler State

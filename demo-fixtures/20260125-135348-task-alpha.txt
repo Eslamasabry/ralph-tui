@@ -1,1 +1,0 @@
-Demo fixture file for E2E logging verification

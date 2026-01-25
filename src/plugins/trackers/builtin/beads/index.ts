@@ -888,7 +888,7 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
 
      if (exitCode !== 0) {
        console.error('bd ready failed:', stderr);
-       return undefined;
+       return super.getNextTask(filter);
      }
 
      // Parse JSON output

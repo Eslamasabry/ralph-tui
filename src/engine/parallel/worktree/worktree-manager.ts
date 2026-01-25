@@ -506,6 +506,10 @@ export class WorktreeManager {
       'exit 1\n';
     await writeFile(bdShimPath, content, 'utf-8');
     await chmod(bdShimPath, 0o755);
+
+    const hooksDir = join(worktreePath, '.ralph-tui', 'hooks-empty');
+    await mkdir(hooksDir, { recursive: true });
+    await this.git(['-C', worktreePath, 'config', 'core.hooksPath', hooksDir]);
   }
 
   async forceCleanupStaleWorktree(worktreePath: string): Promise<void> {

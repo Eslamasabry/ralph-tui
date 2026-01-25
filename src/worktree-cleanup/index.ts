@@ -105,7 +105,10 @@ async function removeWorktreeByPath(repoRoot: string, worktreePath: string): Pro
 	// Try to remove via git (ignore failures)
 	const removeResult = await execGitAllowFailure(repoRoot, ['worktree', 'remove', '--force', worktreePath]);
 	if (removeResult.exitCode !== 0) {
-		errors.push(`Git worktree remove failed: ${removeResult.stderr}`);
+		const stderr = removeResult.stderr.toLowerCase();
+		if (!stderr.includes('not a working tree')) {
+			errors.push(`Git worktree remove failed: ${removeResult.stderr}`);
+		}
 	}
 
 	// Delete the directory if it exists
