@@ -89,7 +89,7 @@ function Tab({
   const separator = '│';
 
   // Selected tabs use different styling for emphasis
-  const labelColor = isSelected ? colors.fg.primary : colors.fg.secondary;
+  const labelColor = isSelected ? colors.bg.primary : colors.fg.secondary;
 
   // Build metrics string for connected remote tabs (US-5)
   let metricsStr = '';
@@ -112,12 +112,12 @@ function Tab({
         flexDirection: 'row',
         paddingLeft: 1,
         paddingRight: 0,
-        backgroundColor: isSelected ? colors.bg.tertiary : colors.bg.secondary,
+        backgroundColor: isSelected ? colors.accent.primary : colors.bg.overlay,
       }}
     >
       <text>
         {/* Status indicator (skip for local since always connected) */}
-        <span fg={statusColor}>{!tab.isLocal ? `${statusIndicator} ` : ''}</span>
+        <span fg={isSelected ? colors.bg.primary : statusColor}>{!tab.isLocal ? `${statusIndicator} ` : ''}</span>
 
         {/* Tab label - use uppercase for selected to indicate emphasis */}
         <span fg={labelColor}>
@@ -125,13 +125,13 @@ function Tab({
         </span>
 
         {/* Connection metrics for selected connected remote tabs (US-5) */}
-        <span fg={colors.fg.dim}>{metricsStr || ''}</span>
+        <span fg={isSelected ? colors.bg.primary : colors.fg.dim}>{metricsStr || ''}</span>
 
         {/* Key hint */}
-        <span fg={colors.fg.dim}>{keyHint ? `[${keyHint}]` : ''}</span>
+        <span fg={isSelected ? colors.bg.primary : colors.fg.dim}>{keyHint ? `[${keyHint}]` : ''}</span>
 
         {/* Separator */}
-        <span fg={colors.border.muted}> {separator}</span>
+        <span fg={isSelected ? colors.bg.primary : colors.border.muted}> {separator}</span>
       </text>
     </box>
   );
@@ -175,7 +175,7 @@ export function TabBar({
         width: '100%',
         height: 1,
         flexDirection: 'row',
-        backgroundColor: colors.bg.secondary,
+        backgroundColor: colors.bg.overlay,
       }}
     >
       {/* Tab list */}

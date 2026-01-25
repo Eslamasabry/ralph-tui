@@ -55,26 +55,6 @@ export interface DashboardBannerProps {
 }
 
 /**
- * Compact stat item component using inline text layout
- */
-function StatItem({
-  label,
-  value,
-  color,
-}: {
-  label: string;
-  value: number;
-  color: string;
-}): ReactNode {
-  return (
-    <text>
-      <span fg={colors.fg.muted}>{label}:</span>{' '}
-      <span fg={color}>{String(value)}</span>
-    </text>
-  );
-}
-
-/**
  * Dashboard banner showing compact task count statistics in a single row.
  * Uses OpenTUI row layout with nested text spans for colored values.
  * Displays status indicator based on active tasks count.
@@ -123,11 +103,19 @@ export function DashboardBanner({
           ? colors.status.error
           : colors.fg.muted;
 
+  const completionPercent = totalTasks > 0
+    ? Math.min(100, Math.round((completedTasks / totalTasks) * 100))
+    : 0;
+  const progressWidth = isCompact ? 16 : 22;
+  const progressFilled = Math.round((completionPercent / 100) * progressWidth);
+  const progressBar = `${'█'.repeat(progressFilled)}${'░'.repeat(progressWidth - progressFilled)}`;
+  const pipelineBorder = mergesFailed > 0 ? colors.status.error : colors.border.muted;
+
   return (
     <box
       style={{
         width: '100%',
-        minHeight: 5,
+        minHeight: 6,
         flexDirection: 'column',
         backgroundColor: colors.bg.secondary,
         border: true,
@@ -137,16 +125,15 @@ export function DashboardBanner({
         paddingRight: 1,
         paddingTop: 0,
         paddingBottom: 0,
-        justifyContent: 'center',
         gap: 0,
       }}
     >
-      {/* Title row */}
       <box
         style={{
           flexDirection: 'row',
           justifyContent: 'space-between',
           alignItems: 'center',
+          marginBottom: 0,
         }}
       >
         <text fg={colors.fg.primary}>
@@ -162,56 +149,129 @@ export function DashboardBanner({
         </text>
       </box>
 
-      {/* Stats row */}
       <box
         style={{
-          flexDirection: 'row',
-          gap: 3,
-          flexWrap: 'wrap',
-          justifyContent: 'space-between',
+          flexDirection: isCompact ? 'column' : 'row',
+          gap: 1,
+          marginTop: 0,
         }}
       >
-        <StatItem label="Total" value={totalTasks} color={colors.fg.primary} />
-        <StatItem label="Active" value={activeTasks} color={colors.task.active} />
-        <StatItem label="Queued" value={queuedTasks} color={colors.status.warning} />
-        <StatItem label="Blocked" value={blockedTasks} color={colors.task.blocked} />
-        <StatItem label="Done" value={completedTasks} color={colors.status.success} />
-        <StatItem label="Failed" value={failedTasks} color={colors.status.error} />
-      </box>
+        <box
+          style={{
+            flexGrow: 1,
+            border: true,
+            borderColor: colors.border.muted,
+            backgroundColor: colors.bg.secondary,
+            paddingLeft: 1,
+            paddingRight: 1,
+          }}
+        >
+          <box style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+            <text fg={colors.accent.primary}>TASK VELOCITY</text>
+            <text fg={colors.fg.muted}>{`${completionPercent}%`}</text>
+          </box>
+          <box style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+            <text>
+              <span fg={colors.fg.muted}>Active: </span>
+              <span fg={colors.task.active}>{String(activeTasks)}</span>
+            </text>
+            <text>
+              <span fg={colors.fg.muted}>Done: </span>
+              <span fg={colors.status.success}>{String(completedTasks)}</span>
+            </text>
+            <text>
+              <span fg={colors.fg.muted}>Blocked: </span>
+              <span fg={colors.task.blocked}>{String(blockedTasks)}</span>
+            </text>
+          </box>
+          <text fg={colors.fg.secondary}>{progressBar}</text>
+        </box>
 
-      {/* Merge status row */}
-      <box
-        style={{
-          flexDirection: 'row',
-          gap: 3,
-          flexWrap: 'wrap',
-          justifyContent: 'space-between',
-        }}
-      >
-        {!isCompact && (
-          <StatItem label="Worktrees" value={worktreeCount} color={colors.accent.primary} />
-        )}
-        {!isCompact && worktreeActive > 0 && (
-          <StatItem label="Active" value={worktreeActive} color={colors.status.success} />
-        )}
-        {!isCompact && worktreeLocked > 0 && (
-          <StatItem label="Locked" value={worktreeLocked} color={colors.status.warning} />
-        )}
-        {!isCompact && worktreeStale > 0 && (
-          <StatItem label="Stale" value={worktreeStale} color={colors.status.error} />
-        )}
-        {!isCompact && worktreePrunable > 0 && (
-          <StatItem label="Prunable" value={worktreePrunable} color={colors.status.warning} />
-        )}
-        <StatItem label={isCompact ? 'Merge Q' : 'Merge Queue'} value={mergesQueued} color={colors.fg.muted} />
-        <StatItem label="Merged" value={mergesSucceeded} color={colors.status.success} />
-        <StatItem label={isCompact ? 'Merge Fail' : 'Merge Failed'} value={mergesFailed} color={colors.status.error} />
-        <StatItem label={isCompact ? 'Sync' : 'Sync Pending'} value={mainSyncPending} color={colors.status.warning} />
-        <StatItem label={isCompact ? 'Valid Q' : 'Validation Queue'} value={validationsQueued} color={colors.fg.muted} />
-        <text>
-          <span fg={colors.fg.muted}>Validation:</span>{' '}
-          <span fg={validationColor}>{validationLabel}</span>
-        </text>
+        <box
+          style={{
+            flexGrow: 1,
+            border: true,
+            borderColor: pipelineBorder,
+            backgroundColor: colors.bg.secondary,
+            paddingLeft: 1,
+            paddingRight: 1,
+          }}
+        >
+          <text fg={colors.accent.secondary}>PIPELINE</text>
+          <box style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+            <text>
+              <span fg={colors.fg.muted}>Worktrees: </span>
+              <span fg={colors.accent.primary}>{String(worktreeCount)}</span>
+            </text>
+            <text>
+              <span fg={colors.fg.muted}>Merge Q: </span>
+              <span fg={colors.fg.secondary}>{String(mergesQueued)}</span>
+            </text>
+          </box>
+          <box style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+            <text>
+              <span fg={colors.fg.muted}>Active: </span>
+              <span fg={colors.status.success}>{String(worktreeActive)}</span>
+            </text>
+            <text>
+              <span fg={colors.fg.muted}>Locked: </span>
+              <span fg={colors.status.warning}>{String(worktreeLocked)}</span>
+            </text>
+          </box>
+          <box style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+            <text>
+              <span fg={colors.fg.muted}>Stale: </span>
+              <span fg={colors.status.error}>{String(worktreeStale)}</span>
+            </text>
+            <text>
+              <span fg={colors.fg.muted}>Prunable: </span>
+              <span fg={colors.status.warning}>{String(worktreePrunable)}</span>
+            </text>
+          </box>
+          <box style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+            <text>
+              <span fg={colors.fg.muted}>Merged: </span>
+              <span fg={colors.status.success}>{String(mergesSucceeded)}</span>
+            </text>
+            <text>
+              <span fg={colors.fg.muted}>Failed: </span>
+              <span fg={colors.status.error}>{String(mergesFailed)}</span>
+            </text>
+          </box>
+          {mainSyncPending > 0 && (
+            <text fg={colors.status.warning}>
+              ⚠ Sync Pending: {String(mainSyncPending)}
+            </text>
+          )}
+        </box>
+
+        <box
+          style={{
+            flexGrow: 1,
+            border: true,
+            borderColor: colors.border.muted,
+            backgroundColor: colors.bg.secondary,
+            paddingLeft: 1,
+            paddingRight: 1,
+          }}
+        >
+          <text fg={colors.accent.tertiary}>VALIDATION</text>
+          <text>
+            <span fg={colors.fg.muted}>Status: </span>
+            <span fg={validationColor}>{validationLabel}</span>
+          </text>
+          <text>
+            <span fg={colors.fg.muted}>Queue: </span>
+            <span fg={colors.fg.secondary}>{String(validationsQueued)}</span>
+          </text>
+          <text>
+            <span fg={colors.fg.muted}>Failures: </span>
+            <span fg={colors.status.error}>{String(failedTasks)}</span>
+          </text>
+          {validating && (
+            <text fg={colors.status.info}>Running checks...</text>
+          )}
+        </box>
       </box>
     </box>
   );

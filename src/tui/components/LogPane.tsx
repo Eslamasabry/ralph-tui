@@ -279,9 +279,9 @@ function LogLine({ line, lineNumber, maxWidth }: { line: string; lineNumber: num
  */
 function EmptyState({ state, isLive }: { state: 'none' | 'pending' | 'empty'; isLive: boolean }): ReactNode {
   const messages = {
-    none: { text: 'Task not yet executed', icon: '○' },
-    pending: { text: 'Waiting for output...', icon: '◐' },
-    empty: { text: 'No output captured', icon: '○' },
+    none: { text: 'Ready to execute', icon: '○', hint: "Press 's' to start execution" },
+    pending: { text: 'Awaiting output', icon: '◐', hint: "Press 'o' to view details" },
+    empty: { text: 'No output captured', icon: '○', hint: "Press 'o' to view details" },
   };
   const msg = messages[state];
 
@@ -289,6 +289,9 @@ function EmptyState({ state, isLive }: { state: 'none' | 'pending' | 'empty'; is
     <box style={{ padding: 2, flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
       <text fg={colors.fg.muted}>{msg.icon}</text>
       <text fg={colors.fg.muted}>{msg.text}</text>
+      <text fg={colors.fg.dim} style={{ marginTop: 1 }}>
+        {msg.hint}
+      </text>
       {isLive && (
         <text fg={colors.fg.dim} style={{ marginTop: 1 }}>
           Agent is running...
