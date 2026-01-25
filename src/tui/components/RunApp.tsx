@@ -3433,6 +3433,13 @@ export function RunApp({
                 gap: 1,
               }}
             >
+              <box style={{ paddingLeft: 1, paddingRight: 1 }}>
+                <text>
+                  <span fg={colors.fg.secondary}>Run Overview</span>
+                  <span fg={colors.fg.muted}> - Live stats, merges, and validations.</span>
+                </text>
+              </box>
+
               {/* Dashboard Banner - shows task counts */}
               <DashboardBanner
                 totalTasks={taskCounts.total}
@@ -3456,6 +3463,13 @@ export function RunApp({
                 appVersion={appVersion}
               />
 
+              <box style={{ paddingLeft: 1, paddingRight: 1 }}>
+                <text>
+                  <span fg={colors.fg.secondary}>Task Board</span>
+                  <span fg={colors.fg.muted}> - Status, ownership, and merge/validation badges.</span>
+                </text>
+              </box>
+
               {/* Task Cards Row - horizontal cards for all tasks */}
               <TaskCardsRow
                 tasks={allTasksForCards}
@@ -3471,21 +3485,29 @@ export function RunApp({
                 flexDirection: !isCompact && subagentPanelVisible ? 'row' : 'column',
               }}
             >
-              <box style={{ flexGrow: 1 }}>
-                <RightPanel
-                  selectedTask={selectedTask}
-                  currentIteration={selectedTaskIteration.iteration}
-                  iterationOutput={displayIterationOutput}
-                  iterationSegments={selectedTaskIteration.segments}
-                  cliOutput={displayCliOutput}
-                  viewMode={detailsViewMode}
-                  iterationTiming={selectedTaskIteration.timing}
-                  agentName={displayAgentInfo.agent}
-                  currentModel={displayAgentInfo.model}
-                  isViewingRemote={isViewingRemote}
-                  remoteConnectionStatus={instanceTabs?.[selectedTabIndex]?.status}
-                  remoteAlias={instanceTabs?.[selectedTabIndex]?.alias}
-                />
+              <box style={{ flexGrow: 1, flexDirection: 'column' }}>
+                <box style={{ paddingLeft: 1, paddingRight: 1 }}>
+                  <text>
+                    <span fg={colors.fg.secondary}>Task Focus</span>
+                    <span fg={colors.fg.muted}> - Details, output, and CLI.</span>
+                  </text>
+                </box>
+                <box style={{ flexGrow: 1 }}>
+                  <RightPanel
+                    selectedTask={selectedTask}
+                    currentIteration={selectedTaskIteration.iteration}
+                    iterationOutput={displayIterationOutput}
+                    iterationSegments={selectedTaskIteration.segments}
+                    cliOutput={displayCliOutput}
+                    viewMode={detailsViewMode}
+                    iterationTiming={selectedTaskIteration.timing}
+                    agentName={displayAgentInfo.agent}
+                    currentModel={displayAgentInfo.model}
+                    isViewingRemote={isViewingRemote}
+                    remoteConnectionStatus={instanceTabs?.[selectedTabIndex]?.status}
+                    remoteAlias={instanceTabs?.[selectedTabIndex]?.alias}
+                  />
+                </box>
               </box>
 
               {subagentPanelVisible && !isCompact && (
