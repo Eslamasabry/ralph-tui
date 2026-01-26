@@ -510,6 +510,13 @@ export class ParallelCoordinator {
         await this.tracker.updateTaskStatus(task.id, 'open');
         await this.tracker.releaseTask?.(task.id, idleWorker.workerId);
         idleWorker.releaseReservation();
+        this.emit({
+          type: 'parallel:task-released',
+          timestamp: new Date().toISOString(),
+          workerId: idleWorker.workerId,
+          task,
+          reason: 'not_ready',
+        });
         const attempts = (this.notReadyAttempts.get(task.id) ?? 0) + 1;
         this.notReadyAttempts.set(task.id, attempts);
         this.setNotReadyCooldown(task.id, attempts);

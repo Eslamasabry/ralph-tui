@@ -151,6 +151,7 @@ export type ParallelEvent =
   | { type: 'parallel:stopped'; timestamp: string }
   | { type: 'parallel:worker-idle'; timestamp: string; workerId: string }
   | { type: 'parallel:task-claimed'; timestamp: string; workerId: string; task: TrackerTask }
+  | { type: 'parallel:task-released'; timestamp: string; workerId: string; task: TrackerTask; reason: string }
   | { type: 'parallel:task-started'; timestamp: string; workerId: string; task: TrackerTask }
   | { type: 'parallel:task-output'; timestamp: string; workerId: string; taskId: string; data: string; stream: 'stdout' | 'stderr' }
   | { type: 'parallel:task-segments'; timestamp: string; workerId: string; taskId: string; segments: FormattedSegment[] }

@@ -546,6 +546,11 @@ export function RunApp({
   // Worker-to-task mapping for stable slot display in parallel execution
   // Maps taskId -> workerId (e.g., "ralph-tui-rs1.3" -> "worker-2")
   const [workerTaskMap, setWorkerTaskMap] = useState<Map<string, string>>(() => new Map());
+  const workerTaskMapRef = useRef(workerTaskMap);
+
+  useEffect(() => {
+    workerTaskMapRef.current = workerTaskMap;
+  }, [workerTaskMap]);
   // Activity events for timeline display
   const activityEventsRef = useRef<ActivityEvent[]>([]);
   const activityEventCounter = useRef(0);
@@ -1382,12 +1387,13 @@ export function RunApp({
           // Update task list with fresh data from tracker
           // BUT preserve 'active' status for tasks currently assigned to workers
           setTasks((prev) => {
-            if (event.tasks.length === 0 && workerTaskMap.size > 0) {
+            const activeWorkerTasks = workerTaskMapRef.current;
+            if (event.tasks.length === 0 && activeWorkerTasks.size > 0) {
               return prev;
             }
             const freshTasks = convertTasksWithDependencyStatus(event.tasks);
             // Get currently active task IDs from workerTaskMap
-            const activeTaskIds = new Set(workerTaskMap.keys());
+            const activeTaskIds = new Set(activeWorkerTasks.keys());
             // Merge: preserve 'active' status for worker-assigned tasks
             return freshTasks.map((freshTask) => {
               if (activeTaskIds.has(freshTask.id)) {
@@ -1940,6 +1946,22 @@ export function RunApp({
                 workerId: parallelEvent.workerId,
               },
             ];
+          });
+          break;
+        case 'parallel:task-released':
+          // Remove worker assignment and restore task to actionable/pending
+          setWorkerTaskMap((prev) => {
+            const next = new Map(prev);
+            next.delete(parallelEvent.task.id);
+            return next;
+          });
+          setTasks((prev) => {
+            const updated = prev.map((t) =>
+              t.id === parallelEvent.task.id
+                ? { ...t, status: 'pending' as TaskStatus, workerId: undefined }
+                : t
+            );
+            return recalculateDependencyStatus(updated);
           });
           break;
         case 'parallel:task-started':
@@ -2737,6 +2759,8 @@ export function RunApp({
     ? 'Subagents'
     : 'Output';
 
+  const isParallelMode = mergeStats.worktrees > 0;
+
   const getPanelBorderColor = (paneName: FocusedPane): string => {
     if (!subagentPanelVisible) {
       return colors.border.normal;
@@ -2813,16 +2837,37 @@ export function RunApp({
     if (effectiveTaskId) {
       const parallelTiming = parallelTimings.get(effectiveTaskId);
       const parallelIteration = parallelIterations.get(effectiveTaskId);
-      const outputKey = parallelIteration !== undefined
-        ? `${effectiveTaskId}:${parallelIteration}`
-        : undefined;
+      let outputKey: string | undefined;
+      let outputIteration: number | undefined = parallelIteration;
+      if (parallelIteration !== undefined) {
+        outputKey = `${effectiveTaskId}:${parallelIteration}`;
+      } else {
+        // Find the latest output for this task
+        for (const key of parallelOutputs.keys()) {
+          if (!key.startsWith(`${effectiveTaskId}:`)) continue;
+          outputKey = key;
+        }
+        if (outputKey) {
+          const parts = outputKey.split(':');
+          const parsed = Number(parts[1]);
+          outputIteration = Number.isNaN(parsed) ? undefined : parsed;
+        }
+      }
       const parallelOutput = outputKey ? parallelOutputs.get(outputKey) : undefined;
       if (parallelOutput !== undefined) {
         return {
-          iteration: parallelIteration ?? currentIteration,
+          iteration: outputIteration ?? currentIteration,
           output: parallelOutput,
           segments: undefined,
           timing: parallelTiming ?? { isRunning: true },
+        };
+      }
+      if (isParallelMode) {
+        return {
+          iteration: outputIteration ?? currentIteration,
+          output: undefined,
+          segments: undefined,
+          timing: parallelTiming,
         };
       }
     }
@@ -2850,7 +2895,7 @@ export function RunApp({
       effectiveTaskStatus === 'active' ||
       effectiveTaskStatus === 'in_progress'; // Tracker status in iterations view.
     const isExecuting = currentTaskId === effectiveTaskId || isActiveTask;
-    if (isExecuting && currentTaskId) {
+    if (!isParallelMode && isExecuting && currentTaskId) {
       // Use the captured start time from the iteration:started event
       const timing: IterationTimingInfo = {
         startedAt: currentIterationStartedAt,
@@ -2860,7 +2905,14 @@ export function RunApp({
     }
 
     // Look for a completed iteration for this task (in-memory from current session)
-    const taskIteration = iterations.find((iter) => iter.task.id === effectiveTaskId);
+    let taskIteration: IterationResult | undefined;
+    for (let i = iterations.length - 1; i >= 0; i -= 1) {
+      const candidate = iterations[i];
+      if (candidate && candidate.task.id === effectiveTaskId) {
+        taskIteration = candidate;
+        break;
+      }
+    }
     if (taskIteration) {
       const timing: IterationTimingInfo = {
         startedAt: taskIteration.startedAt,
@@ -2898,9 +2950,15 @@ export function RunApp({
 
     if (effectiveTaskId) {
       const parallelIteration = parallelIterations.get(effectiveTaskId);
-      const outputKey = parallelIteration !== undefined
-        ? `${effectiveTaskId}:${parallelIteration}`
-        : undefined;
+      let outputKey: string | undefined;
+      if (parallelIteration !== undefined) {
+        outputKey = `${effectiveTaskId}:${parallelIteration}`;
+      } else {
+        for (const key of parallelOutputs.keys()) {
+          if (!key.startsWith(`${effectiveTaskId}:`)) continue;
+          outputKey = key;
+        }
+      }
       if (outputKey && parallelOutputs.has(outputKey)) {
         return parallelOutputs.get(outputKey);
       }
