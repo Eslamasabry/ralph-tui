@@ -6,8 +6,9 @@
  */
 
 import type { ReactNode } from 'react';
-import { colors, statusIndicators, formatElapsedTime, layout, type RalphStatus } from '../theme.js';
+import { colors, statusIndicators, layout, type RalphStatus } from '../theme.js';
 import type { HeaderProps } from '../types.js';
+import { LiveTimer } from './LiveTimer.js';
 
 // ============================================================================
 // Icons and Special Characters
@@ -300,15 +301,16 @@ function ProgressSection({
   totalTasks,
   currentIteration,
   maxIterations,
-  elapsedTime,
+  status,
+  timerStartMs,
 }: {
   completedTasks: number;
   totalTasks: number;
   currentIteration: number | undefined;
   maxIterations: number | undefined;
-  elapsedTime: number;
+  status: RalphStatus;
+  timerStartMs?: number;
 }): ReactNode {
-  const formattedTime = formatElapsedTime(elapsedTime);
   const iterationDisplay =
     currentIteration !== undefined && maxIterations !== undefined
       ? ` ${PROGRESS_BRACKET_LEFT}${currentIteration}/${maxIterations === 0 ? '∞' : maxIterations}${PROGRESS_BRACKET_RIGHT}`
@@ -322,7 +324,11 @@ function ProgressSection({
       </text>
       <text fg={colors.fg.muted}>{iterationDisplay}</text>
       <text fg={colors.fg.muted}>{TIMER_ICON}</text>
-      <text fg={colors.fg.secondary}>{formattedTime}</text>
+      <text fg={colors.fg.secondary}>
+        <span>
+          <LiveTimer startTimeMs={timerStartMs} status={status} />
+        </span>
+      </text>
     </box>
   );
 }
@@ -382,7 +388,7 @@ function AgentInfoSection({
  */
 export function Header({
   status,
-  elapsedTime,
+  timerStartMs,
   currentTaskId,
   currentTaskTitle,
   completedTasks = 0,
@@ -460,7 +466,8 @@ export function Header({
             totalTasks={totalTasks}
             currentIteration={currentIteration}
             maxIterations={maxIterations}
-            elapsedTime={elapsedTime}
+            status={status}
+            timerStartMs={timerStartMs}
           />
         </box>
       </box>

@@ -94,8 +94,8 @@ export interface TaskItem {
 export interface HeaderProps {
   /** Current Ralph execution status */
   status: RalphStatus;
-  /** Elapsed time in seconds */
-  elapsedTime: number;
+  /** Start time for the run timer (ms since epoch) */
+  timerStartMs?: number;
   /** Current task ID being worked on (if any) */
   currentTaskId?: string;
   /** Current task title being worked on (if any) */

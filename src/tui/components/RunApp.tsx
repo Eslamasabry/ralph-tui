@@ -460,7 +460,8 @@ export function RunApp({
       agentPlugin: resolvedAgentName,
     })
   );
-  const [elapsedTime, setElapsedTime] = useState(0);
+  const [runStartedAtMs, setRunStartedAtMs] = useState<number | undefined>(undefined);
+  const [runEndedAtMs, setRunEndedAtMs] = useState<number | undefined>(undefined);
   const [epicName] = useState('Ralph');
   // Derive agent/tracker names from config - these are displayed in the header
   const agentName = resolvedAgentName;
@@ -718,6 +719,7 @@ export function RunApp({
   const [remoteTrackerName, setRemoteTrackerName] = useState<string | undefined>(undefined);
   const [remoteModel, setRemoteModel] = useState<string | undefined>(undefined);
   const [remoteAutoCommit, setRemoteAutoCommit] = useState<boolean | undefined>(undefined);
+  const [remoteRunStartedAtMs, setRemoteRunStartedAtMs] = useState<number | undefined>(undefined);
   // Remote sandbox config for display
   const [remoteSandboxConfig, setRemoteSandboxConfig] = useState<SandboxConfig | undefined>(undefined);
   const [remoteResolvedSandboxMode, setRemoteResolvedSandboxMode] = useState<Exclude<SandboxMode, 'auto'> | undefined>(undefined);
@@ -848,6 +850,10 @@ export function RunApp({
       switch (event.type) {
         case 'engine:started':
           setRemoteStatus('running');
+          {
+            const startedAtMs = Date.parse(event.timestamp);
+            setRemoteRunStartedAtMs(Number.isNaN(startedAtMs) ? Date.now() : startedAtMs);
+          }
           break;
         case 'engine:stopped':
           setRemoteStatus(
@@ -1125,6 +1131,11 @@ export function RunApp({
         case 'engine:started':
           // Engine starting means we're about to select a task
           setStatus('selecting');
+          {
+            const startedAtMs = Date.parse(event.timestamp);
+            setRunStartedAtMs(Number.isNaN(startedAtMs) ? Date.now() : startedAtMs);
+            setRunEndedAtMs(undefined);
+          }
           // Initialize task list from engine with proper status mapping
           // Uses convertTasksWithDependencyStatus to determine actionable/blocked
           if (event.tasks && event.tasks.length > 0) {
@@ -1137,6 +1148,10 @@ export function RunApp({
           // Clear current task info since we're not executing anymore
           setCurrentTaskId(undefined);
           setCurrentTaskTitle(undefined);
+          {
+            const endedAtMs = Date.parse(event.timestamp);
+            setRunEndedAtMs(Number.isNaN(endedAtMs) ? Date.now() : endedAtMs);
+          }
           if (event.reason === 'error') {
             setStatus('error');
           } else if (event.reason === 'completed') {
@@ -2018,20 +2033,6 @@ export function RunApp({
     return unsubscribe;
   }, [engine, appendActivityEvent]);
 
-  // Update elapsed time every second - only while executing
-  // Timer accumulates total execution time across all iterations
-  useEffect(() => {
-    // Only run timer when actively executing an iteration
-    if (status !== 'executing') {
-      return;
-    }
-
-    const interval = setInterval(() => {
-      setElapsedTime((prev) => prev + 1);
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [status]);
-
   // Get initial state from engine
   useEffect(() => {
     const state = engine.getState();
@@ -2747,13 +2748,13 @@ export function RunApp({
   );
   const topSectionHeight = Math.max(topSectionFloor, Math.min(preferredTopHeight, maxTopHeight));
 
-  const displayElapsedTime = useMemo(() => {
-    if (!isViewingRemote) return elapsedTime;
-    if (!remoteCurrentTaskId) return 0;
-    const cached = remoteIterationCache.get(remoteCurrentTaskId);
-    if (!cached?.durationMs) return 0;
-    return Math.floor(cached.durationMs / 1000);
-  }, [elapsedTime, isViewingRemote, remoteCurrentTaskId, remoteIterationCache]);
+  const runElapsedSeconds = useMemo(() => {
+    if (!runStartedAtMs) return 0;
+    const endMs = runEndedAtMs ?? Date.now();
+    return Math.max(0, Math.floor((endMs - runStartedAtMs) / 1000));
+  }, [runStartedAtMs, runEndedAtMs]);
+
+  const displayTimerStartMs = isViewingRemote ? remoteRunStartedAtMs : runStartedAtMs;
 
   const focusTargetLabel = subagentPanelVisible && focusedPane === 'subagentTree'
     ? 'Subagents'
@@ -3364,7 +3365,7 @@ export function RunApp({
         {/* Header - compact design showing essential info + agent/tracker + fallback status */}
         <Header
           status={displayStatus}
-          elapsedTime={displayElapsedTime}
+          timerStartMs={displayTimerStartMs}
           currentTaskId={displayCurrentTaskId}
           currentTaskTitle={displayCurrentTaskTitle}
           completedTasks={headerCounts.completed}
@@ -3471,7 +3472,8 @@ export function RunApp({
             currentStatus={iterations.find(i => i.iteration === currentIteration)?.status ?? (status === 'running' || status === 'executing' ? 'running' : undefined)}
             currentStartedAt={currentIterationStartedAt}
             currentDurationMs={iterations.find(i => i.iteration === currentIteration)?.durationMs}
-            elapsedTime={elapsedTime}
+            timerStartMs={runStartedAtMs}
+            timerStatus={status}
             isExecuting={status === 'running' || status === 'executing'}
             subagentTree={subagentTree}
             subagentStats={subagentStatsCache.get(currentIteration)}
@@ -3989,7 +3991,7 @@ export function RunApp({
       <RunSummaryOverlay
         visible={showRunSummary}
         status={status}
-        elapsedTime={elapsedTime}
+        elapsedTime={runElapsedSeconds}
         epicName={epicName}
         totalTasks={tasks.length}
         completedTasks={tasks.filter((t) => t.status === 'done').length}

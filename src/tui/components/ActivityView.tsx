@@ -8,11 +8,12 @@
 import type { ReactNode } from 'react';
 import { useMemo } from 'react';
 import { useTerminalDimensions } from '@opentui/react';
-import { colors, formatElapsedTime, layout } from '../theme.js';
+import { colors, layout, type RalphStatus } from '../theme.js';
 import type { IterationResult, IterationStatus, EngineSubagentStatus } from '../../engine/types.js';
 import type { SubagentTreeNode } from '../../engine/types.js';
 import type { SubagentTraceStats } from '../../logs/types.js';
 import type { ActivityEvent } from '../../logs/activity-events.js';
+import { LiveTimer } from './LiveTimer.js';
 
 /** Activity view header icon */
 const ACTIVITY_ICON = '◎';
@@ -79,8 +80,10 @@ export interface ActivityViewProps {
   currentStartedAt?: string;
   /** Current iteration duration in milliseconds */
   currentDurationMs?: number;
-  /** Elapsed time in seconds since execution started */
-  elapsedTime: number;
+  /** Start time for the run timer (ms since epoch) */
+  timerStartMs?: number;
+  /** Run status for the timer */
+  timerStatus: RalphStatus;
   /** Whether an agent is currently executing */
   isExecuting: boolean;
   /** Subagent tree for the current iteration */
@@ -500,7 +503,8 @@ export function ActivityView({
   currentTaskTitle,
   currentStatus,
   currentDurationMs,
-  elapsedTime,
+  timerStartMs,
+  timerStatus,
   isExecuting,
   subagentTree,
   subagentStats,
@@ -610,7 +614,9 @@ export function ActivityView({
             <span fg={colors.fg.muted}>{TIMER_ICON}</span>
             <span fg={colors.fg.muted}> </span>
             <span fg={colors.fg.muted}>Total:</span>{' '}
-            <span fg={colors.accent.tertiary}>{formatElapsedTime(elapsedTime)}</span>
+            <span fg={colors.accent.tertiary}>
+              <LiveTimer startTimeMs={timerStartMs} status={timerStatus} />
+            </span>
           </text>
         </box>
       </box>
@@ -673,7 +679,11 @@ export function ActivityView({
             {/* Elapsed time with icon */}
             <box style={{ flexDirection: 'row', marginBottom: 0 }}>
               <text fg={colors.fg.muted}>{TIMER_ICON} Elapsed: </text>
-              <text fg={colors.accent.tertiary}>{formatElapsedTime(elapsedTime)}</text>
+              <text fg={colors.accent.tertiary}>
+                <span>
+                  <LiveTimer startTimeMs={timerStartMs} status={timerStatus} />
+                </span>
+              </text>
             </box>
           </box>
         </box>

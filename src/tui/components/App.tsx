@@ -5,7 +5,7 @@
 
 import { useKeyboard, useTerminalDimensions } from '@opentui/react';
 import type { ReactNode } from 'react';
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import { getColors } from '../theme.js';
 import type { AppState, TaskItem } from '../types.js';
 import { Header } from './Header.js';
@@ -33,7 +33,6 @@ function createDefaultState(tasks: TaskItem[] = []): AppState {
   return {
     header: {
       status: 'ready',
-      elapsedTime: 0,
       completedTasks: completedTasksCount,
       totalTasks: tasks.length,
     },
@@ -59,15 +58,7 @@ export function App({ initialState, onQuit }: AppProps): ReactNode {
     ...createDefaultState(),
     ...initialState,
   }));
-  const [elapsedTime, setElapsedTime] = useState(state.header.elapsedTime);
-
-  // Update elapsed time every second
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setElapsedTime((prev) => prev + 1);
-    }, 1000);
-    return () => clearInterval(interval);
-  }, []);
+  const [timerStartMs] = useState(() => Date.now());
 
   // Handle keyboard navigation
   const handleKeyboard = useCallback(
@@ -142,7 +133,7 @@ export function App({ initialState, onQuit }: AppProps): ReactNode {
       {/* Header - compact design */}
       <Header
         status={state.header.status}
-        elapsedTime={elapsedTime}
+        timerStartMs={timerStartMs}
         completedTasks={state.header.completedTasks}
         totalTasks={state.header.totalTasks}
       />
