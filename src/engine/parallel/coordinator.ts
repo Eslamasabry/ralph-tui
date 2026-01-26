@@ -2769,6 +2769,7 @@ export class ParallelCoordinator {
         return !(
           path.startsWith('.beads/') ||
           path.startsWith('.ralph-tui/') ||
+          path.startsWith('logs/') ||
           path.startsWith('worktrees/')
         );
       });
