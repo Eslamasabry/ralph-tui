@@ -62,6 +62,7 @@ export class ParallelCoordinator {
   private notReadyCooldowns = new Map<string, number>();
   private notReadyAttempts = new Map<string, number>();
   private activeTaskLeases = new Map<string, { workerId: string; claimedAt: number }>();
+  private taskAffinity = new Map<string, string>();
   private readonly staleInProgressTimeoutMs = 30 * 60 * 1000;
   private lastValidationSkipLogAt = 0;
   private lastMainSyncAttemptAt = 0;
@@ -445,7 +446,7 @@ export class ParallelCoordinator {
         continue;
       }
 
-      const task = await this.getNextReadyTask();
+      const task = await this.getNextReadyTask(idleWorker.workerId);
       if (!task) {
         const busyWorkers = this.workers.some((worker) => worker.isBusy());
         if (!busyWorkers) {
@@ -527,6 +528,7 @@ export class ParallelCoordinator {
       this.notReadyAttempts.delete(task.id);
       this.notReadyCooldowns.delete(task.id);
       this.activeTaskLeases.set(task.id, { workerId: idleWorker.workerId, claimedAt: Date.now() });
+      this.taskAffinity.set(task.id, idleWorker.workerId);
       this.emit({ type: 'parallel:task-claimed', timestamp: new Date().toISOString(), workerId: idleWorker.workerId, task });
       void this.runTaskOnWorker(idleWorker, task);
     }
@@ -665,6 +667,7 @@ export class ParallelCoordinator {
 
     if (taskResult.completed) {
       this.taskFailureCounts.delete(taskResult.task.id);
+      this.taskAffinity.delete(taskResult.task.id);
       const commits = await this.collectCommits(taskResult.task, workerId);
       this.logInfo(
         `Task completed ${taskResult.task.id}; collected ${commits.length} commit(s).`
@@ -773,6 +776,7 @@ export class ParallelCoordinator {
     if (this.isInsufficientCredit(taskResult.result)) {
       const reason = 'Agent credit exhausted. Blocking task and pausing parallel execution.';
       this.blockedTaskIds.add(taskId);
+      this.taskAffinity.delete(taskId);
       await this.tracker.updateTaskStatus(taskId, 'blocked');
       await this.tracker.releaseTask?.(taskId, workerId);
       this.paused = true;
@@ -788,6 +792,7 @@ export class ParallelCoordinator {
     if (failures >= maxFailures) {
       const reason = `Agent failed ${failures} times without COMPLETE.`;
       this.blockedTaskIds.add(taskId);
+      this.taskAffinity.delete(taskId);
       await this.tracker.updateTaskStatus(taskId, 'blocked');
       await this.tracker.releaseTask?.(taskId, workerId);
       this.logWarn(`Task blocked after repeated failures: ${taskId} (${reason}).`);
@@ -799,8 +804,19 @@ export class ParallelCoordinator {
     this.logWarn(`Task retry scheduled after failure ${failures}/${maxFailures}: ${taskId}.`);
   }
 
-  private async getNextReadyTask(): Promise<TrackerTask | undefined> {
+  private async getNextReadyTask(requestingWorkerId: string): Promise<TrackerTask | undefined> {
     if (!this.tracker) return undefined;
+    for (const [taskId, workerId] of this.taskAffinity.entries()) {
+      if (workerId !== requestingWorkerId) continue;
+      const stickyTask = await this.tracker.getTask(taskId);
+      if (!stickyTask) {
+        continue;
+      }
+      if (stickyTask.status === 'open' || stickyTask.status === 'in_progress') {
+        this.logInfo(`Worker ${requestingWorkerId} resuming sticky task ${taskId}.`);
+        return stickyTask;
+      }
+    }
     const now = Date.now();
     const cooldownIds: string[] = [];
     for (const [taskId, until] of this.notReadyCooldowns.entries()) {
@@ -814,6 +830,9 @@ export class ParallelCoordinator {
       ...this.blockedTaskIds,
       ...cooldownIds,
       ...this.activeTaskLeases.keys(),
+      ...Array.from(this.taskAffinity.entries())
+        .filter(([, workerId]) => workerId !== requestingWorkerId)
+        .map(([taskId]) => taskId),
     ]);
 
     for (let attempt = 0; attempt < 5; attempt++) {
