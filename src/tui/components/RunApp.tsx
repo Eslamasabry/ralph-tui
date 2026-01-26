@@ -1309,12 +1309,18 @@ export function RunApp({
             const taskId = event.taskId;
             const cleaned = stripAnsiCodes(event.data);
             if (taskId) {
-              const existing = parallelOutputsRef.current.get(taskId) ?? '';
+              const outputKey = `${taskId}:${event.iteration}`;
+              const existing = parallelOutputsRef.current.get(outputKey) ?? '';
               const prefix = event.stream === 'stderr' ? '[stderr] ' : '';
               parallelOutputsRef.current.set(
-                taskId,
+                outputKey,
                 appendBounded(existing, prefix + cleaned, MAX_TASK_OUTPUT_CHARS)
               );
+              setParallelIterations((prev) => {
+                const next = new Map(prev);
+                next.set(taskId, event.iteration);
+                return next;
+              });
               pendingParallelOutputsRef.current = true;
               scheduleOutputFlush();
             } else {
@@ -1376,6 +1382,9 @@ export function RunApp({
           // Update task list with fresh data from tracker
           // BUT preserve 'active' status for tasks currently assigned to workers
           setTasks((prev) => {
+            if (event.tasks.length === 0 && workerTaskMap.size > 0) {
+              return prev;
+            }
             const freshTasks = convertTasksWithDependencyStatus(event.tasks);
             // Get currently active task IDs from workerTaskMap
             const activeTaskIds = new Set(workerTaskMap.keys());
@@ -1915,6 +1924,28 @@ export function RunApp({
           // Ensure task exists in list (parallel may start before tracker refresh)
           setTasks((prev) => {
             if (prev.some((t) => t.id === parallelEvent.task.id)) {
+              return prev.map((t) =>
+                t.id === parallelEvent.task.id
+                  ? { ...t, status: 'active', workerId: parallelEvent.workerId }
+                  : t
+              );
+            }
+            return [
+              ...prev,
+              {
+                id: parallelEvent.task.id,
+                title: parallelEvent.task.title,
+                status: 'active',
+                description: parallelEvent.task.description,
+                workerId: parallelEvent.workerId,
+              },
+            ];
+          });
+          break;
+        case 'parallel:task-started':
+          // UI state already updated on claim; ensure task exists if missed
+          setTasks((prev) => {
+            if (prev.some((t) => t.id === parallelEvent.task.id)) {
               return prev;
             }
             return [
@@ -1922,36 +1953,11 @@ export function RunApp({
               {
                 id: parallelEvent.task.id,
                 title: parallelEvent.task.title,
-                status: 'pending',
+                status: 'active',
                 description: parallelEvent.task.description,
+                workerId: parallelEvent.workerId,
               },
             ];
-          });
-          break;
-        case 'parallel:task-started':
-          // Map task to worker and set status to active when execution begins
-          setWorkerTaskMap((prev) => {
-            const next = new Map(prev);
-            next.set(parallelEvent.task.id, parallelEvent.workerId);
-            return next;
-          });
-          // Set task status to active so it appears in running tasks
-          setTasks((prev) => {
-            const exists = prev.some((t) => t.id === parallelEvent.task.id);
-            if (!exists) {
-              return [
-                ...prev,
-                {
-                  id: parallelEvent.task.id,
-                  title: parallelEvent.task.title,
-                  status: 'active',
-                  description: parallelEvent.task.description,
-                },
-              ];
-            }
-            return prev.map((t) =>
-              t.id === parallelEvent.task.id ? { ...t, status: 'active' } : t
-            );
           });
           break;
         case 'parallel:task-finished':
@@ -2805,9 +2811,12 @@ export function RunApp({
     }
 
     if (effectiveTaskId) {
-      const parallelOutput = parallelOutputs.get(effectiveTaskId);
       const parallelTiming = parallelTimings.get(effectiveTaskId);
       const parallelIteration = parallelIterations.get(effectiveTaskId);
+      const outputKey = parallelIteration !== undefined
+        ? `${effectiveTaskId}:${parallelIteration}`
+        : undefined;
+      const parallelOutput = outputKey ? parallelOutputs.get(outputKey) : undefined;
       if (parallelOutput !== undefined) {
         return {
           iteration: parallelIteration ?? currentIteration,
@@ -2887,12 +2896,18 @@ export function RunApp({
       return remoteOutput || undefined;
     }
 
-    if (effectiveTaskId && parallelOutputs.has(effectiveTaskId)) {
-      return parallelOutputs.get(effectiveTaskId);
+    if (effectiveTaskId) {
+      const parallelIteration = parallelIterations.get(effectiveTaskId);
+      const outputKey = parallelIteration !== undefined
+        ? `${effectiveTaskId}:${parallelIteration}`
+        : undefined;
+      if (outputKey && parallelOutputs.has(outputKey)) {
+        return parallelOutputs.get(outputKey);
+      }
     }
 
     return currentCliOutput || undefined;
-  }, [isViewingRemote, remoteOutput, effectiveTaskId, parallelOutputs, currentCliOutput]);
+  }, [isViewingRemote, remoteOutput, effectiveTaskId, parallelOutputs, currentCliOutput, parallelIterations]);
 
   // Compute the actual output to display based on selectedSubagentId
   // When a subagent is selected (not task root), try to get its specific output
