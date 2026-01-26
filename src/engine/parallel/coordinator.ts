@@ -4,7 +4,7 @@
 
 import type { RalphConfig } from '../../config/types.js';
 import { spawn } from 'node:child_process';
-import { appendFile, mkdir, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import type { TrackerPlugin, TrackerTask } from '../../plugins/trackers/types.js';
 import type { AgentPlugin, AgentExecutionResult } from '../../plugins/agents/types.js';
@@ -2448,11 +2448,11 @@ export class ParallelCoordinator {
         }
 
         // Strategy 2: Check if the conflict is simple and can be auto-merged
-        const content = await Bun.file(filePath).text();
+        const content = await readFile(filePath, 'utf-8');
         if (this.isSimpleConflict(content)) {
           const resolvedContent = this.resolveSimpleConflict(content);
           if (resolvedContent !== null) {
-            await Bun.write(filePath, resolvedContent);
+            await writeFile(filePath, resolvedContent, 'utf-8');
             this.logInfo(`Auto-resolved simple conflict in ${file}.`);
             continue;
           }

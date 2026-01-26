@@ -409,6 +409,7 @@ export function RunApp({
   );
   const [parallelTimings, setParallelTimings] = useState<Map<string, IterationTimingInfo>>(() => new Map());
   const [parallelIterations, setParallelIterations] = useState<Map<string, number>>(() => new Map());
+  const selectedTaskIdRef = useRef<string | null>(null);
   const [mergeStats, setMergeStats] = useState({
     worktrees: 0,
     queued: 0,
@@ -417,6 +418,10 @@ export function RunApp({
     failed: 0,
     syncPending: 0,
   });
+  const mergeStatsRef = useRef(mergeStats);
+  useEffect(() => {
+    mergeStatsRef.current = mergeStats;
+  }, [mergeStats]);
   const [validationStats, setValidationStats] = useState<{
     queued: number;
     running: boolean;
@@ -739,6 +744,8 @@ export function RunApp({
     durationMs?: number;
     isRunning: boolean;
   }>>(new Map());
+  const remoteStateRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const remoteStateRefreshPendingRef = useRef(false);
 
   // Get the selected tab's connection status from instanceTabs
   // This is used to trigger data fetch when connection completes
@@ -845,6 +852,21 @@ export function RunApp({
       console.error('Failed to fetch remote data:', err);
     });
 
+    const scheduleRemoteStateRefresh = () => {
+      if (remoteStateRefreshPendingRef.current) return;
+      remoteStateRefreshPendingRef.current = true;
+      remoteStateRefreshTimerRef.current = setTimeout(() => {
+        remoteStateRefreshPendingRef.current = false;
+        instanceManager.getRemoteState().then((state) => {
+          if (state?.subagentTree) {
+            setRemoteSubagentTree(state.subagentTree);
+          }
+        }).catch((err) => {
+          console.error('Failed to refresh remote state:', err);
+        });
+      }, 400);
+    };
+
     // Subscribe to engine events from InstanceManager
     const unsubscribe = instanceManager.onEngineEvent((event) => {
       switch (event.type) {
@@ -895,14 +917,7 @@ export function RunApp({
             const prefix = event.stream === 'stderr' ? '[stderr] ' : '';
             setRemoteOutput((prev) => appendBounded(prev, prefix + cleaned, MAX_MAIN_OUTPUT_CHARS));
           }
-          // Refresh remote state to get updated subagent tree
-          instanceManager.getRemoteState().then((state) => {
-            if (state?.subagentTree) {
-              setRemoteSubagentTree(state.subagentTree);
-            }
-          }).catch((err) => {
-            console.error('Failed to refresh remote state:', err);
-          });
+          scheduleRemoteStateRefresh();
           break;
         case 'task:completed':
           // Refresh task list
@@ -934,6 +949,11 @@ export function RunApp({
     return () => {
       unsubscribe();
       instanceManager.unsubscribeFromSelectedRemote();
+      if (remoteStateRefreshTimerRef.current) {
+        clearTimeout(remoteStateRefreshTimerRef.current);
+        remoteStateRefreshTimerRef.current = null;
+      }
+      remoteStateRefreshPendingRef.current = false;
     };
   }, [isViewingRemote, selectedTabIndex, selectedTabStatus, instanceManager]);
 
@@ -1004,6 +1024,28 @@ export function RunApp({
       return a.id.localeCompare(b.id);
     });
   }, [tasks, remoteTasks, isViewingRemote, showClosedTasks]);
+
+  useEffect(() => {
+    const currentId = displayedTasks[selectedIndex]?.id;
+    if (currentId) {
+      selectedTaskIdRef.current = currentId;
+    }
+  }, [displayedTasks, selectedIndex]);
+
+  useEffect(() => {
+    const selectedId = selectedTaskIdRef.current;
+    if (!selectedId) return;
+    const idx = displayedTasks.findIndex((task) => task.id === selectedId);
+    if (idx === -1) {
+      if (displayedTasks.length > 0 && selectedIndex !== 0) {
+        setSelectedIndex(0);
+      }
+      return;
+    }
+    if (idx !== selectedIndex) {
+      setSelectedIndex(idx);
+    }
+  }, [displayedTasks, selectedIndex]);
 
   // All tasks displayed as cards (parallel dashboard - shows ALL tasks, not just running)
   // Includes workerId for stable slot assignment
@@ -1127,6 +1169,10 @@ export function RunApp({
   // Subscribe to engine events
   useEffect(() => {
     const unsubscribe = engine.on((event: EngineEvent) => {
+      const isParallelActive = mergeStatsRef.current.worktrees > 0;
+      if (isParallelActive && event.type.startsWith('main-sync-')) {
+        return;
+      }
       switch (event.type) {
         case 'engine:started':
           // Engine starting means we're about to select a task
