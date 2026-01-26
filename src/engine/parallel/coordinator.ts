@@ -419,6 +419,17 @@ export class ParallelCoordinator {
       throw new Error('Coordinator not initialized');
     }
 
+    const dirtyLines = await this.getRepoStatusLines(this.config.cwd);
+    if (dirtyLines.length > 0) {
+      const sample = dirtyLines.slice(0, 8).join(', ');
+      const suffix = dirtyLines.length > 8 ? ` (and ${dirtyLines.length - 8} more)` : '';
+      this.logWarn(
+        `Main worktree is dirty. Clean your repo before running parallel execution. ` +
+          `Changed files: ${sample}${suffix}`
+      );
+      throw new Error('Main worktree is dirty. Clean your repo before running parallel execution.');
+    }
+
     this.running = true;
     this.summaryCounts.clear();
     this.summaryStartAt = null;
@@ -1911,6 +1922,18 @@ export class ParallelCoordinator {
     }
 
     const clean = await this.isRepoClean(this.config.cwd);
+    if (!clean && await this.hasOnlySafeDirty(this.config.cwd)) {
+      this.logInfo('Main worktree has only runtime/log changes; skipping stash for main sync.');
+      const result = await this.execGitIn(this.config.cwd, ['merge', '--ff-only', commit]);
+      if (result.exitCode !== 0) {
+        this.logWarn('Fast-forward merge failed, resetting main branch to integration commit.');
+        const resetResult = await this.execGitIn(this.config.cwd, ['reset', '--hard', commit]);
+        if (resetResult.exitCode !== 0) {
+          return { success: false, reason: resetResult.stderr.trim() || 'Failed to reset main branch' };
+        }
+      }
+      return { success: true };
+    }
     if (clean) {
       const result = await this.execGitIn(this.config.cwd, ['merge', '--ff-only', commit]);
       if (result.exitCode !== 0) {
@@ -2752,6 +2775,23 @@ export class ParallelCoordinator {
   private async isRepoClean(repoPath: string): Promise<boolean> {
     const statusLines = await this.getRepoStatusLines(repoPath);
     return statusLines.length === 0;
+  }
+
+  private async hasOnlySafeDirty(repoPath: string): Promise<boolean> {
+    const status = await this.execGitIn(repoPath, ['status', '--porcelain']);
+    const lines = status.stdout.split('\n').map((line) => line.replace(/\r$/, '')).filter(Boolean);
+    if (lines.length === 0) {
+      return false;
+    }
+    return lines.every((line) => {
+      const path = line.slice(3).trim();
+      return (
+        path.startsWith('.beads/') ||
+        path.startsWith('.ralph-tui/') ||
+        path.startsWith('logs/') ||
+        path.startsWith('worktrees/')
+      );
+    });
   }
 
   private async getRepoStatusLines(repoPath: string): Promise<string[]> {

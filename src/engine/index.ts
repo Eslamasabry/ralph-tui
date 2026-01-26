@@ -528,6 +528,15 @@ export class ExecutionEngine {
       throw new Error('Engine not initialized');
     }
 
+    if (await this.isRepoDirty()) {
+      const changed = await this.getChangedFiles();
+      const sample = changed.slice(0, 8).join(', ');
+      const suffix = changed.length > 8 ? ` (and ${changed.length - 8} more)` : '';
+      throw new Error(
+        `Main worktree is dirty. Clean your repo before running. Changed files: ${sample}${suffix}`
+      );
+    }
+
     this.state.status = 'running';
     this.state.startedAt = new Date().toISOString();
     this.shouldStop = false;
@@ -2251,6 +2260,7 @@ export class ExecutionEngine {
           !(
             path.startsWith('.beads/') ||
             path.startsWith('.ralph-tui/') ||
+            path.startsWith('logs/') ||
             path.startsWith('worktrees/')
           )
         );
