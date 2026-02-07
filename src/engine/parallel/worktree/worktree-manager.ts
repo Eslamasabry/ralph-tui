@@ -187,42 +187,53 @@ export class WorktreeManager {
     await Promise.all(
       paths.map((path) =>
         this.sem.with(async () => {
-          if (!this.isManagedPath(path)) {
-            return;
-          }
-
-          await this.git(['-C', this.repoRoot, 'worktree', 'unlock', path]);
-
-          const removeResult = await this.git([
-            '-C',
-            this.repoRoot,
-            'worktree',
-            'remove',
-            '--force',
-            path,
-          ]);
-
-          if (removeResult.exitCode !== 0) {
-            const managed = await this.hasManagedMetadata(path);
-            if (managed) {
-              await this.git([
-                '-C',
-                this.repoRoot,
-                'worktree',
-                'remove',
-                '--force',
-                '--force',
-                path,
-              ]);
+          try {
+            if (!this.isManagedPath(path)) {
+              return;
             }
-          }
 
-          await rm(path, { recursive: true, force: true });
+            await this.git(['-C', this.repoRoot, 'worktree', 'unlock', path]);
+
+            const removeResult = await this.git([
+              '-C',
+              this.repoRoot,
+              'worktree',
+              'remove',
+              '--force',
+              path,
+            ]);
+
+            if (removeResult.exitCode !== 0) {
+              const managed = await this.hasManagedMetadata(path);
+              if (managed) {
+                await this.git([
+                  '-C',
+                  this.repoRoot,
+                  'worktree',
+                  'remove',
+                  '--force',
+                  '--force',
+                  path,
+                ]);
+              }
+            }
+
+            await rm(path, { recursive: true, force: true });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            // Best-effort cleanup should never block shutdown.
+            console.warn(`[worktree/cleanup] Failed to clean ${path}: ${message}`);
+          }
         })
       )
     );
 
-    await this.git(['-C', this.repoRoot, 'worktree', 'prune']);
+    try {
+      await this.git(['-C', this.repoRoot, 'worktree', 'prune']);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[worktree/cleanup] Failed to prune worktrees: ${message}`);
+    }
   }
 
   async createWorktrees(options: CreateWorktreeOptions[]): Promise<Map<string, string>> {

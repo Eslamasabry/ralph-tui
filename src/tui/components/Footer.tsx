@@ -74,6 +74,7 @@ function getConnectionStatusColor(status: string | undefined): string {
  */
 export function Footer({
   version = '0.3.0',
+  shortcutHints,
   sandboxMode,
   remoteAlias,
   remoteConnectionStatus,
@@ -81,6 +82,39 @@ export function Footer({
 }: FooterProps): ReactNode {
   const footerColors = getColors();
   const connectionColor = getConnectionStatusColor(remoteConnectionStatus);
+
+  if (shortcutHints) {
+    return (
+      <box
+        style={{
+          width: '100%',
+          height: 1,
+          minHeight: 1,
+          flexShrink: 0,
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          paddingLeft: 1,
+          paddingRight: 1,
+          backgroundColor: footerColors.bg.secondary,
+        }}
+      >
+        <text fg={footerColors.fg.muted}>{shortcutHints}</text>
+        <box style={{ flexDirection: 'row', alignItems: 'center', flexShrink: 0 }}>
+          <text fg={footerColors.fg.dim}>{ICONS.version}</text>
+          <text fg={footerColors.fg.secondary}> {version}</text>
+          {formatSystemInfo(ICONS.sandbox, sandboxMode, footerColors.status.info)}
+          {remoteAlias ? (
+            <text>
+              <span fg={footerColors.fg.dim}> {ICONS.separator} </span>
+              <span fg={footerColors.fg.muted}>{ICONS.remote}</span>
+              <span fg={connectionColor}> {remoteAlias}</span>
+            </text>
+          ) : null}
+        </box>
+      </box>
+    );
+  }
 
   // Group shortcuts by priority (most common first)
   const primaryShortcuts = keyboardShortcuts.filter((s) =>

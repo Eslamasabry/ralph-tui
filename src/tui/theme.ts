@@ -45,6 +45,7 @@ export const darkColors = {
     active: '#60a5fa',     // Blue
     actionable: '#34d399', // Emerald (distinct from done)
     pending: '#636da6',    // Muted Blue
+    queued: '#636da6',     // Alias of pending for legacy compatibility
     blocked: '#f472b6',    // Pink (distinct from error)
     error: '#ef4444',      // Red
     closed: '#475569',     // Slate (faded)
@@ -62,8 +63,10 @@ export const darkColors = {
   border: {
     normal: '#232736',
     active: '#818cf8',     // Matches primary accent
+    focused: '#818cf8',    // Explicit focused border alias (V2)
     muted: '#181b25',
     highlight: '#636da6',
+    error: '#f87171',      // Error boundary borders
   },
 
   // Interaction states
@@ -133,6 +136,7 @@ export const lightColors = {
     active: '#2563eb',
     actionable: '#059669',
     pending: '#64748b',
+    queued: '#64748b',     // Alias of pending for legacy compatibility
     blocked: '#db2777',
     error: '#dc2626',
     closed: '#94a3b8',
@@ -150,8 +154,10 @@ export const lightColors = {
   border: {
     normal: '#e2e8f0',
     active: '#4f46e5',
+    focused: '#4f46e5',    // Explicit focused border alias (V2)
     muted: '#f1f5f9',
     highlight: '#94a3b8',
+    error: '#dc2626',      // Error boundary borders
   },
 
   // Interaction states
@@ -203,6 +209,8 @@ export let currentThemeMode: ThemeMode = 'dark';
 export function setThemeMode(mode: ThemeMode): void {
   currentThemeMode = mode;
   colors = getColors();
+  loadingColors = getLoadingColors();
+  loadingTokens = getLoadingTokens();
 }
 
 /**
@@ -279,7 +287,6 @@ export const keyboardShortcuts = [
   { key: 't', description: 'Trace Level' },
   { key: 'T', description: 'Trace Panel' },
   { key: 'Tab', description: 'Cycle Views' },
-  { key: '1-9', description: 'Switch Instance Tab' },
   { key: '[]', description: 'Prev/Next Instance Tab' },
   { key: '↑↓', description: 'Navigate' },
   { key: '?', description: 'Help' },
@@ -352,6 +359,101 @@ export const layout = {
     small: 1,
     medium: 2,
   },
+} as const;
+
+/**
+ * WCAG contrast notes for dark theme:
+ * - fg.primary (#e4e7eb on #0f1117): passes AA comfortably
+ * - fg.secondary (#9aa5ce on #0f1117): passes AA comfortably
+ * - fg.muted (#636da6 on #0f1117): ~4.0:1 (fails 4.5:1 for normal text)
+ * - fg.dim (#464f72 on #0f1117): ~2.5:1 (fails AA)
+ *
+ * Mitigation rule: fg.muted/fg.dim are never the sole channel for actionable
+ * or safety-critical state. Use icon/label/position redundancy.
+ */
+
+/**
+ * Loading-specific semantic colors used by V2 feedback components.
+ * Recomputed from current theme so mode switches stay consistent.
+ */
+export function getLoadingColors() {
+  const palette = getColors();
+  return {
+    spinner: palette.accent.primary,
+    skeleton: palette.fg.dim,
+    text: palette.fg.muted,
+  } as const;
+}
+
+/**
+ * Active loading colors for convenience imports.
+ * Updated when theme mode changes via setThemeMode.
+ */
+export let loadingColors = getLoadingColors();
+
+/**
+ * Loading semantic token group.
+ * Includes requested tokens: spinner.fg and loading.bg.
+ */
+export function getLoadingTokens() {
+  const palette = getColors();
+  return {
+    spinner: {
+      fg: palette.accent.primary,
+    },
+    loading: {
+      bg: palette.bg.secondary,
+    },
+  } as const;
+}
+
+export let loadingTokens = getLoadingTokens();
+
+/**
+ * Shared timing constants for UI updates and interaction behavior.
+ */
+export const timing = {
+  outputFlush: 50,
+  batchInterval: 50,
+  activityFlush: 200,
+  subagentFlush: 150,
+  toastDuration: 3000,
+  spinnerFrame: 80,
+  focusHintDuration: 1500,
+  successFlashDuration: 2000,
+  debounceToggle: 200,
+  debounceAction: 300,
+} as const;
+
+/**
+ * Consistent spacing scale in terminal cells.
+ */
+export const spacing = {
+  xs: 0,
+  sm: 1,
+  md: 2,
+  lg: 3,
+  xl: 4,
+  none: 0,
+  line: 1,
+  group: 2,
+} as const;
+
+/**
+ * Named typography styles for consistent text hierarchy in the TUI.
+ */
+export const typography = {
+  heading: { color: 'fg.primary', bold: true },
+  body: { color: 'fg.primary', bold: false },
+  label: { color: 'fg.secondary', bold: false },
+  caption: { color: 'fg.muted', bold: false },
+  badge: { color: 'fg.inverse', bold: true },
+  code: { color: 'code.variable', bold: false },
+  keyHint: { color: 'accent.primary', bold: true },
+  disabled: { color: 'fg.dim', bold: false },
+  error: { color: 'status.error', bold: true },
+  success: { color: 'status.success', bold: false },
+  link: { color: 'link.default', bold: false, underline: true },
 } as const;
 
 /**

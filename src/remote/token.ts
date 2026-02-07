@@ -8,7 +8,14 @@
 
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { readFile, writeFile, mkdir, access, constants } from 'node:fs/promises';
+import {
+  readFile,
+  writeFile,
+  mkdir,
+  access,
+  constants,
+  chmod,
+} from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import type { RemoteConfig, ServerToken, ConnectionToken } from './types.js';
 import { TOKEN_LIFETIMES } from './types.js';
@@ -18,11 +25,29 @@ import { TOKEN_LIFETIMES } from './types.js';
  */
 const REMOTE_CONFIG_DIR = join(homedir(), '.config', 'ralph-tui');
 const REMOTE_CONFIG_PATH = join(REMOTE_CONFIG_DIR, 'remote.json');
+const CONFIG_DIR_MODE = 0o700;
+const CONFIG_FILE_MODE = 0o600;
 
 /**
  * Token length in bytes (32 bytes = 256 bits)
  */
 const TOKEN_BYTES = 32;
+
+async function enforceMode(path: string, mode: number): Promise<void> {
+  try {
+    await chmod(path, mode);
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (
+      nodeError.code === 'ENOSYS' ||
+      nodeError.code === 'EPERM' ||
+      nodeError.code === 'EINVAL'
+    ) {
+      return;
+    }
+    throw error;
+  }
+}
 
 /**
  * Generate a cryptographically secure token.
@@ -96,6 +121,8 @@ export function needsRefresh(
 export async function loadRemoteConfig(): Promise<RemoteConfig | null> {
   try {
     await access(REMOTE_CONFIG_PATH, constants.R_OK);
+    await enforceMode(REMOTE_CONFIG_DIR, CONFIG_DIR_MODE);
+    await enforceMode(REMOTE_CONFIG_PATH, CONFIG_FILE_MODE);
     const content = await readFile(REMOTE_CONFIG_PATH, 'utf-8');
     const config = JSON.parse(content) as RemoteConfig;
 
@@ -136,8 +163,13 @@ function migrateFromLegacy(legacyConfig: RemoteConfig): RemoteConfig {
  * Creates the directory if it doesn't exist.
  */
 export async function saveRemoteConfig(config: RemoteConfig): Promise<void> {
-  await mkdir(REMOTE_CONFIG_DIR, { recursive: true });
-  await writeFile(REMOTE_CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8');
+  await mkdir(REMOTE_CONFIG_DIR, { recursive: true, mode: CONFIG_DIR_MODE });
+  await enforceMode(REMOTE_CONFIG_DIR, CONFIG_DIR_MODE);
+  await writeFile(REMOTE_CONFIG_PATH, JSON.stringify(config, null, 2), {
+    encoding: 'utf-8',
+    mode: CONFIG_FILE_MODE,
+  });
+  await enforceMode(REMOTE_CONFIG_PATH, CONFIG_FILE_MODE);
 }
 
 /**

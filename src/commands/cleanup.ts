@@ -67,8 +67,13 @@ export async function executeCleanupCommand(args: string[]): Promise<void> {
 
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i];
-		if (arg === '--cwd' && args[i + 1]) {
-			cwd = args[i + 1];
+		if (arg === '--cwd') {
+			const cwdValue = args[i + 1];
+			if (!cwdValue || cwdValue.startsWith('-')) {
+				console.error('Error: --cwd requires a directory path');
+				process.exit(1);
+			}
+			cwd = cwdValue;
 			i++; // Skip next arg
 		} else if (arg === '--status' || arg === '-s') {
 			showStatus = true;

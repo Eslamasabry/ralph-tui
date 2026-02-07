@@ -156,6 +156,12 @@ function determineStatus(
     return 'running';
   }
 
+  // Stale lock means no active process holds the session.
+  // If the session file still says "running", treat it as resumable/paused.
+  if (lockCheck.isStale && session?.status === 'running') {
+    return 'paused';
+  }
+
   // No session file exists
   if (!session) {
     return 'no-session';
@@ -164,8 +170,6 @@ function determineStatus(
   // Session exists - check its status
   switch (session.status) {
     case 'running':
-      // Session says running but no lock - crashed or lock is stale
-      // Treat as running since session thinks it's running
       return 'running';
     case 'paused':
       return 'paused';
@@ -431,14 +435,24 @@ export async function executeStatusCommand(args: string[]): Promise<void> {
   let outputJson = false;
 
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--cwd' && args[i + 1]) {
-      cwd = args[i + 1];
+    const arg = args[i];
+    if (arg === '--cwd') {
+      const cwdValue = args[i + 1];
+      if (!cwdValue || cwdValue.startsWith('-')) {
+        console.error('Error: --cwd requires a directory path');
+        process.exit(1);
+      }
+      cwd = cwdValue;
       i++; // Skip next arg
-    } else if (args[i] === '--json') {
+    } else if (arg === '--json') {
       outputJson = true;
-    } else if (args[i] === '--help' || args[i] === '-h') {
+    } else if (arg === '--help' || arg === '-h') {
       printStatusHelp();
       return;
+    } else if (arg.startsWith('-')) {
+      console.error(`Unknown option: ${arg}`);
+      printStatusHelp();
+      process.exit(1);
     }
   }
 

@@ -121,13 +121,13 @@ describe('theme', () => {
 
   describe('theme modes', () => {
     test('should have dark colors defined', () => {
-      expect(darkColors.bg.primary).toBe('#1a1b26');
-      expect(darkColors.fg.primary).toBe('#c0caf5');
+      expect(darkColors.bg.primary).toBe('#0f1117');
+      expect(darkColors.fg.primary).toBe('#e4e7eb');
     });
 
     test('should have light colors defined', () => {
-      expect(lightColors.bg.primary).toBe('#fafafa');
-      expect(lightColors.fg.primary).toBe('#1a1b26');
+      expect(lightColors.bg.primary).toBe('#ffffff');
+      expect(lightColors.fg.primary).toBe('#0f172a');
     });
 
     test('should switch theme mode', () => {

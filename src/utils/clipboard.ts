@@ -4,8 +4,8 @@
  * clipboard access across different terminal and display server configurations.
  */
 
-import { spawn } from 'node:child_process';
-import { platform } from 'node:os';
+import * as childProcess from 'node:child_process';
+import * as os from 'node:os';
 
 /**
  * Result of a clipboard write operation
@@ -35,11 +35,11 @@ export async function writeToClipboard(text: string): Promise<ClipboardResult> {
     return { success: false, error: 'No text provided' };
   }
 
-  const os = platform();
+  const currentPlatform = os.platform();
   let command: string;
   let args: string[];
 
-  switch (os) {
+  switch (currentPlatform) {
     case 'darwin':
       command = 'pbcopy';
       args = [];
@@ -56,7 +56,7 @@ export async function writeToClipboard(text: string): Promise<ClipboardResult> {
       break;
 
     default:
-      return { success: false, error: `Unsupported platform: ${os}` };
+      return { success: false, error: `Unsupported platform: ${currentPlatform}` };
   }
 
   return runClipboardCommand(command, args, text);
@@ -104,7 +104,7 @@ function runClipboardCommand(
 ): Promise<ClipboardResult> {
   return new Promise((resolve) => {
     try {
-      const proc = spawn(command, args, {
+      const proc = childProcess.spawn(command, args, {
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 

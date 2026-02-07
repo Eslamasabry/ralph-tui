@@ -106,6 +106,9 @@ export interface LogsArgs {
 
   /** Show latest parallel summary */
   parallelSummary: boolean;
+
+  /** Validation error from argument parsing */
+  error?: string;
 }
 
 /**
@@ -119,6 +122,7 @@ export function parseLogsArgs(args: string[]): LogsArgs {
     cwd: process.cwd(),
     verbose: false,
     parallelSummary: false,
+    error: undefined,
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -127,7 +131,12 @@ export function parseLogsArgs(args: string[]): LogsArgs {
     if (arg === '--iteration' || arg === '-i') {
       const value = args[i + 1];
       if (value && !value.startsWith('-')) {
-        result.iteration = parseInt(value, 10);
+        const parsed = parseInt(value, 10);
+        if (Number.isNaN(parsed) || parsed <= 0) {
+          result.error = `Invalid --iteration value '${value}'. Expected a positive integer.`;
+        } else {
+          result.iteration = parsed;
+        }
         i++;
       }
     } else if (arg === '--task' || arg === '-t') {
@@ -141,7 +150,12 @@ export function parseLogsArgs(args: string[]): LogsArgs {
     } else if (arg === '--keep') {
       const value = args[i + 1];
       if (value && !value.startsWith('-')) {
-        result.keep = parseInt(value, 10);
+        const parsed = parseInt(value, 10);
+        if (Number.isNaN(parsed) || parsed < 0) {
+          result.error = `Invalid --keep value '${value}'. Expected a non-negative integer.`;
+        } else {
+          result.keep = parsed;
+        }
         i++;
       }
     } else if (arg === '--dry-run') {
@@ -173,7 +187,7 @@ async function getLatestParallelSummary(
 
   try {
     entries = await readdir(summaryDir);
-  } catch (_error) {
+  } catch {
     return null;
   }
 
@@ -322,6 +336,10 @@ function displayLogList(summaries: IterationLogSummary[]): void {
  */
 export async function executeLogsCommand(args: string[]): Promise<void> {
   const parsedArgs = parseLogsArgs(args);
+  if (parsedArgs.error) {
+    console.error(parsedArgs.error);
+    process.exit(1);
+  }
   const { cwd, iteration, taskId, clean, keep, dryRun, verbose, parallelSummary } =
     parsedArgs;
 

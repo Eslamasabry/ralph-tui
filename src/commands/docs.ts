@@ -4,10 +4,7 @@
  * Detects repository URL from git remote origin for accurate documentation links.
  */
 
-import { exec } from 'node:child_process';
-import { promisify } from 'node:util';
-
-const execAsync = promisify(exec);
+import { spawn } from 'node:child_process';
 
 /** Default repository base URL (used if git remote detection fails) */
 const DEFAULT_REPO_URL = 'https://github.com/subsy/ralph-tui';
@@ -38,7 +35,7 @@ async function getRepoUrl(): Promise<string> {
   }
 
   try {
-    const { stdout } = await execAsync('git remote get-url origin');
+    const stdout = await runCommandForStdout('git', ['remote', 'get-url', 'origin']);
     const remoteUrl = stdout.trim();
 
     // Convert SSH URL to HTTPS URL
@@ -64,6 +61,65 @@ async function getRepoUrl(): Promise<string> {
     // Not a git repo or git not available
     cachedRepoUrl = DEFAULT_REPO_URL;
     return cachedRepoUrl;
+  }
+}
+
+async function runCommandForStdout(command: string, args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(command, args, {
+      cwd: process.cwd(),
+      env: { ...process.env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: false,
+    });
+
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    const timeoutId = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      proc.kill('SIGTERM');
+      reject(new Error(`Timed out running ${command}`));
+    }, 5000);
+
+    proc.stdout.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+    proc.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    proc.on('error', (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeoutId);
+      reject(error);
+    });
+    proc.on('close', (code) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeoutId);
+      if (code === 0) {
+        resolve(stdout);
+      } else {
+        reject(new Error(stderr.trim() || `${command} exited with code ${code ?? 'unknown'}`));
+      }
+    });
+  });
+}
+
+async function runCommand(command: string, args: string[]): Promise<boolean> {
+  try {
+    await runCommandForStdout(command, args);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -143,38 +199,28 @@ export function parseDocsArgs(args: string[]): { section: DocSection; urlOnly: b
 async function openInBrowser(url: string): Promise<boolean> {
   const platform = process.platform;
 
-  try {
-    if (platform === 'darwin') {
-      await execAsync(`open "${url}"`);
-    } else if (platform === 'win32') {
-      await execAsync(`start "" "${url}"`);
-    } else {
-      // Linux and others - try xdg-open first, then common browsers
-      try {
-        await execAsync(`xdg-open "${url}"`);
-      } catch {
-        // Fallback to common browsers
-        const browsers = ['firefox', 'google-chrome', 'chromium', 'brave'];
-        let opened = false;
-        for (const browser of browsers) {
-          try {
-            await execAsync(`which ${browser}`);
-            await execAsync(`${browser} "${url}"`);
-            opened = true;
-            break;
-          } catch {
-            // Browser not found, try next
-          }
-        }
-        if (!opened) {
-          return false;
-        }
-      }
-    }
-    return true;
-  } catch {
-    return false;
+  if (platform === 'darwin') {
+    return runCommand('open', [url]);
   }
+
+  if (platform === 'win32') {
+    // explorer.exe opens URLs using the default browser.
+    return runCommand('explorer.exe', [url]);
+  }
+
+  // Linux and others - try xdg-open first, then common browsers.
+  if (await runCommand('xdg-open', [url])) {
+    return true;
+  }
+
+  const browsers = ['firefox', 'google-chrome', 'chromium', 'brave'];
+  for (const browser of browsers) {
+    if (await runCommand(browser, [url])) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /**

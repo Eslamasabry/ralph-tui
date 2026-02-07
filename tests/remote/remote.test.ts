@@ -1368,12 +1368,21 @@ describe('Remote CLI Commands', () => {
       expect(projectOptions.scope).toBe('project');
     });
 
-    test('ignores invalid scope values', async () => {
+    test('returns error for invalid scope values', async () => {
       const { parseRemoteArgs } = await import('../../src/commands/remote.js');
 
       const args = ['push-config', 'test', '--scope', 'invalid'];
       const options = parseRemoteArgs(args);
       expect(options.scope).toBeUndefined();
+      expect(options.error).toContain('--scope must be');
+    });
+
+    test('returns error for missing scope value', async () => {
+      const { parseRemoteArgs } = await import('../../src/commands/remote.js');
+
+      const args = ['push-config', 'test', '--scope'];
+      const options = parseRemoteArgs(args);
+      expect(options.error).toContain('--scope requires a value');
     });
   });
 });

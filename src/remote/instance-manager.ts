@@ -240,9 +240,15 @@ export class InstanceManager {
 
     // Create new client if needed
     if (!client) {
-      client = new RemoteClient(tab.host, tab.port, config.token, (event) => {
-        this.handleClientEvent(tab.alias!, event);
-      });
+      client = new RemoteClient(
+        tab.host,
+        tab.port,
+        config.token,
+        (event) => {
+          this.handleClientEvent(tab.alias!, event);
+        },
+        { secure: Boolean(config.secure) }
+      );
       this.clients.set(tab.alias, client);
     }
 

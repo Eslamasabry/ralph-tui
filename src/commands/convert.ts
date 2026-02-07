@@ -69,9 +69,21 @@ export function parseConvertArgs(args: string[]): ConvertArgs | null {
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
+    const getRequiredValue = (flag: string): string | null => {
+      const value = args[i + 1];
+      if (!value || value.startsWith('-')) {
+        console.error(`Error: ${flag} requires a value`);
+        return null;
+      }
+      i++;
+      return value;
+    };
 
     if (arg === '--to' || arg === '-t') {
-      const format = args[++i];
+      const format = getRequiredValue(arg);
+      if (!format) {
+        return null;
+      }
       if (format === 'json' || format === 'beads') {
         to = format;
       } else {
@@ -80,12 +92,21 @@ export function parseConvertArgs(args: string[]): ConvertArgs | null {
         return null;
       }
     } else if (arg === '--output' || arg === '-o') {
-      output = args[++i];
+      output = getRequiredValue(arg) ?? undefined;
+      if (!output) {
+        return null;
+      }
     } else if (arg === '--branch' || arg === '-b') {
-      branch = args[++i];
+      branch = getRequiredValue(arg) ?? undefined;
+      if (!branch) {
+        return null;
+      }
     } else if (arg === '--labels' || arg === '-l') {
-      const labelsStr = args[++i];
-      labels = labelsStr ? labelsStr.split(',').map((l) => l.trim()).filter((l) => l.length > 0) : [];
+      const labelsStr = getRequiredValue(arg);
+      if (!labelsStr) {
+        return null;
+      }
+      labels = labelsStr.split(',').map((l) => l.trim()).filter((l) => l.length > 0);
     } else if (arg === '--force' || arg === '-f') {
       force = true;
     } else if (arg === '--verbose' || arg === '-v') {
@@ -93,6 +114,10 @@ export function parseConvertArgs(args: string[]): ConvertArgs | null {
     } else if (arg === '--help' || arg === '-h') {
       printConvertHelp();
       process.exit(0);
+    } else if (arg.startsWith('-')) {
+      console.error(`Unknown option: ${arg}`);
+      console.log('Use --help for usage information');
+      return null;
     } else if (!arg?.startsWith('-')) {
       // Positional argument is the input file
       input = arg;

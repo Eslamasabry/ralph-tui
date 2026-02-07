@@ -167,6 +167,7 @@ export class RemoteClient {
   private ws: WebSocket | null = null;
   private host: string;
   private port: number;
+  private secure: boolean;
   /** Server token for initial authentication (long-lived, 90 days) */
   private serverToken: string;
   private eventHandler: RemoteClientEventHandler;
@@ -204,13 +205,20 @@ export class RemoteClient {
     port: number,
     token: string,
     eventHandler: RemoteClientEventHandler,
-    reconnectConfig: Partial<ReconnectConfig> = {}
+    options: Partial<ReconnectConfig> & { secure?: boolean } = {}
   ) {
+    const { secure = false, ...reconnectConfig } = options;
     this.host = host;
     this.port = port;
+    this.secure = secure;
     this.serverToken = token;
     this.eventHandler = eventHandler;
     this.reconnectConfig = { ...DEFAULT_RECONNECT_CONFIG, ...reconnectConfig };
+  }
+
+  private getWebSocketUrl(): string {
+    const protocol = this.secure ? 'wss' : 'ws';
+    return `${protocol}://${this.host}:${this.port}`;
   }
 
   /**
@@ -258,7 +266,7 @@ export class RemoteClient {
 
     return new Promise<void>((resolve, reject) => {
       try {
-        const url = `ws://${this.host}:${this.port}`;
+        const url = this.getWebSocketUrl();
         this.ws = new WebSocket(url);
 
         this.ws.onopen = () => {
@@ -957,7 +965,7 @@ export class RemoteClient {
    */
   private async attemptReconnect(): Promise<void> {
     try {
-      const url = `ws://${this.host}:${this.port}`;
+      const url = this.getWebSocketUrl();
       this.ws = new WebSocket(url);
 
       this.ws.onopen = () => {

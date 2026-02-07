@@ -756,8 +756,8 @@ export function ActivityView({
                   _____________
                  {'<'}_____________{'>'}
                 </text>
-                <text fg={colors.fg.secondary}>Agent Idle</text>
-                <text fg={colors.fg.dim}>Press 's' to start execution</text>
+                <text fg={colors.fg.secondary}>No activity yet.</text>
+                <text fg={colors.accent.primary}>Press 's' to start execution.</text>
               </box>
             )}
           </box>

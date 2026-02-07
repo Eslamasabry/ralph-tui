@@ -9,6 +9,8 @@ import type { RalphConfig } from '../../config/types.js';
 import type { FormattedSegment } from '../../plugins/agents/output-formatting.js';
 import { buildAgentEnv } from '../agent-env.js';
 
+const PROMISE_COMPLETE_PATTERN = /<promise>\s*COMPLETE\s*<\/promise>/i;
+
 export interface WorkerCallbacks {
   onStdout?: (data: string) => void;
   onStdoutSegments?: (segments: FormattedSegment[]) => void;
@@ -92,7 +94,9 @@ export class ParallelWorker {
       });
 
       const result = await handle.promise;
-      const completed = /<promise>\s*COMPLETE\s*<\/promise>/i.test(result.stdout);
+      const combinedOutput = `${result.stdout}\n${result.stderr}`;
+      const completed =
+        result.status === 'completed' && PROMISE_COMPLETE_PATTERN.test(combinedOutput);
 
       return { result, completed };
     } finally {

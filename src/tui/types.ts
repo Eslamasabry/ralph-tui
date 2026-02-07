@@ -255,6 +255,8 @@ export interface TaskDetailViewProps {
 export interface FooterProps {
   /** Current Ralph version (e.g., "0.3.0") */
   version?: string;
+  /** Dynamic keyboard hint line for active context. */
+  shortcutHints?: string;
   /** Sandbox mode display string (e.g., "sandbox", "sandbox (no-net)") */
   sandboxMode?: string | null;
   /** Remote instance alias when viewing remote (e.g., "prod") */

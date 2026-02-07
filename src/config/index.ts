@@ -85,7 +85,6 @@ interface LoadConfigResult {
  */
 async function loadConfigFile(configPath: string): Promise<LoadConfigResult> {
   try {
-    await access(configPath, constants.R_OK);
     const content = await readFile(configPath, 'utf-8');
 
     // Handle empty file
@@ -93,7 +92,18 @@ async function loadConfigFile(configPath: string): Promise<LoadConfigResult> {
       return { config: {}, exists: true };
     }
 
-    const parsed = parseToml(content);
+    let parsed: unknown;
+    try {
+      parsed = parseToml(content);
+    } catch (error) {
+      return {
+        config: {},
+        exists: true,
+        errors:
+          `Invalid TOML in ${configPath}:\n` +
+          `  ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
 
     // Validate with Zod
     const result: ConfigParseResult = validateStoredConfig(parsed);
@@ -103,9 +113,18 @@ async function loadConfigFile(configPath: string): Promise<LoadConfigResult> {
     }
 
     return { config: result.data as StoredConfig, exists: true };
-  } catch {
-    // File doesn't exist or can't be read
-    return { config: {}, exists: false };
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (nodeError.code === 'ENOENT') {
+      return { config: {}, exists: false };
+    }
+    return {
+      config: {},
+      exists: true,
+      errors:
+        `Failed to read config file ${configPath}:\n` +
+        `  ${error instanceof Error ? error.message : String(error)}`,
+    };
   }
 }
 
@@ -312,6 +331,59 @@ export function serializeConfig(config: StoredConfig): string {
   return stringifyToml(config);
 }
 
+const FALLBACK_AGENT_PLUGIN_IDS = ['claude', 'opencode', 'droid'] as const;
+const FALLBACK_TRACKER_PLUGIN_IDS = ['beads', 'beads-bv', 'json'] as const;
+
+function getPluginIdList(
+  registry: unknown,
+  fallback: readonly string[]
+): string[] {
+  if (registry && typeof registry === 'object') {
+    const maybeGetRegistered = (registry as { getRegisteredPlugins?: unknown }).getRegisteredPlugins;
+    if (typeof maybeGetRegistered === 'function') {
+      try {
+        const plugins = (
+          maybeGetRegistered as () => Array<{ id?: string }>
+        )();
+        const ids = plugins
+          .map((plugin) => plugin.id)
+          .filter((id): id is string => typeof id === 'string' && id.length > 0);
+        if (ids.length > 0) {
+          return ids;
+        }
+      } catch {
+        // Fallback below.
+      }
+    }
+  }
+
+  return [...fallback];
+}
+
+function pluginExists(
+  registry: unknown,
+  pluginId: string,
+  fallback: readonly string[]
+): boolean {
+  const availableIds = getPluginIdList(registry, fallback);
+  if (availableIds.length > 0) {
+    return availableIds.includes(pluginId);
+  }
+
+  if (registry && typeof registry === 'object') {
+    const maybeHasPlugin = (registry as { hasPlugin?: unknown }).hasPlugin;
+    if (typeof maybeHasPlugin === 'function') {
+      try {
+        return Boolean((maybeHasPlugin as (id: string) => unknown)(pluginId));
+      } catch {
+        return false;
+      }
+    }
+  }
+
+  return false;
+}
+
 /**
  * Get default agent configuration based on available plugins
  */
@@ -320,7 +392,7 @@ function getDefaultAgentConfig(
   options: RuntimeOptions
 ): AgentPluginConfig | undefined {
   const registry = getAgentRegistry();
-  const plugins = registry.getRegisteredPlugins();
+  const pluginIds = getPluginIdList(registry, FALLBACK_AGENT_PLUGIN_IDS);
 
   // Helper to apply shorthand config fields to agent config
   const applyAgentOptions = (config: AgentPluginConfig): AgentPluginConfig => {
@@ -378,7 +450,7 @@ function getDefaultAgentConfig(
     if (found) return applyAgentOptions(found);
 
     // Create minimal config for the specified plugin
-    if (registry.hasPlugin(options.agent)) {
+    if (pluginExists(registry, options.agent, FALLBACK_AGENT_PLUGIN_IDS)) {
       return applyAgentOptions({
         name: options.agent,
         plugin: options.agent,
@@ -399,7 +471,7 @@ function getDefaultAgentConfig(
     if (found) return applyAgentOptions(found);
 
     // Create config for the shorthand plugin
-    if (registry.hasPlugin(shorthandAgent)) {
+    if (pluginExists(registry, shorthandAgent, FALLBACK_AGENT_PLUGIN_IDS)) {
       return applyAgentOptions({
         name: shorthandAgent,
         plugin: shorthandAgent,
@@ -423,11 +495,13 @@ function getDefaultAgentConfig(
   }
 
   // Fall back to first built-in plugin (claude)
-  const firstPlugin = plugins.find((p) => p.id === 'claude') ?? plugins[0];
-  if (firstPlugin) {
+  const firstPluginId = pluginIds.includes('claude')
+    ? 'claude'
+    : pluginIds[0];
+  if (firstPluginId) {
     return applyAgentOptions({
-      name: firstPlugin.id,
-      plugin: firstPlugin.id,
+      name: firstPluginId,
+      plugin: firstPluginId,
       options: {},
     });
   }
@@ -443,7 +517,7 @@ function getDefaultTrackerConfig(
   options: RuntimeOptions
 ): TrackerPluginConfig | undefined {
   const registry = getTrackerRegistry();
-  const plugins = registry.getRegisteredPlugins();
+  const pluginIds = getPluginIdList(registry, FALLBACK_TRACKER_PLUGIN_IDS);
 
   // Helper to apply trackerOptions shorthand to config
   const applyTrackerOptions = (config: TrackerPluginConfig): TrackerPluginConfig => {
@@ -464,7 +538,7 @@ function getDefaultTrackerConfig(
     if (found) return applyTrackerOptions(found);
 
     // Create minimal config for the specified plugin
-    if (registry.hasPlugin(options.tracker)) {
+    if (pluginExists(registry, options.tracker, FALLBACK_TRACKER_PLUGIN_IDS)) {
       return applyTrackerOptions({
         name: options.tracker,
         plugin: options.tracker,
@@ -483,7 +557,7 @@ function getDefaultTrackerConfig(
     if (found) return applyTrackerOptions(found);
 
     // Create config for the shorthand plugin
-    if (registry.hasPlugin(storedConfig.tracker)) {
+    if (pluginExists(registry, storedConfig.tracker, FALLBACK_TRACKER_PLUGIN_IDS)) {
       return applyTrackerOptions({
         name: storedConfig.tracker,
         plugin: storedConfig.tracker,
@@ -507,11 +581,13 @@ function getDefaultTrackerConfig(
   }
 
   // Fall back to first built-in plugin (beads-bv)
-  const firstPlugin = plugins.find((p) => p.id === 'beads-bv') ?? plugins[0];
-  if (firstPlugin) {
+  const firstPluginId = pluginIds.includes('beads-bv')
+    ? 'beads-bv'
+    : pluginIds[0];
+  if (firstPluginId) {
     return applyTrackerOptions({
-      name: firstPlugin.id,
-      plugin: firstPlugin.id,
+      name: firstPluginId,
+      plugin: firstPluginId,
       options: {},
     });
   }
@@ -547,7 +623,7 @@ export async function buildConfig(
   // This allows `ralph-tui run --prd ./prd.json` to work without needing `--tracker json`
   if (options.prdPath && !options.tracker) {
     const registry = getTrackerRegistry();
-    if (registry.hasPlugin('json')) {
+    if (pluginExists(registry, 'json', FALLBACK_TRACKER_PLUGIN_IDS)) {
       trackerConfig = {
         name: 'json',
         plugin: 'json',
@@ -668,7 +744,7 @@ export async function validateConfig(
 
   // Validate agent plugin exists
   const agentRegistry = getAgentRegistry();
-  if (!agentRegistry.hasPlugin(config.agent.plugin)) {
+  if (!pluginExists(agentRegistry, config.agent.plugin, FALLBACK_AGENT_PLUGIN_IDS)) {
     errors.push(`Agent plugin '${config.agent.plugin}' not found`);
   }
 
@@ -684,7 +760,7 @@ export async function validateConfig(
 
   // Validate tracker plugin exists
   const trackerRegistry = getTrackerRegistry();
-  if (!trackerRegistry.hasPlugin(config.tracker.plugin)) {
+  if (!pluginExists(trackerRegistry, config.tracker.plugin, FALLBACK_TRACKER_PLUGIN_IDS)) {
     errors.push(`Tracker plugin '${config.tracker.plugin}' not found`);
   }
 
@@ -728,7 +804,7 @@ export async function validateConfig(
   if (config.agent.fallbackAgents && config.agent.fallbackAgents.length > 0) {
     for (const fallbackName of config.agent.fallbackAgents) {
       // Check if fallback is a known plugin or a configured agent
-      if (!agentRegistry.hasPlugin(fallbackName)) {
+      if (!pluginExists(agentRegistry, fallbackName, FALLBACK_AGENT_PLUGIN_IDS)) {
         warnings.push(
           `Fallback agent '${fallbackName}' not found in available plugins; it may not be installed`
         );

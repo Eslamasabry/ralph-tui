@@ -91,6 +91,11 @@ interface CleanupAction {
 }
 
 /**
+ * Public action shape used by summary overlay tests and rendering.
+ */
+export type SummaryOverlayAction = CleanupAction;
+
+/**
  * Props for the RunSummaryOverlay component
  */
 export interface RunSummaryOverlayProps {
@@ -164,6 +169,77 @@ function getStatusDisplay(status: RalphStatus): { label: string; color: string; 
 }
 
 /**
+ * Build a short plain-language outcome summary.
+ */
+export function getOutcomeSummary(params: {
+	status: RalphStatus;
+	failedTasks: number;
+	pendingMainTasks: number;
+	hasMainSyncFailure: boolean;
+}): { headline: string; detail: string; nextStep: string } {
+	const { status, failedTasks, pendingMainTasks, hasMainSyncFailure } = params;
+	const needsFollowUp = failedTasks > 0 || pendingMainTasks > 0 || hasMainSyncFailure;
+
+	if (status === 'complete' && !needsFollowUp) {
+		return {
+			headline: 'Run finished cleanly.',
+			detail: 'All tracked tasks completed and no follow-up blockers were detected.',
+			nextStep: 'Close this summary and start a new run when ready.',
+		};
+	}
+
+	if (status === 'error') {
+		return {
+			headline: 'Run stopped with issues.',
+			detail: 'One or more tasks failed before the run could finish successfully.',
+			nextStep: 'Review failures below, fix blockers, then rerun.',
+		};
+	}
+
+	return {
+		headline: 'Run finished with follow-up needed.',
+		detail: 'Some work is done, but blockers still need manual action.',
+		nextStep: 'Resolve tasks waiting on main sync and any failures, then continue.',
+	};
+}
+
+/**
+ * Build the list of actions that are truly actionable for the current run summary.
+ */
+export function getAvailableSummaryActions(params: {
+	cleanupConfig?: CleanupConfig;
+	snapshotTag?: string;
+	onCleanupAction?: (actionId: string) => void;
+	onRestoreSnapshot?: () => Promise<void>;
+}): SummaryOverlayAction[] {
+	const { cleanupConfig, snapshotTag, onCleanupAction, onRestoreSnapshot } = params;
+	const allActions: SummaryOverlayAction[] = [
+		{ key: '1', label: 'Sync Main', actionId: 'syncMain' },
+		{ key: '2', label: 'Prune Worktrees', actionId: 'pruneWorktrees' },
+		{ key: '3', label: 'Delete Branches', actionId: 'deleteBranches' },
+		{ key: '4', label: 'Push', actionId: 'push' },
+		{ key: '5', label: 'Restore Snapshot', actionId: 'restoreSnapshot' },
+	];
+
+	return allActions.filter((action) => {
+		if (action.actionId === 'restoreSnapshot') {
+			return Boolean(snapshotTag && onRestoreSnapshot);
+		}
+
+		if (!onCleanupAction) {
+			return false;
+		}
+
+		const config = cleanupConfig?.[action.actionId as keyof CleanupConfig];
+		if (config && typeof config === 'object' && 'enabled' in config) {
+			return (config as { enabled?: boolean }).enabled !== false;
+		}
+
+		return true;
+	});
+}
+
+/**
  * Run Summary Overlay - displays execution outcomes on completion or failure.
  * Shows totals, failures, pending-main tasks, and merge statistics.
  */
@@ -190,32 +266,24 @@ export function RunSummaryOverlay({
 	const [selectedAction, setSelectedAction] = useState(0);
 	const [isRestoring, setIsRestoring] = useState(false);
 	const statusDisplay = getStatusDisplay(status);
+	const hasMainSyncFailure = mainSyncStatus.hasFailure;
+	const outcomeSummary = getOutcomeSummary({
+		status,
+		failedTasks,
+		pendingMainTasks,
+		hasMainSyncFailure,
+	});
 
-	// Calculate actions based on cleanup config
-	const actions = useMemo(() => {
-		const allActions: Array<CleanupAction & { alwaysVisible?: boolean }> = [
-			{ key: '1', label: 'Sync Main', actionId: 'syncMain' },
-			{ key: '2', label: 'Prune Worktrees', actionId: 'pruneWorktrees' },
-			{ key: '3', label: 'Delete Branches', actionId: 'deleteBranches' },
-			{ key: '4', label: 'Push', actionId: 'push' },
-			{ key: '5', label: 'Restore Snapshot', actionId: 'restoreSnapshot', alwaysVisible: true },
-		];
-
-		return allActions.filter((action) => {
-			// Always show actions marked as alwaysVisible
-			if (action.alwaysVisible) {
-				return action.label === 'Restore Snapshot' ? !!snapshotTag : true;
-			}
-			// Filter based on cleanup config
-			const config = cleanupConfig?.[action.actionId as keyof CleanupConfig];
-			// Check if it's an object with enabled property (CleanupActionConfig)
-			if (config && typeof config === 'object' && 'enabled' in config) {
-				return (config as { enabled?: boolean }).enabled !== false;
-			}
-			// Default to enabled if not specified
-			return true;
-		});
-	}, [cleanupConfig, snapshotTag]);
+	const actions = useMemo(
+		() =>
+			getAvailableSummaryActions({
+				cleanupConfig,
+				snapshotTag,
+				onCleanupAction,
+				onRestoreSnapshot,
+			}),
+		[cleanupConfig, onCleanupAction, onRestoreSnapshot, snapshotTag]
+	);
 
 	// Handle keyboard navigation
 	const handleKeyboard = useCallback(
@@ -229,11 +297,13 @@ export function RunSummaryOverlay({
 
 				case 'left':
 				case 'h':
+					if (actions.length === 0) break;
 					setSelectedAction((prev) => Math.max(0, prev - 1));
 					break;
 
 				case 'right':
 				case 'l':
+					if (actions.length === 0) break;
 					setSelectedAction((prev) => Math.min(actions.length - 1, prev + 1));
 					break;
 
@@ -241,7 +311,7 @@ export function RunSummaryOverlay({
 				case 'enter':
 					// Trigger the selected cleanup action or restore snapshot
 					if (!actions[selectedAction]) break;
-					
+
 					// Handle restore snapshot action specially
 					if (actions[selectedAction].label === 'Restore Snapshot' && onRestoreSnapshot) {
 						setIsRestoring(true);
@@ -254,37 +324,45 @@ export function RunSummaryOverlay({
 					break;
 			}
 		},
-		[visible, onClose, actions, selectedAction, onCleanupAction]
+		[visible, onClose, actions, selectedAction, onCleanupAction, onRestoreSnapshot]
 	);
 
 	useKeyboard(handleKeyboard);
 
-  // Reset selection when overlay becomes visible and when actions change
-  useEffect(() => {
-    if (visible) {
-      setSelectedAction(0);
-    }
-  }, [visible, actions.length]);
+	// Reset selection when overlay becomes visible and when actions change
+	useEffect(() => {
+		if (visible) {
+			setSelectedAction(0);
+		}
+	}, [visible, actions.length]);
 
-  if (!visible) {
-    return null;
-  }
+	if (!visible) {
+		return null;
+	}
 
-  const hasFailures = failures.length > 0;
-  const hasPendingMain = pendingMainTasksList.length > 0;
-  const hasMainSyncFailure = mainSyncStatus.hasFailure;
+	const hasFailures = failures.length > 0;
+	const hasPendingMain = pendingMainTasksList.length > 0;
 
-	// Calculate content height based on what we're showing
-	const headerHeight = 1;
-	const statsHeight = 2;
-	const syncStatusHeight = hasMainSyncFailure ? 1 : 0;
-	const snapshotHeight = snapshotTag ? 1 : 0;
-	const failuresHeight = hasFailures ? Math.min(failures.length + 2, 6) : 0;
-	const pendingHeight = hasPendingMain ? Math.min(pendingMainTasksList.length + 2, 4) : 0;
-	const actionsHeight = actions.length > 0 ? 3 : 0; // Increased to show status
-	const footerHeight = 1;
-	const totalHeight =
-		headerHeight + statsHeight + syncStatusHeight + snapshotHeight + failuresHeight + pendingHeight + actionsHeight + footerHeight;
+		// Calculate content height based on what we're showing
+		const headerHeight = 1;
+		const outcomeHeight = 3;
+		const statsHeight = 2;
+		const syncStatusHeight = hasMainSyncFailure ? 1 : 0;
+		const snapshotHeight = snapshotTag ? 1 : 0;
+		const failuresHeight = hasFailures ? Math.min(failures.length + 2, 6) : 0;
+		const pendingHeight = hasPendingMain ? Math.min(pendingMainTasksList.length + 2, 4) : 0;
+		const actionsHeight = actions.length > 0 ? 3 : 0; // Increased to show status
+		const footerHeight = 1;
+		const totalHeight =
+			headerHeight +
+			outcomeHeight +
+			statsHeight +
+			syncStatusHeight +
+			snapshotHeight +
+			failuresHeight +
+			pendingHeight +
+			actionsHeight +
+			footerHeight;
 
 	return (
 		<box
@@ -323,29 +401,44 @@ export function RunSummaryOverlay({
 						paddingRight: 1,
 					}}
 				>
-					<text fg={statusDisplay.color}>Run Summary ({statusDisplay.label})</text>
-				<text fg={colors.fg.muted}>
-					Duration: {formatElapsedTime(elapsedTime)}
-					{epicName ? ` • Epic: ${epicName}` : ''}
-				</text>
-				</box>
+						<text fg={statusDisplay.color}>Run Summary: {statusDisplay.label}</text>
+					<text fg={colors.fg.muted}>
+						Duration: {formatElapsedTime(elapsedTime)}
+						{epicName ? ` • Epic: ${epicName}` : ''}
+					</text>
+					</box>
 
-				{/* Task and Merge Stats */}
-				<box
-					style={{
-						flexDirection: 'column',
-						padding: 1,
+					{/* Outcome summary */}
+					<box
+						style={{
+							flexDirection: 'column',
+							paddingLeft: 1,
+							paddingRight: 1,
+						}}
+					>
+						<text fg={statusDisplay.color}>
+							{statusDisplay.indicator} {outcomeSummary.headline}
+						</text>
+						<text fg={colors.fg.secondary}>{outcomeSummary.detail}</text>
+						<text fg={colors.fg.muted}>Next: {outcomeSummary.nextStep}</text>
+					</box>
+
+					{/* Task and Merge Stats */}
+					<box
+						style={{
+							flexDirection: 'column',
+							padding: 1,
 						gap: 0,
 					}}
 				>
-					{/* Tasks row */}
-					<box style={{ flexDirection: 'row', gap: 2 }}>
-						<text fg={colors.fg.muted}>Tasks: </text>
-						<text fg={colors.fg.primary}>{String(totalTasks)} total</text>
-						<text fg={colors.status.success}>• {String(completedTasks)} done</text>
-						{failedTasks > 0 && <text fg={colors.status.error}>• {String(failedTasks)} failed</text>}
-						{pendingMainTasks > 0 && <text fg={colors.status.warning}>• {String(pendingMainTasks)} pending-main</text>}
-					</box>
+						{/* Tasks row */}
+						<box style={{ flexDirection: 'row', gap: 2 }}>
+							<text fg={colors.fg.muted}>Progress: </text>
+							<text fg={colors.fg.primary}>{String(totalTasks)} total</text>
+							<text fg={colors.status.success}>• {String(completedTasks)} done</text>
+							{failedTasks > 0 && <text fg={colors.status.error}>• {String(failedTasks)} failed</text>}
+							{pendingMainTasks > 0 && <text fg={colors.status.warning}>• {String(pendingMainTasks)} awaiting main sync</text>}
+						</box>
 
 					{/* Merge stats row */}
 					<box style={{ flexDirection: 'row', gap: 2 }}>
@@ -360,7 +453,9 @@ export function RunSummaryOverlay({
 				{/* Main sync status */}
 				{hasMainSyncFailure && (
 					<box style={{ paddingLeft: 1, paddingRight: 1 }}>
-							<text fg={colors.status.warning}>Main sync failed: <span fg={colors.fg.secondary}>{mainSyncStatus.failureReason}</span></text>
+						<text fg={colors.status.warning}>
+							Main branch sync failed: <span fg={colors.fg.secondary}>{mainSyncStatus.failureReason}</span>
+						</text>
 					</box>
 				)}
 
@@ -415,10 +510,10 @@ export function RunSummaryOverlay({
 				)}
 
 				{/* Pending-main list */}
-				{hasPendingMain && (
-					<box style={{ paddingLeft: 1, paddingRight: 1 }}>
-						<text fg={colors.status.warning}>Pending-main:</text>
-						<box style={{ paddingLeft: 2 }}>
+					{hasPendingMain && (
+						<box style={{ paddingLeft: 1, paddingRight: 1 }}>
+							<text fg={colors.status.warning}>Needs main sync:</text>
+							<box style={{ paddingLeft: 2 }}>
 							{pendingMainTasksList.slice(0, 2).map((pending, index) => (
 								<text key={index} fg={colors.fg.secondary}>
 									- {pending.taskId} ({String(pending.commitCount)} commits)
@@ -463,7 +558,7 @@ export function RunSummaryOverlay({
 								return (
 									<text
 										key={action.key}
-										fg={isSelected ? colors.bg.primary : (isRestoreAction ? getStatusColor(status) : getStatusColor(status))}
+										fg={isSelected ? colors.bg.primary : getStatusColor(status)}
 										bg={isSelected ? colors.accent.primary : undefined}
 									>
 										[{String(index + 1)}]{showLoading ? ' ⟳' : getStatusIcon(status)} {showLoading ? `${action.label}...` : action.label}
@@ -503,8 +598,8 @@ export function RunSummaryOverlay({
 					</box>
 				)}
 
-				{/* Footer */}
-				<box
+					{/* Footer */}
+					<box
 					style={{
 						width: '100%',
 						height: footerHeight,
@@ -514,17 +609,21 @@ export function RunSummaryOverlay({
 						backgroundColor: colors.bg.tertiary,
 						gap: 3,
 					}}
-				>
-					<text fg={colors.fg.muted}>
-						<span fg={colors.accent.primary}>Esc</span> Close
-					</text>
-					<text fg={colors.fg.muted}>
-						<span fg={colors.accent.primary}>←/→</span> Navigate
-					</text>
-					<text fg={colors.fg.muted}>
-						<span fg={colors.accent.primary}>Enter</span> Run Action
-					</text>
-				</box>
+					>
+						<text fg={colors.fg.muted}>
+							<span fg={colors.accent.primary}>Esc</span> Close
+						</text>
+						{actions.length > 0 && (
+							<>
+								<text fg={colors.fg.muted}>
+									<span fg={colors.accent.primary}>←/→</span> Navigate
+								</text>
+								<text fg={colors.fg.muted}>
+									<span fg={colors.accent.primary}>Enter</span> Run Action
+								</text>
+							</>
+						)}
+					</box>
 			</box>
 		</box>
 	);

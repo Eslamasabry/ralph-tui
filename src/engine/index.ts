@@ -189,6 +189,8 @@ export class ExecutionEngine {
   private commitRecoveryAttempts: Map<string, number> = new Map();
   /** Main sync worktree for fast-forward syncs to main branch */
   private mainSyncWorktree: MainSyncWorktree | null = null;
+  /** Main sync is only enabled when cwd is a git repository */
+  private mainSyncEnabled = true;
   /** Track tasks pending main sync (blocked until main sync succeeds) */
   private pendingMainSyncTasks: Map<string, { task: TrackerTask; workerId: string }> = new Map();
   /** Timestamp of last main sync attempt (for rate limiting retries) */
@@ -289,10 +291,22 @@ export class ExecutionEngine {
 
     this.startTrackerRealtimeWatcher();
 
-    // Initialize main sync worktree for fast-forward syncs
-    this.mainSyncWorktree = new MainSyncWorktree({
-      repoRoot: this.config.cwd,
-    });
+    // Initialize main sync worktree only when cwd is a git repository.
+    // Tests and some workflows use non-git temp directories where main sync is not applicable.
+    if (await this.isGitRepository()) {
+      this.mainSyncEnabled = true;
+      this.mainSyncWorktree = new MainSyncWorktree({
+        repoRoot: this.config.cwd,
+      });
+    } else {
+      this.mainSyncEnabled = false;
+      this.mainSyncWorktree = null;
+      this.emit({
+        type: 'main-sync-skipped',
+        timestamp: new Date().toISOString(),
+        reason: 'Main sync disabled: current working directory is not a git repository',
+      });
+    }
   }
 
   private startTrackerRealtimeWatcher(): void {
@@ -528,48 +542,48 @@ export class ExecutionEngine {
       throw new Error('Engine not initialized');
     }
 
-    if (await this.isRepoDirty()) {
-      const changed = await this.getChangedFiles();
-      const sample = changed.slice(0, 8).join(', ');
-      const suffix = changed.length > 8 ? ` (and ${changed.length - 8} more)` : '';
-      throw new Error(
-        `Main worktree is dirty. Clean your repo before running. Changed files: ${sample}${suffix}`
-      );
-    }
-
     this.state.status = 'running';
     this.state.startedAt = new Date().toISOString();
     this.shouldStop = false;
 
-    // Fetch all tasks including completed for TUI display
-    // Open/in_progress tasks are actionable; completed tasks are for historical view
-    const initialTasks = await this.tracker.getTasks({
-      status: ['open', 'in_progress', 'completed'],
-    });
-
-    this.emit({
-      type: 'engine:started',
-      timestamp: new Date().toISOString(),
-      sessionId: '',
-      totalTasks: this.state.totalTasks, // Only counts open/in_progress
-      tasks: initialTasks,
-    });
-
-    // Warn if sandbox network is disabled but agent requires network
-    if (
-      this.config.sandbox?.enabled &&
-      this.config.sandbox?.network === false &&
-      this.agent!.getSandboxRequirements().requiresNetwork
-    ) {
-      this.emit({
-        type: 'engine:warning',
-        timestamp: new Date().toISOString(),
-        code: 'sandbox-network-conflict',
-        message: `Warning: Agent '${this.config.agent.plugin}' requires network access but --no-network is enabled. LLM API calls will fail.`,
-      });
-    }
-
     try {
+      if (await this.isRepoDirty()) {
+        const changed = await this.getChangedFiles();
+        const sample = changed.slice(0, 8).join(', ');
+        const suffix = changed.length > 8 ? ` (and ${changed.length - 8} more)` : '';
+        throw new Error(
+          `Main worktree is dirty. Clean your repo before running. Changed files: ${sample}${suffix}`
+        );
+      }
+
+      // Fetch all tasks including completed for TUI display
+      // Open/in_progress tasks are actionable; completed tasks are for historical view
+      const initialTasks = await this.tracker.getTasks({
+        status: ['open', 'in_progress', 'completed'],
+      });
+
+      this.emit({
+        type: 'engine:started',
+        timestamp: new Date().toISOString(),
+        sessionId: '',
+        totalTasks: this.state.totalTasks, // Only counts open/in_progress
+        tasks: initialTasks,
+      });
+
+      // Warn if sandbox network is disabled but agent requires network
+      if (
+        this.config.sandbox?.enabled &&
+        this.config.sandbox?.network === false &&
+        this.agent!.getSandboxRequirements().requiresNetwork
+      ) {
+        this.emit({
+          type: 'engine:warning',
+          timestamp: new Date().toISOString(),
+          code: 'sandbox-network-conflict',
+          message: `Warning: Agent '${this.config.agent.plugin}' requires network access but --no-network is enabled. LLM API calls will fail.`,
+        });
+      }
+
       await this.runLoop();
     } finally {
       this.state.status = 'idle';
@@ -1049,7 +1063,10 @@ export class ExecutionEngine {
           const handle = this.agent!.execute(prompt, [], {
             cwd: this.config.cwd,
             flags,
-            env: await buildAgentEnv({ cwd: this.config.cwd, agentId: this.config.agent.plugin }),
+            env: await buildAgentEnv({
+              cwd: this.config.cwd,
+              agentId: this.agent?.meta.id ?? this.config.agent.plugin,
+            }),
             sandbox: this.config.sandbox,
             subagentTracing: supportsTracing,
             onJsonlMessage: (message: Record<string, unknown>) => {
@@ -1230,7 +1247,7 @@ export class ExecutionEngine {
 
           // Determine if task was completed (only if no pending recovery or recovery succeeded)
           // Fix 4: Strict completion logic - require explicit <promise>COMPLETE</promise> signal
-          const taskCompleted =
+          let taskCompleted =
             promiseComplete &&
             (!recoveryNeeded || (recoveryResult?.success ?? false));
 
@@ -1255,6 +1272,7 @@ export class ExecutionEngine {
             } else {
               // Main sync failed or was skipped - block the task pending main sync
               console.log(`[main-sync] Task ${task.id} blocked: ${syncResult.reason}`);
+              taskCompleted = false;
 
               // Get pending commits to mark in tracker
               const pendingInfo = await this.getPendingMainCommits();
@@ -2192,10 +2210,35 @@ export class ExecutionEngine {
     * @param args - Git command arguments
     * @returns Object with stdout, stderr, and exitCode
     */
+  private getIsolatedGitEnv(
+    overrides?: Record<string, string | undefined>
+  ): Record<string, string> {
+    const env: Record<string, string> = {};
+    for (const [key, value] of Object.entries(process.env)) {
+      if (value !== undefined && !key.startsWith('GIT_')) {
+        env[key] = value;
+      }
+    }
+
+    env.GIT_TERMINAL_PROMPT = '0';
+
+    if (overrides) {
+      for (const [key, value] of Object.entries(overrides)) {
+        if (value === undefined) {
+          delete env[key];
+        } else {
+          env[key] = value;
+        }
+      }
+    }
+
+    return env;
+  }
+
   private execGit(args: string[]): Promise<{ stdout: string; stderr: string; exitCode: number }> {
     return new Promise((resolve) => {
       const proc = spawn('git', ['-C', this.config.cwd, ...args], {
-        env: { ...process.env },
+        env: this.getIsolatedGitEnv(),
         stdio: ['ignore', 'pipe', 'pipe'],
       });
 
@@ -2218,6 +2261,14 @@ export class ExecutionEngine {
         resolve({ stdout, stderr: err.message, exitCode: 1 });
       });
     });
+  }
+
+  /**
+    * Check if cwd is inside a git worktree.
+    */
+  private async isGitRepository(): Promise<boolean> {
+    const result = await this.execGit(['rev-parse', '--is-inside-work-tree']);
+    return result.exitCode === 0 && result.stdout.trim() === 'true';
   }
 
   /**
@@ -2460,7 +2511,10 @@ export class ExecutionEngine {
     const handle = this.agent!.execute(prompt, [], {
       cwd: this.config.cwd,
       flags,
-      env: await buildAgentEnv({ cwd: this.config.cwd, agentId: this.config.agent.plugin }),
+      env: await buildAgentEnv({
+        cwd: this.config.cwd,
+        agentId: this.agent?.meta.id ?? this.config.agent.plugin,
+      }),
       sandbox: this.config.sandbox,
     });
 
@@ -2492,8 +2546,8 @@ export class ExecutionEngine {
    * Returns { success: false, reason } if sync was skipped or failed.
    */
   private async syncMainBranch(): Promise<{ success: boolean; reason?: string; commit?: string }> {
-    if (!this.mainSyncWorktree) {
-      return { success: false, reason: 'Main sync worktree not initialized' };
+    if (!this.mainSyncEnabled || !this.mainSyncWorktree) {
+      return { success: true };
     }
 
     try {
@@ -2679,7 +2733,14 @@ export class ExecutionEngine {
    * Dispose of engine resources
    */
   async dispose(): Promise<void> {
-    await this.stop();
+    if (
+      this.state.status === 'running' ||
+      this.state.status === 'pausing' ||
+      this.state.status === 'paused' ||
+      this.state.status === 'stopping'
+    ) {
+      await this.stop();
+    }
     if (this.trackerRealtimeWatcher) {
       this.trackerRealtimeWatcher.stop();
       this.trackerRealtimeWatcher = null;

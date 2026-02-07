@@ -1053,7 +1053,7 @@ export class RemoteServer {
     const { access, readFile, constants } = await import('node:fs/promises');
 
     const globalPath = join(homedir(), '.config', 'ralph-tui', 'config.toml');
-    const cwd = process.cwd();
+    const cwd = this.options.cwd ?? process.cwd();
     const projectPath = join(cwd, '.ralph-tui', 'config.toml');
 
     let globalExists = false;
@@ -1107,7 +1107,7 @@ export class RemoteServer {
     const { access, readFile, writeFile, mkdir, constants } = await import('node:fs/promises');
     const { parse: parseToml } = await import('smol-toml');
 
-    const cwd = process.cwd();
+    const cwd = this.options.cwd ?? process.cwd();
     let configPath: string;
 
     if (message.scope === 'global') {
@@ -1260,7 +1260,7 @@ export class RemoteServer {
       // Re-auth with existing connection token
       const validation = validateConnectionToken(message.token);
 
-      if (validation.valid) {
+      if (validation.valid && validation.clientId === clientId) {
         clientState.authenticated = true;
         clientState.connectionToken = message.token;
 
@@ -1272,13 +1272,17 @@ export class RemoteServer {
         await this.auditLogger.logAuth(clientId, true, undefined, { tokenType: 'connection' });
       } else {
         // Connection token invalid/expired - client should re-auth with server token
+        const error =
+          !validation.valid
+            ? validation.error ?? 'Connection token invalid'
+            : 'Connection token does not match this client';
         const response = createMessage<AuthResponseMessage>('auth_response', {
           success: false,
-          error: validation.error ?? 'Connection token invalid',
+          error,
         });
         this.send(ws, response);
 
-        await this.auditLogger.logAuth(clientId, false, validation.error ?? 'Connection token invalid');
+        await this.auditLogger.logAuth(clientId, false, error);
       }
     } else {
       // Initial auth with server token

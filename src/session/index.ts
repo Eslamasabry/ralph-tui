@@ -98,8 +98,14 @@ async function readLockFile(cwd: string): Promise<LockFile | null> {
   try {
     const content = await readFile(lockPath, 'utf-8');
     return JSON.parse(content) as LockFile;
-  } catch {
-    return null;
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (nodeError.code === 'ENOENT') {
+      return null;
+    }
+    throw new Error(
+      `Failed to read lock file at ${lockPath}: ${error instanceof Error ? error.message : String(error)}`
+    );
   }
 }
 
@@ -126,8 +132,23 @@ async function readSessionMetadata(
  * Check for existing session and lock status
  */
 export async function checkSession(cwd: string): Promise<SessionCheckResult> {
-  const lock = await readLockFile(cwd);
   const session = await readSessionMetadata(cwd);
+  let lock: LockFile | null = null;
+  try {
+    lock = await readLockFile(cwd);
+  } catch (error) {
+    console.warn(
+      `[session] Lock read failed; treating session as locked to avoid concurrent runs: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+    return {
+      hasSession: session !== null && session.status !== 'completed',
+      session: session ?? undefined,
+      isLocked: true,
+      isStale: false,
+    };
+  }
 
   if (!lock) {
     return {
@@ -216,10 +237,12 @@ export async function createSession(
   options: CreateSessionOptions
 ): Promise<SessionMetadata> {
   await ensureSessionDir(options.cwd);
+  const existingLock = await readLockFile(options.cwd);
+  const hasCurrentProcessLock = existingLock?.pid === process.pid;
 
   const now = new Date().toISOString();
   const session: SessionMetadata = {
-    id: randomUUID(),
+    id: hasCurrentProcessLock ? existingLock.sessionId : randomUUID(),
     status: 'running',
     startedAt: now,
     updatedAt: now,
@@ -234,10 +257,23 @@ export async function createSession(
     cwd: options.cwd,
   };
 
-  await saveSession(session);
+  let lockAcquiredBySession = false;
+  if (!hasCurrentProcessLock) {
+    const acquired = await acquireLock(options.cwd, session.id);
+    if (!acquired) {
+      throw new Error('Failed to acquire session lock');
+    }
+    lockAcquiredBySession = true;
+  }
 
-  // Acquire lock
-  await acquireLock(options.cwd, session.id);
+  try {
+    await saveSession(session);
+  } catch (error) {
+    if (lockAcquiredBySession) {
+      await releaseLock(options.cwd);
+    }
+    throw error;
+  }
 
   return session;
 }

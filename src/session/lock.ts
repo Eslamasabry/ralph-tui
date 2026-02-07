@@ -261,11 +261,12 @@ export async function checkAndCleanStaleLock(
   // Check if process is running
   const processRunning = isProcessRunning(lockStatus.lock.pid);
 
-  // Lock is stale if process is not running OR if it's older than timeout
+  // Only clean locks owned by non-running processes.
+  // Timestamp is used for observability but must never override a live PID check.
   const isStaleByProcess = !processRunning;
   const isStaleByTimestamp = isLockStaleByTimestamp(lockStatus.lock, timeoutMinutes);
 
-  if (isStaleByProcess || isStaleByTimestamp) {
+  if (isStaleByProcess) {
     // Clean the stale lock
     await deleteLockFile(cwd);
     result.cleaned = true;
@@ -279,6 +280,13 @@ export async function checkAndCleanStaleLock(
 
     console.log(
       `[session/lock] Cleaned stale lock (PID: ${lockStatus.lock.pid}, age: ${ageMinutes} minutes, acquiredAt: ${lockStatus.lock.acquiredAt})`
+    );
+  } else if (isStaleByTimestamp) {
+    const acquiredAt = new Date(lockStatus.lock.acquiredAt);
+    const now = new Date();
+    const ageMinutes = Math.round((now.getTime() - acquiredAt.getTime()) / (1000 * 60));
+    console.log(
+      `[session/lock] Lock age exceeded timeout (${ageMinutes} minutes) but process is still running (PID: ${lockStatus.lock.pid}); keeping lock.`
     );
   }
 

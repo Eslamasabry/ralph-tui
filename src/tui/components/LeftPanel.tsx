@@ -138,6 +138,14 @@ export const LeftPanel = memo(function LeftPanel({
 }): ReactNode {
   // Calculate max width for task row content (panel width minus padding and border)
   const maxRowWidth = Math.max(20, width - 4);
+  const remoteStatusText =
+    remoteConnectionStatus === 'connecting'
+      ? 'Connecting...'
+      : remoteConnectionStatus === 'reconnecting'
+        ? 'Reconnecting...'
+        : remoteConnectionStatus === 'disconnected'
+          ? 'Not connected'
+          : '';
 
   // Build indentation map for hierarchical display
   const indentMap = buildIndentMap(tasks);
@@ -166,11 +174,7 @@ export const LeftPanel = memo(function LeftPanel({
           <box style={{ padding: 1, flexDirection: 'column' }}>
             {isViewingRemote && remoteConnectionStatus !== 'connected' ? (
               <>
-                <text fg={colors.fg.muted}>
-                  {remoteConnectionStatus === 'connecting' && 'Connecting...'}
-                  {remoteConnectionStatus === 'reconnecting' && 'Reconnecting...'}
-                  {remoteConnectionStatus === 'disconnected' && 'Not connected'}
-                </text>
+                <text fg={colors.fg.muted}>{remoteStatusText}</text>
                 {remoteConnectionStatus === 'disconnected' && remoteAlias && (
                   <text fg={colors.fg.dim}>
                     {'\n'}Remote "{remoteAlias}" is offline
@@ -178,7 +182,10 @@ export const LeftPanel = memo(function LeftPanel({
                 )}
               </>
             ) : (
-              <text fg={colors.fg.muted}>No tasks loaded</text>
+              <box style={{ flexDirection: 'column' }}>
+                <text fg={colors.fg.muted}>No tasks found.</text>
+                <text fg={colors.accent.primary}>Press 'l' to load an epic.</text>
+              </box>
             )}
           </box>
         ) : (

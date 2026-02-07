@@ -178,17 +178,6 @@ export class DroidAgentPlugin extends BaseAgentPlugin {
       return "'" + s.replace(/'/g, "'\\''") + "'";
     };
 
-    // Full escape using $'...' syntax for strings with newlines/special chars
-    const fullEscape = (s: string): string => {
-      return "$'" + s
-        .replace(/\\/g, '\\\\')     // Backslash first
-        .replace(/'/g, "\\'")       // Single quotes
-        .replace(/\n/g, '\\n')      // Newlines
-        .replace(/\r/g, '\\r')      // Carriage returns
-        .replace(/\t/g, '\\t')      // Tabs
-        + "'";
-    };
-
     let proc;
     if (isWindows) {
       proc = spawn(command, allArgs, {
@@ -201,11 +190,7 @@ export class DroidAgentPlugin extends BaseAgentPlugin {
       // Use 'script' to create a pseudo-TTY that satisfies Ink's requirements
       // script -q: quiet mode (no "Script started" messages)
       //
-      // The prompt (last arg) may contain newlines, so use fullEscape for it.
-      // Other args are simple strings, so use simpleEscape.
-      const cmdParts = [command, ...allArgs.slice(0, -1)].map(simpleEscape);
-      const promptArg = allArgs.length > 0 ? fullEscape(allArgs[allArgs.length - 1]) : '';
-      const droidCmd = promptArg ? [...cmdParts, promptArg].join(' ') : cmdParts.join(' ');
+      const droidCmd = [command, ...allArgs].map(simpleEscape).join(' ');
       // Prefix with cd to ensure correct working directory (script's subshell may not respect cwd)
       // Use stty -echo to prevent the pseudo-TTY from echoing input back as output
       const targetCwd = options?.cwd ?? process.cwd();
@@ -231,6 +216,7 @@ export class DroidAgentPlugin extends BaseAgentPlugin {
     let stderr = '';
     let interrupted = false;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    let completed = false;
 
     options?.onStart?.(executionId);
 
@@ -247,6 +233,10 @@ export class DroidAgentPlugin extends BaseAgentPlugin {
     });
 
     const complete = (status: AgentExecutionStatus, exitCode?: number, error?: string) => {
+      if (completed) {
+        return;
+      }
+      completed = true;
       if (timeoutId) clearTimeout(timeoutId);
       const endedAt = new Date();
       resolvePromise!({
@@ -301,7 +291,7 @@ export class DroidAgentPlugin extends BaseAgentPlugin {
         }, 5000);
         return true;
       },
-      isRunning: () => !proc.killed,
+      isRunning: () => !completed,
     };
   }
 }

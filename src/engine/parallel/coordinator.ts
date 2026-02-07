@@ -541,7 +541,12 @@ export class ParallelCoordinator {
       this.activeTaskLeases.set(task.id, { workerId: idleWorker.workerId, claimedAt: Date.now() });
       this.taskAffinity.set(task.id, idleWorker.workerId);
       this.emit({ type: 'parallel:task-claimed', timestamp: new Date().toISOString(), workerId: idleWorker.workerId, task });
-      void this.runTaskOnWorker(idleWorker, task);
+      void this.runTaskOnWorker(idleWorker, task).catch((error) => {
+        const reason = error instanceof Error ? error.message : String(error);
+        this.logWarn(
+          `Unhandled worker execution error for ${task.id} on ${idleWorker.workerId}: ${reason}`
+        );
+      });
     }
 
     this.emit({ type: 'parallel:stopped', timestamp: new Date().toISOString() });
@@ -596,6 +601,7 @@ export class ParallelCoordinator {
 
   private async runTaskOnWorker(worker: ParallelWorker, task: TrackerTask): Promise<void> {
     if (!this.tracker) return;
+    const startedAt = new Date();
     try {
       const prompt = await buildParallelPrompt(task, this.config, this.tracker, worker.worktreePath);
       this.logInfo(`Worker ${worker.workerId} starting ${task.id}.`);
@@ -662,6 +668,47 @@ export class ParallelCoordinator {
       this.emit({
         type: 'parallel:worker-idle',
         timestamp: new Date().toISOString(),
+        workerId: worker.workerId,
+      });
+    } catch (error) {
+      const endedAt = new Date();
+      const reason = error instanceof Error ? error.message : String(error);
+      this.logWarn(`Worker ${worker.workerId} crashed on ${task.id}: ${reason}`);
+
+      const failureResult: AgentExecutionResult = {
+        executionId: `parallel-crash-${worker.workerId}-${task.id}-${endedAt.getTime()}`,
+        status: 'failed',
+        stdout: '',
+        stderr: reason,
+        durationMs: endedAt.getTime() - startedAt.getTime(),
+        error: reason,
+        interrupted: false,
+        startedAt: startedAt.toISOString(),
+        endedAt: endedAt.toISOString(),
+      };
+
+      try {
+        await this.handleTaskResult({ task, result: failureResult, completed: false }, worker);
+      } catch (handlerError) {
+        const handlerReason =
+          handlerError instanceof Error ? handlerError.message : String(handlerError);
+        this.logWarn(
+          `Failed handling crash recovery for ${task.id} on ${worker.workerId}: ${handlerReason}`
+        );
+      }
+
+      this.emit({
+        type: 'parallel:task-finished',
+        timestamp: endedAt.toISOString(),
+        workerId: worker.workerId,
+        task,
+        result: failureResult,
+        completed: false,
+      });
+
+      this.emit({
+        type: 'parallel:worker-idle',
+        timestamp: endedAt.toISOString(),
         workerId: worker.workerId,
       });
     } finally {
@@ -1302,16 +1349,28 @@ export class ParallelCoordinator {
   private async processValidationQueue(): Promise<void> {
     if (this.validationRunning) return;
     this.validationRunning = true;
-
-    while (this.validationQueue.length > 0) {
-      const item = this.validationQueue.shift();
-      if (!item) break;
-      this.logInfo(`Validation dequeued (${item.plan.planId}).`);
-      await this.runValidationPlan(item);
+    try {
+      while (this.validationQueue.length > 0) {
+        const item = this.validationQueue.shift();
+        if (!item) break;
+        this.logInfo(`Validation dequeued (${item.plan.planId}).`);
+        try {
+          await this.runValidationPlan(item);
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          this.logWarn(`Validation plan crashed (${item.plan.planId}): ${reason}`);
+          this.emit({
+            type: 'parallel:validation-blocked',
+            timestamp: new Date().toISOString(),
+            planId: item.plan.planId,
+            reason: `Validation execution error: ${reason}`,
+          });
+        }
+      }
+    } finally {
+      this.validationRunning = false;
+      this.logInfo('Validation queue drained.');
     }
-
-    this.validationRunning = false;
-    this.logInfo('Validation queue drained.');
   }
 
   private async runValidationPlan(item: { entry: { task: TrackerTask; workerId: string; commit: string; filesChanged?: string[] }; plan: ValidationPlan; remaining: number }): Promise<void> {
@@ -2258,76 +2317,78 @@ export class ParallelCoordinator {
   private async processMergeQueue(): Promise<void> {
     if (this.merging) return;
     this.merging = true;
+    try {
+      while (this.mergeQueue.length > 0) {
+        const entry = this.mergeQueue.shift();
+        if (!entry) break;
 
-    while (this.mergeQueue.length > 0) {
-      const entry = this.mergeQueue.shift();
-      if (!entry) break;
+        const mergePath = this.mergeWorktreePath ?? this.config.cwd;
 
-      const mergePath = this.mergeWorktreePath ?? this.config.cwd;
-
-      try {
-        const clean = await this.isRepoClean(mergePath);
-        if (!clean) {
-          const reason = 'Merge worktree has uncommitted changes. Resolve before merge.';
-          await this.handleMergeFailure(entry, reason);
-          continue;
-        }
-
-        const filesChanged = entry.filesChanged ?? (await this.getCommitFiles(entry.commit, mergePath));
-        this.logInfo(`Merging ${entry.task.id} (${entry.commit.slice(0, 7)})...`);
-        const result = await this.execGitIn(mergePath, ['cherry-pick', entry.commit]);
-        if (result.exitCode !== 0) {
-          if (this.isEmptyCherryPick(result)) {
-            const skipResult = await this.execGitIn(mergePath, ['cherry-pick', '--skip']);
-            if (skipResult.exitCode !== 0) {
-              await this.execGitIn(mergePath, ['cherry-pick', '--abort']);
-            }
-            this.logInfo(`Cherry-pick empty for ${entry.task.id}; skipping commit.`);
-            await this.markMergeSuccess(entry, false, filesChanged);
+        try {
+          const clean = await this.isRepoClean(mergePath);
+          if (!clean) {
+            const reason = 'Merge worktree has uncommitted changes. Resolve before merge.';
+            await this.handleMergeFailure(entry, reason);
             continue;
           }
 
-          await this.execGitIn(mergePath, ['cherry-pick', '--abort']);
-          const resolved = await this.attemptMergeResolution(entry);
-          if (!resolved.success || !resolved.commit) {
-            const stderr = result.stderr.trim();
-            const reason = resolved.reason ?? (stderr || 'Cherry-pick failed');
-            await this.handleMergeFailure(entry, reason, resolved.conflictFiles);
-            continue;
-          }
-
-          const resolvedResult = await this.execGitIn(mergePath, ['cherry-pick', resolved.commit]);
-          if (resolvedResult.exitCode !== 0) {
-            if (this.isEmptyCherryPick(resolvedResult)) {
+          const filesChanged = entry.filesChanged ?? (await this.getCommitFiles(entry.commit, mergePath));
+          this.logInfo(`Merging ${entry.task.id} (${entry.commit.slice(0, 7)})...`);
+          const result = await this.execGitIn(mergePath, ['cherry-pick', entry.commit]);
+          if (result.exitCode !== 0) {
+            if (this.isEmptyCherryPick(result)) {
               const skipResult = await this.execGitIn(mergePath, ['cherry-pick', '--skip']);
               if (skipResult.exitCode !== 0) {
                 await this.execGitIn(mergePath, ['cherry-pick', '--abort']);
               }
-              this.logInfo(`Resolved cherry-pick empty for ${entry.task.id}; skipping commit.`);
-              await this.markMergeSuccess({ ...entry, commit: resolved.commit }, false, filesChanged, resolved.conflictFiles);
+              this.logInfo(`Cherry-pick empty for ${entry.task.id}; skipping commit.`);
+              await this.markMergeSuccess(entry, false, filesChanged);
               continue;
             }
 
             await this.execGitIn(mergePath, ['cherry-pick', '--abort']);
-            const reason = resolvedResult.stderr.trim() || 'Cherry-pick failed after auto-resolve';
-            await this.handleMergeFailure({ ...entry, commit: resolved.commit }, reason, resolved.conflictFiles);
+            const resolved = await this.attemptMergeResolution(entry);
+            if (!resolved.success || !resolved.commit) {
+              const stderr = result.stderr.trim();
+              const reason = resolved.reason ?? (stderr || 'Cherry-pick failed');
+              await this.handleMergeFailure(entry, reason, resolved.conflictFiles);
+              continue;
+            }
+
+            const resolvedResult = await this.execGitIn(mergePath, ['cherry-pick', resolved.commit]);
+            if (resolvedResult.exitCode !== 0) {
+              if (this.isEmptyCherryPick(resolvedResult)) {
+                const skipResult = await this.execGitIn(mergePath, ['cherry-pick', '--skip']);
+                if (skipResult.exitCode !== 0) {
+                  await this.execGitIn(mergePath, ['cherry-pick', '--abort']);
+                }
+                this.logInfo(`Resolved cherry-pick empty for ${entry.task.id}; skipping commit.`);
+                await this.markMergeSuccess({ ...entry, commit: resolved.commit }, false, filesChanged, resolved.conflictFiles);
+                continue;
+              }
+
+              await this.execGitIn(mergePath, ['cherry-pick', '--abort']);
+              const reason = resolvedResult.stderr.trim() || 'Cherry-pick failed after auto-resolve';
+              await this.handleMergeFailure({ ...entry, commit: resolved.commit }, reason, resolved.conflictFiles);
+              continue;
+            }
+
+            const resolvedFiles = await this.getCommitFiles(resolved.commit, mergePath);
+            const mergedFiles = resolvedFiles.length > 0 ? resolvedFiles : filesChanged;
+            this.logInfo(`Auto-resolved merge for ${entry.task.id} (${resolved.commit.slice(0, 7)}).`);
+            await this.markMergeSuccess({ ...entry, commit: resolved.commit }, true, mergedFiles, resolved.conflictFiles);
             continue;
           }
 
-          const resolvedFiles = await this.getCommitFiles(resolved.commit, mergePath);
-          const mergedFiles = resolvedFiles.length > 0 ? resolvedFiles : filesChanged;
-          this.logInfo(`Auto-resolved merge for ${entry.task.id} (${resolved.commit.slice(0, 7)}).`);
-          await this.markMergeSuccess({ ...entry, commit: resolved.commit }, true, mergedFiles, resolved.conflictFiles);
-          continue;
+          await this.markMergeSuccess(entry, false, filesChanged);
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          await this.handleMergeFailure(entry, `Merge pipeline crashed: ${reason}`);
         }
-
-        await this.markMergeSuccess(entry, false, filesChanged);
-      } finally {
-        // no-op
       }
+    } finally {
+      this.merging = false;
     }
-
-    this.merging = false;
   }
 
   private async collectCommits(task: TrackerTask, workerId: string): Promise<string[]> {
@@ -2820,10 +2881,35 @@ export class ParallelCoordinator {
     return result.stdout.trim();
   }
 
+  private getIsolatedGitEnv(
+    overrides?: Record<string, string | undefined>
+  ): Record<string, string> {
+    const env: Record<string, string> = {};
+    for (const [key, value] of Object.entries(process.env)) {
+      if (value !== undefined && !key.startsWith('GIT_')) {
+        env[key] = value;
+      }
+    }
+
+    env.GIT_TERMINAL_PROMPT = '0';
+
+    if (overrides) {
+      for (const [key, value] of Object.entries(overrides)) {
+        if (value === undefined) {
+          delete env[key];
+        } else {
+          env[key] = value;
+        }
+      }
+    }
+
+    return env;
+  }
+
   private execGitIn(path: string, args: string[]): Promise<{ stdout: string; stderr: string; exitCode: number }> {
     return new Promise((resolve) => {
       const proc = spawn('git', ['-C', path, ...args], {
-        env: { ...process.env },
+        env: this.getIsolatedGitEnv(),
         stdio: ['ignore', 'pipe', 'pipe'],
       });
 

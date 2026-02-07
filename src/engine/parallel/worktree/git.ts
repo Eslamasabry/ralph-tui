@@ -11,6 +11,32 @@ export interface GitExecOptions {
   env?: Record<string, string | undefined>;
 }
 
+function buildIsolatedGitEnv(
+  overrides?: Record<string, string | undefined>
+): Record<string, string> {
+  const env: Record<string, string> = {};
+
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined && !key.startsWith('GIT_')) {
+      env[key] = value;
+    }
+  }
+
+  env.GIT_TERMINAL_PROMPT = '0';
+
+  if (overrides) {
+    for (const [key, value] of Object.entries(overrides)) {
+      if (value === undefined) {
+        delete env[key];
+      } else {
+        env[key] = value;
+      }
+    }
+  }
+
+  return env;
+}
+
 function isTransientGitLockError(stderr: string): boolean {
   const text = stderr.toLowerCase();
   return (
@@ -53,11 +79,7 @@ export async function execGit(
 
 async function execGitOnce(args: string[], opts: GitExecOptions): Promise<GitCommandResult> {
   return new Promise((resolve) => {
-    const env = {
-      ...process.env,
-      GIT_TERMINAL_PROMPT: '0',
-      ...opts.env,
-    };
+    const env = buildIsolatedGitEnv(opts.env);
 
     const proc = spawn('git', args, {
       cwd: opts.cwd,

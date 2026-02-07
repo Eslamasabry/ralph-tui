@@ -6,21 +6,31 @@
 import type { ReactNode } from 'react';
 import { colors, fullKeyboardShortcuts } from '../theme.js';
 
+export interface HelpShortcut {
+  key: string;
+  description: string;
+  category: string;
+}
+
 /**
  * Props for the HelpOverlay component
  */
 export interface HelpOverlayProps {
   /** Whether the overlay is visible */
   visible: boolean;
+  /** Optional active shortcut set for dynamic contexts. */
+  shortcuts?: HelpShortcut[];
 }
 
 /**
  * Group shortcuts by category for display
  */
-function groupShortcutsByCategory(): Map<string, Array<{ key: string; description: string }>> {
+function groupShortcutsByCategory(
+  shortcuts: ReadonlyArray<HelpShortcut>
+): Map<string, Array<{ key: string; description: string }>> {
   const groups = new Map<string, Array<{ key: string; description: string }>>();
 
-  for (const shortcut of fullKeyboardShortcuts) {
+  for (const shortcut of shortcuts) {
     const existing = groups.get(shortcut.category) || [];
     existing.push({ key: shortcut.key, description: shortcut.description });
     groups.set(shortcut.category, existing);
@@ -32,16 +42,23 @@ function groupShortcutsByCategory(): Map<string, Array<{ key: string; descriptio
 /**
  * Help overlay component
  */
-export function HelpOverlay({ visible }: HelpOverlayProps): ReactNode {
+export function HelpOverlay({ visible, shortcuts }: HelpOverlayProps): ReactNode {
   if (!visible) {
     return null;
   }
 
-  const groups = groupShortcutsByCategory();
+  const resolvedShortcuts = (shortcuts?.length ?? 0) > 0
+    ? shortcuts ?? []
+    : fullKeyboardShortcuts.map((shortcut) => ({
+      key: shortcut.key,
+      description: shortcut.description,
+      category: shortcut.category,
+    }));
+  const groups = groupShortcutsByCategory(resolvedShortcuts);
 
   // Calculate max key width for alignment
   let maxKeyWidth = 0;
-  for (const shortcut of fullKeyboardShortcuts) {
+  for (const shortcut of resolvedShortcuts) {
     if (shortcut.key.length > maxKeyWidth) {
       maxKeyWidth = shortcut.key.length;
     }

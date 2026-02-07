@@ -5,7 +5,6 @@
  */
 
 import { readFile, writeFile, access, constants, mkdir, open, unlink } from 'node:fs/promises';
-import { readFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { BaseTrackerPlugin } from '../../base.js';
 import type {
@@ -305,6 +304,7 @@ function storyToTask(story: PrdUserStory, parentName?: string): TrackerTask {
 
 /** Template cache to avoid re-reading on every call */
 let templateCache: string | null = null;
+let templateLoadPromise: Promise<void> | null = null;
 
 /** Fallback template used if external file not found */
 const FALLBACK_TEMPLATE = `## Your Task: {{taskId}} - {{taskTitle}}
@@ -328,6 +328,33 @@ const FALLBACK_TEMPLATE = `## Your Task: {{taskId}} - {{taskTitle}}
 6. Do NOT merge, rebase, or push unless explicitly asked.
 7. Signal completion with: <promise>COMPLETE</promise>
 `;
+
+async function loadTemplateCache(): Promise<void> {
+  if (templateCache !== null) {
+    return;
+  }
+  if (templateLoadPromise) {
+    await templateLoadPromise;
+    return;
+  }
+
+  const templatePath = join(__dirname, 'template.hbs');
+  templateLoadPromise = (async () => {
+    try {
+      templateCache = await readFile(templatePath, 'utf-8');
+    } catch (err) {
+      console.warn(
+        `Warning: Could not read template from ${templatePath}, using fallback template.`,
+        err instanceof Error ? err.message : err
+      );
+      templateCache = FALLBACK_TEMPLATE;
+    } finally {
+      templateLoadPromise = null;
+    }
+  })();
+
+  await templateLoadPromise;
+}
 
 /**
  * JSON tracker plugin implementation.
@@ -415,6 +442,7 @@ export class JsonTrackerPlugin extends BaseTrackerPlugin {
 
   override async initialize(config: Record<string, unknown>): Promise<void> {
     await super.initialize(config);
+    await loadTemplateCache();
 
     if (typeof config.path === 'string') {
       this.filePath = resolve(config.path);
@@ -855,19 +883,11 @@ export class JsonTrackerPlugin extends BaseTrackerPlugin {
       return templateCache;
     }
 
-    const templatePath = join(__dirname, 'template.hbs');
-    try {
-      templateCache = readFileSync(templatePath, 'utf-8');
-      return templateCache;
-    } catch (err) {
-      // Log warning and fall back to embedded template
-      console.warn(
-        `Warning: Could not read template from ${templatePath}, using fallback template.`,
-        err instanceof Error ? err.message : err
-      );
-      templateCache = FALLBACK_TEMPLATE;
-      return templateCache;
-    }
+    // Avoid synchronous disk I/O in render-critical paths.
+    // Kick off async load and return fallback immediately.
+    void loadTemplateCache();
+    templateCache = FALLBACK_TEMPLATE;
+    return templateCache;
   }
 
   /**

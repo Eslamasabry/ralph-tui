@@ -6,7 +6,14 @@
 
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { readFile, writeFile, mkdir, access, constants } from 'node:fs/promises';
+import {
+  readFile,
+  writeFile,
+  mkdir,
+  access,
+  constants,
+  chmod,
+} from 'node:fs/promises';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 
 /**
@@ -18,6 +25,9 @@ export interface RemoteServerConfig {
 
   /** Server port */
   port: number;
+
+  /** Whether to use secure WebSocket transport (wss://) */
+  secure?: boolean;
 
   /** Authentication token for the remote server */
   token: string;
@@ -45,6 +55,8 @@ export interface RemotesConfig {
  */
 const REMOTES_CONFIG_DIR = join(homedir(), '.config', 'ralph-tui');
 const REMOTES_CONFIG_PATH = join(REMOTES_CONFIG_DIR, 'remotes.toml');
+const REMOTES_DIR_MODE = 0o700;
+const REMOTES_FILE_MODE = 0o600;
 
 /**
  * Default empty configuration
@@ -54,6 +66,22 @@ const DEFAULT_REMOTES_CONFIG: RemotesConfig = {
   remotes: {},
 };
 
+async function enforceMode(path: string, mode: number): Promise<void> {
+  try {
+    await chmod(path, mode);
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (
+      nodeError.code === 'ENOSYS' ||
+      nodeError.code === 'EPERM' ||
+      nodeError.code === 'EINVAL'
+    ) {
+      return;
+    }
+    throw error;
+  }
+}
+
 /**
  * Load the remotes configuration from disk.
  * Returns default config if file doesn't exist.
@@ -61,6 +89,8 @@ const DEFAULT_REMOTES_CONFIG: RemotesConfig = {
 export async function loadRemotesConfig(): Promise<RemotesConfig> {
   try {
     await access(REMOTES_CONFIG_PATH, constants.R_OK);
+    await enforceMode(REMOTES_CONFIG_DIR, REMOTES_DIR_MODE);
+    await enforceMode(REMOTES_CONFIG_PATH, REMOTES_FILE_MODE);
     const content = await readFile(REMOTES_CONFIG_PATH, 'utf-8');
 
     // Handle empty file
@@ -86,9 +116,14 @@ export async function loadRemotesConfig(): Promise<RemotesConfig> {
  * Creates the directory if it doesn't exist.
  */
 export async function saveRemotesConfig(config: RemotesConfig): Promise<void> {
-  await mkdir(REMOTES_CONFIG_DIR, { recursive: true });
+  await mkdir(REMOTES_CONFIG_DIR, { recursive: true, mode: REMOTES_DIR_MODE });
+  await enforceMode(REMOTES_CONFIG_DIR, REMOTES_DIR_MODE);
   const toml = stringifyToml(config as unknown as Record<string, unknown>);
-  await writeFile(REMOTES_CONFIG_PATH, toml, 'utf-8');
+  await writeFile(REMOTES_CONFIG_PATH, toml, {
+    encoding: 'utf-8',
+    mode: REMOTES_FILE_MODE,
+  });
+  await enforceMode(REMOTES_CONFIG_PATH, REMOTES_FILE_MODE);
 }
 
 /**
@@ -103,7 +138,8 @@ export async function addRemote(
   alias: string,
   host: string,
   port: number,
-  token: string
+  token: string,
+  secure = false
 ): Promise<{ success: boolean; error?: string }> {
   const config = await loadRemotesConfig();
 
@@ -124,6 +160,7 @@ export async function addRemote(
   config.remotes[alias] = {
     host,
     port,
+    secure,
     token,
     addedAt: new Date().toISOString(),
   };
@@ -187,11 +224,16 @@ export async function updateLastConnected(alias: string): Promise<void> {
  * @returns Parsed host and port
  */
 export function parseHostPort(hostPort: string): { host: string; port: number } | null {
-  const parts = hostPort.split(':');
+  const trimmed = hostPort.trim();
+  const parts = trimmed.split(':');
+  const host = parts[0]?.trim() ?? '';
+  if (!host) {
+    return null;
+  }
 
   if (parts.length === 1) {
     // Just host, use default port
-    return { host: parts[0], port: 7890 };
+    return { host, port: 7890 };
   }
 
   if (parts.length === 2) {
@@ -204,7 +246,7 @@ export function parseHostPort(hostPort: string): { host: string; port: number } 
     if (isNaN(port) || port <= 0 || port > 65535) {
       return null;
     }
-    return { host: parts[0], port };
+    return { host, port };
   }
 
   return null;

@@ -691,6 +691,15 @@ export function createDroidStreamingJsonlParser(): {
   flush: () => DroidJsonlParseResult[];
   getState: () => { messages: DroidJsonlMessage[]; fallback: string[]; costSummary: DroidCostSummary };
 } {
+  const MAX_STREAMING_MESSAGES = 5000;
+  const MAX_STREAMING_FALLBACK_LINES = 1000;
+  const pushBounded = <T>(target: T[], item: T, maxSize: number): void => {
+    target.push(item);
+    if (target.length > maxSize) {
+      target.splice(0, target.length - maxSize);
+    }
+  };
+
   let buffer = '';
   const messages: DroidJsonlMessage[] = [];
   const fallback: string[] = [];
@@ -710,12 +719,12 @@ export function createDroidStreamingJsonlParser(): {
         results.push(result);
 
         if (result.success) {
-          messages.push(result.message);
+          pushBounded(messages, result.message, MAX_STREAMING_MESSAGES);
           if (result.message.cost) {
             costAccumulator.add(result.message.cost);
           }
         } else if (result.raw.trim()) {
-          fallback.push(result.raw);
+          pushBounded(fallback, result.raw, MAX_STREAMING_FALLBACK_LINES);
         }
       }
 
@@ -732,12 +741,12 @@ export function createDroidStreamingJsonlParser(): {
       buffer = '';
 
       if (result.success) {
-        messages.push(result.message);
+        pushBounded(messages, result.message, MAX_STREAMING_MESSAGES);
         if (result.message.cost) {
           costAccumulator.add(result.message.cost);
         }
       } else if (result.raw.trim()) {
-        fallback.push(result.raw);
+        pushBounded(fallback, result.raw, MAX_STREAMING_FALLBACK_LINES);
       }
 
       return [result];
@@ -745,8 +754,8 @@ export function createDroidStreamingJsonlParser(): {
 
     getState(): { messages: DroidJsonlMessage[]; fallback: string[]; costSummary: DroidCostSummary } {
       return {
-        messages,
-        fallback,
+        messages: [...messages],
+        fallback: [...fallback],
         costSummary: costAccumulator.getSummary(),
       };
     },

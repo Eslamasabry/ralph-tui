@@ -445,7 +445,10 @@ export function IterationHistoryView({
               backgroundColor: colors.bg.secondary,
             }}
           >
-            <text fg={colors.fg.muted}>No iterations yet</text>
+            <box style={{ flexDirection: 'column' }}>
+              <text fg={colors.fg.muted}>No iterations yet.</text>
+              <text fg={colors.accent.primary}>Press 's' to start.</text>
+            </box>
           </box>
         ) : (
           displayItems.map((item, index) => {

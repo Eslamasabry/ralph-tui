@@ -42,6 +42,8 @@ export interface CreatePrdArgs {
   prdSkill?: string;
 
   prdSkillSource?: string;
+
+  parseError?: string;
 }
 
 /**
@@ -52,30 +54,70 @@ export function parseCreatePrdArgs(args: string[]): CreatePrdArgs {
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
+    const getRequiredValue = (flag: string): string | null => {
+      const value = args[i + 1];
+      if (!value || value.startsWith('-')) {
+        result.parseError = `Error: ${flag} requires a value`;
+        return null;
+      }
+      i++;
+      return value;
+    };
 
     if (arg === '--cwd' || arg === '-C') {
-      result.cwd = args[++i];
-    } else if (arg === '--output' || arg === '-o') {
-      result.output = args[++i];
-    } else if (arg === '--stories' || arg === '-n') {
-      const count = parseInt(args[++i] ?? '', 10);
-      if (!isNaN(count)) {
-        result.stories = count;
+      const cwdValue = getRequiredValue(arg);
+      if (!cwdValue) {
+        break;
       }
+      result.cwd = cwdValue;
+    } else if (arg === '--output' || arg === '-o') {
+      const outputValue = getRequiredValue(arg);
+      if (!outputValue) {
+        break;
+      }
+      result.output = outputValue;
+    } else if (arg === '--stories' || arg === '-n') {
+      const storiesValue = getRequiredValue(arg);
+      if (!storiesValue) {
+        break;
+      }
+      const count = parseInt(storiesValue, 10);
+      if (isNaN(count) || count <= 0) {
+        result.parseError = 'Error: --stories must be a positive integer';
+        break;
+      }
+      result.stories = count;
     } else if (arg === '--force' || arg === '-f') {
       result.force = true;
     } else if (arg === '--agent' || arg === '-a') {
-      result.agent = args[++i];
-    } else if (arg === '--timeout' || arg === '-t') {
-      const timeout = parseInt(args[++i] ?? '', 10);
-      if (!isNaN(timeout)) {
-        result.timeout = timeout;
+      const agentValue = getRequiredValue(arg);
+      if (!agentValue) {
+        break;
       }
+      result.agent = agentValue;
+    } else if (arg === '--timeout' || arg === '-t') {
+      const timeoutValue = getRequiredValue(arg);
+      if (!timeoutValue) {
+        break;
+      }
+      const timeout = parseInt(timeoutValue, 10);
+      if (isNaN(timeout) || timeout <= 0) {
+        result.parseError = 'Error: --timeout must be a positive integer (milliseconds)';
+        break;
+      }
+      result.timeout = timeout;
     } else if (arg === '--prd-skill') {
-      result.prdSkill = args[++i];
+      const prdSkillValue = getRequiredValue(arg);
+      if (!prdSkillValue) {
+        break;
+      }
+      result.prdSkill = prdSkillValue;
     } else if (arg === '--help' || arg === '-h') {
       printCreatePrdHelp();
       process.exit(0);
+    } else if (arg.startsWith('-')) {
+      result.parseError = `Unknown option: ${arg}`;
+      break;
     }
   }
 
@@ -184,9 +226,8 @@ async function loadPrdSkillSource(
 /**
  * Get the configured agent plugin.
  */
-async function getAgent(agentName?: string): Promise<AgentPlugin | null> {
+async function getAgent(agentName?: string, cwd: string = process.cwd()): Promise<AgentPlugin | null> {
   try {
-    const cwd = process.cwd();
     const storedConfig = await loadStoredConfig(cwd);
 
     // Register built-in agents
@@ -230,7 +271,8 @@ async function getAgent(agentName?: string): Promise<AgentPlugin | null> {
  */
 async function runChatMode(parsedArgs: CreatePrdArgs): Promise<PrdCreationResult | null> {
   // Get agent
-  const agent = await getAgent(parsedArgs.agent);
+  const cwd = parsedArgs.cwd || process.cwd();
+  const agent = await getAgent(parsedArgs.agent, cwd);
   if (!agent) {
     console.error('');
     console.error('Chat mode requires an AI agent. Options:');
@@ -239,7 +281,6 @@ async function runChatMode(parsedArgs: CreatePrdArgs): Promise<PrdCreationResult
     process.exit(1);
   }
 
-  const cwd = parsedArgs.cwd || process.cwd();
   const outputDir = parsedArgs.output || 'tasks';
   const timeout = parsedArgs.timeout == undefined ? 180000 : parsedArgs.timeout;
 
@@ -321,6 +362,12 @@ async function runChatMode(parsedArgs: CreatePrdArgs): Promise<PrdCreationResult
  */
 export async function executeCreatePrdCommand(args: string[]): Promise<void> {
   const parsedArgs = parseCreatePrdArgs(args);
+  if (parsedArgs.parseError) {
+    console.error(parsedArgs.parseError);
+    console.error('');
+    printCreatePrdHelp();
+    process.exit(1);
+  }
   const cwd = parsedArgs.cwd || process.cwd();
 
   // Verify setup is complete before running

@@ -3,8 +3,11 @@
  * Tests cross-platform clipboard write functionality with mocked child processes.
  */
 
-import { describe, test, expect, mock, beforeEach, afterEach } from 'bun:test';
+import { describe, test, expect, mock, beforeEach, afterEach, spyOn } from 'bun:test';
 import { EventEmitter } from 'node:events';
+import * as childProcess from 'node:child_process';
+import * as os from 'node:os';
+import { writeToClipboard } from '../../src/utils/clipboard.js';
 
 // Track what spawn was called with
 let spawnCalls: Array<{ command: string; args: string[] }> = [];
@@ -12,6 +15,8 @@ let mockPlatform = 'darwin';
 let mockSpawnBehavior: 'success' | 'enoent' | 'error' | 'stderr' | 'other-error' = 'success';
 let mockSpawnSequence: Array<'success' | 'enoent' | 'error' | 'stderr' | 'other-error'> = [];
 let spawnCallIndex = 0;
+let spawnSpy: ReturnType<typeof spyOn> | undefined;
+let platformSpy: ReturnType<typeof spyOn> | undefined;
 
 // Create mock stdin
 function createMockStdin() {
@@ -78,28 +83,30 @@ function mockSpawn(command: string, args: string[]) {
   return createMockProcess(behavior);
 }
 
-// Mock the modules before importing clipboard
-mock.module('node:child_process', () => ({
-  spawn: mockSpawn,
-}));
-
-mock.module('node:os', () => ({
-  platform: () => mockPlatform,
-}));
-
-// Import after mocking
-const { writeToClipboard } = await import('../../src/utils/clipboard.js');
-
 describe('clipboard utility', () => {
   beforeEach(() => {
+    mock.restore();
     spawnCalls = [];
     mockPlatform = 'darwin';
     mockSpawnBehavior = 'success';
     mockSpawnSequence = [];
     spawnCallIndex = 0;
+
+    spawnSpy = spyOn(childProcess, 'spawn').mockImplementation(
+      ((command: string, args?: readonly string[]) =>
+        mockSpawn(command, Array.isArray(args) ? [...args] : [])) as unknown as typeof childProcess.spawn
+    );
+    platformSpy = spyOn(os, 'platform').mockImplementation(
+      (() => mockPlatform as NodeJS.Platform) as typeof os.platform
+    );
   });
 
   afterEach(() => {
+    spawnSpy?.mockRestore();
+    platformSpy?.mockRestore();
+    spawnSpy = undefined;
+    platformSpy = undefined;
+    mock.restore();
     spawnCalls = [];
     mockSpawnSequence = [];
     spawnCallIndex = 0;

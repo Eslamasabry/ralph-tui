@@ -6,7 +6,6 @@
  */
 
 import { spawn } from 'node:child_process';
-import { platform } from 'node:os';
 import { BaseAgentPlugin, findCommandPath } from '../base.js';
 import { processAgentEvents, processAgentEventsToSegments, type AgentDisplayEvent } from '../output-formatting.js';
 import type {
@@ -231,10 +230,22 @@ export class OpenCodeAgentPlugin extends BaseAgentPlugin {
     command: string
   ): Promise<{ success: boolean; version?: string; error?: string }> {
     return new Promise((resolve) => {
+      let settled = false;
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
       const proc = spawn(command, ['--version'], {
         stdio: ['ignore', 'pipe', 'pipe'],
-        shell: true,
+        shell: false,
       });
+      const finish = (result: { success: boolean; version?: string; error?: string }): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        if (timeoutId !== null) {
+          clearTimeout(timeoutId);
+        }
+        resolve(result);
+      };
 
       let stdout = '';
       let stderr = '';
@@ -248,7 +259,7 @@ export class OpenCodeAgentPlugin extends BaseAgentPlugin {
       });
 
       proc.on('error', (error) => {
-        resolve({
+        finish({
           success: false,
           error: `Failed to execute: ${error.message}`,
         });
@@ -258,12 +269,12 @@ export class OpenCodeAgentPlugin extends BaseAgentPlugin {
         if (code === 0) {
           // Extract version from output (e.g., "opencode 1.0.5" or just "1.0.5")
           const versionMatch = stdout.match(/(\d+\.\d+\.\d+)/);
-          resolve({
+          finish({
             success: true,
             version: versionMatch?.[1],
           });
         } else {
-          resolve({
+          finish({
             success: false,
             error: stderr || `Exited with code ${code}`,
           });
@@ -271,9 +282,9 @@ export class OpenCodeAgentPlugin extends BaseAgentPlugin {
       });
 
       // Timeout after 5 seconds
-      setTimeout(() => {
+      timeoutId = setTimeout(() => {
         proc.kill();
-        resolve({ success: false, error: 'Timeout waiting for --version' });
+        finish({ success: false, error: 'Timeout waiting for --version' });
       }, 5000);
     });
   }
@@ -323,7 +334,7 @@ export class OpenCodeAgentPlugin extends BaseAgentPlugin {
   }
 
   protected buildArgs(
-    prompt: string,
+    _prompt: string,
     files?: AgentFileContext[],
     _options?: AgentExecuteOptions
   ): string[] {
@@ -358,12 +369,8 @@ export class OpenCodeAgentPlugin extends BaseAgentPlugin {
       }
     }
 
-    if (!this.shouldUseStdin() && prompt) {
-      args.push(prompt);
-    }
-
-    // NOTE: Prompt is passed via stdin on Windows to avoid shell interpretation
-    // issues when shell: true is required for wrapper script execution.
+    // Prompt is always provided via stdin to avoid shell interpretation issues
+    // and large argument payloads on all platforms.
 
     return args;
   }
@@ -378,14 +385,7 @@ export class OpenCodeAgentPlugin extends BaseAgentPlugin {
     _files?: AgentFileContext[],
     _options?: AgentExecuteOptions
   ): string | undefined {
-    if (!this.shouldUseStdin()) {
-      return undefined;
-    }
     return prompt;
-  }
-
-  private shouldUseStdin(): boolean {
-    return platform() === 'win32';
   }
 
   /**

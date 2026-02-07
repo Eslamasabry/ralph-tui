@@ -639,8 +639,17 @@ async function showEpicSelectionTui(
     });
 
     const root = createRoot(renderer);
+    let cleaned = false;
+    let handleSigint: (() => void) | null = null;
 
     const cleanup = () => {
+      if (cleaned) {
+        return;
+      }
+      cleaned = true;
+      if (handleSigint) {
+        process.off('SIGINT', handleSigint);
+      }
       renderer.destroy();
     };
 
@@ -655,7 +664,7 @@ async function showEpicSelectionTui(
     };
 
     // Handle Ctrl+C during epic selection
-    const handleSigint = () => {
+    handleSigint = () => {
       cleanup();
       resolve(undefined);
     };

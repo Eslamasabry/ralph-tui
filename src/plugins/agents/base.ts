@@ -103,6 +103,7 @@ import type { SandboxConfig } from '../../sandbox/types.js';
 interface RunningExecution {
   executionId: string;
   process: ChildProcess;
+  promise: Promise<AgentExecutionResult>;
   startedAt: Date;
   stdout: string;
   stderr: string;
@@ -325,6 +326,7 @@ export abstract class BaseAgentPlugin implements AgentPlugin {
       const execution: RunningExecution = {
         executionId,
         process: proc,
+        promise,
         startedAt,
         stdout: '',
         stderr: '',
@@ -575,10 +577,7 @@ export abstract class BaseAgentPlugin implements AgentPlugin {
     const executionId = this.currentExecutionId;
     return {
       executionId,
-      promise: new Promise((resolve, reject) => {
-        execution.resolve = resolve;
-        execution.reject = reject;
-      }),
+      promise: execution.promise,
       interrupt: () => this.interrupt(executionId),
       isRunning: () => this.executions.has(executionId),
     };

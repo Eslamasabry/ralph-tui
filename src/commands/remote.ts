@@ -21,7 +21,9 @@ interface RemoteCommandOptions {
   alias?: string;
   hostPort?: string;
   token?: string;
+  secure?: boolean;
   help?: boolean;
+  error?: string;
   // push-config options
   scope?: 'global' | 'project';
   preview?: boolean;
@@ -51,24 +53,46 @@ export function parseRemoteArgs(args: string[]): RemoteCommandOptions {
   // Parse remaining args based on subcommand
   for (let i = 1; i < args.length; i++) {
     const arg = args[i];
+    const getRequiredValue = (flag: string): string | null => {
+      const value = args[i + 1];
+      if (!value || value.startsWith('-')) {
+        options.error = `${flag} requires a value`;
+        return null;
+      }
+      i++;
+      return value;
+    };
 
     if (arg === '--help' || arg === '-h') {
       options.help = true;
-    } else if (arg === '--token' && args[i + 1]) {
-      options.token = args[i + 1];
-      i++;
-    } else if (arg === '--scope' && args[i + 1]) {
-      const scopeValue = args[i + 1];
+    } else if (arg === '--token') {
+      const tokenValue = getRequiredValue(arg);
+      if (!tokenValue) {
+        return options;
+      }
+      options.token = tokenValue;
+    } else if (arg === '--secure') {
+      options.secure = true;
+    } else if (arg === '--scope') {
+      const scopeValue = getRequiredValue(arg);
+      if (!scopeValue) {
+        return options;
+      }
       if (scopeValue === 'global' || scopeValue === 'project') {
         options.scope = scopeValue;
+      } else {
+        options.error = `--scope must be "global" or "project" (got "${scopeValue}")`;
+        return options;
       }
-      i++;
     } else if (arg === '--preview') {
       options.preview = true;
     } else if (arg === '--force') {
       options.force = true;
     } else if (arg === '--all') {
       options.all = true;
+    } else if (arg.startsWith('-')) {
+      options.error = `Unknown option: ${arg}`;
+      return options;
     } else if (!arg.startsWith('-')) {
       // Positional arguments
       if (!options.alias) {
@@ -89,7 +113,8 @@ export function parseRemoteArgs(args: string[]): RemoteCommandOptions {
 async function testRemoteConnection(
   host: string,
   port: number,
-  token: string
+  token: string,
+  secure = false
 ): Promise<{ connected: boolean; error?: string; latencyMs?: number }> {
   const startTime = Date.now();
 
@@ -124,7 +149,8 @@ async function testRemoteConnection(
     }, 5000);
 
     try {
-      ws = new WebSocket(`ws://${host}:${port}`);
+      const protocol = secure ? 'wss' : 'ws';
+      ws = new WebSocket(`${protocol}://${host}:${port}`);
 
       ws.onopen = () => {
         // Send auth message
@@ -198,7 +224,13 @@ async function executeRemoteAdd(options: RemoteCommandOptions): Promise<void> {
     process.exit(1);
   }
 
-  const result = await addRemote(options.alias, parsed.host, parsed.port, options.token);
+  const result = await addRemote(
+    options.alias,
+    parsed.host,
+    parsed.port,
+    options.token,
+    options.secure ?? false
+  );
 
   if (!result.success) {
     console.error(`Error: ${result.error}`);
@@ -210,6 +242,7 @@ async function executeRemoteAdd(options: RemoteCommandOptions): Promise<void> {
   console.log('');
   console.log(`  Host: ${parsed.host}`);
   console.log(`  Port: ${parsed.port}`);
+  console.log(`  Transport: ${(options.secure ?? false) ? 'wss://' : 'ws://'}`);
   console.log('');
   console.log(`To test: ralph-tui remote test ${options.alias}`);
   console.log('');
@@ -238,7 +271,12 @@ async function executeRemoteList(): Promise<void> {
 
   // Test connections in parallel for status
   const statusPromises = remotes.map(async ([alias, remote]) => {
-    const status = await testRemoteConnection(remote.host, remote.port, remote.token);
+    const status = await testRemoteConnection(
+      remote.host,
+      remote.port,
+      remote.token,
+      Boolean(remote.secure)
+    );
     return { alias, remote, status };
   });
 
@@ -249,9 +287,10 @@ async function executeRemoteList(): Promise<void> {
     const statusText = status.connected
       ? `connected (${status.latencyMs}ms)`
       : status.error ?? 'disconnected';
+    const protocol = remote.secure ? 'wss' : 'ws';
 
     console.log(`  ${statusIcon} ${alias}`);
-    console.log(`    URL:    ws://${remote.host}:${remote.port}`);
+    console.log(`    URL:    ${protocol}://${remote.host}:${remote.port}`);
     console.log(`    Status: ${statusText}`);
     console.log(`    Token:  ${remote.token.slice(0, 8)}...`);
 
@@ -314,10 +353,16 @@ async function executeRemoteTest(options: RemoteCommandOptions): Promise<void> {
 
   console.log('');
   console.log(`Testing connection to '${options.alias}'...`);
-  console.log(`  URL: ws://${remote.host}:${remote.port}`);
+  const protocol = remote.secure ? 'wss' : 'ws';
+  console.log(`  URL: ${protocol}://${remote.host}:${remote.port}`);
   console.log('');
 
-  const status = await testRemoteConnection(remote.host, remote.port, remote.token);
+  const status = await testRemoteConnection(
+    remote.host,
+    remote.port,
+    remote.token,
+    Boolean(remote.secure)
+  );
 
   if (status.connected) {
     // Update last connected timestamp
@@ -441,7 +486,9 @@ async function executeRemotePushConfig(options: RemoteCommandOptions): Promise<v
     // Connect to remote
     let client: InstanceType<typeof RemoteClient>;
     try {
-      client = new RemoteClient(remote.host, remote.port, remote.token, () => {});
+      client = new RemoteClient(remote.host, remote.port, remote.token, () => {}, {
+        secure: Boolean(remote.secure),
+      });
       await client.connect();
     } catch (error) {
       console.error(`  ✗ Connection failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -572,6 +619,13 @@ async function executeRemotePushConfig(options: RemoteCommandOptions): Promise<v
 export async function executeRemoteCommand(args: string[]): Promise<void> {
   const options = parseRemoteArgs(args);
 
+  if (options.error) {
+    console.error(`Error: ${options.error}`);
+    console.error('');
+    printRemoteHelp();
+    process.exit(1);
+  }
+
   if (options.help || !options.subcommand) {
     printRemoteHelp();
     return;
@@ -622,6 +676,7 @@ Subcommands:
 
 Add Options:
   --token <token>       Authentication token (required)
+  --secure              Use TLS transport (wss://)
 
 Push-Config Options:
   --scope global|project  Which config to push (default: auto-detect)
@@ -631,6 +686,9 @@ Push-Config Options:
 Examples:
   # Add a remote server
   ralph-tui remote add prod server.example.com:7890 --token abc123
+
+  # Add using secure transport (wss://)
+  ralph-tui remote add prod-secure server.example.com:443 --token abc123 --secure
 
   # Add with default port (7890)
   ralph-tui remote add staging staging.local --token xyz789
@@ -663,6 +721,7 @@ Configuration:
     [remotes.prod]
     host = "server.example.com"
     port = 7890
+    secure = false
     token = "your-token-here"
     addedAt = "2026-01-19T00:00:00.000Z"
 

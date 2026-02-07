@@ -211,17 +211,32 @@ export async function executeDoctorCommand(args: string[]): Promise<void> {
 
   // Parse arguments
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--cwd' && args[i + 1]) {
-      cwd = args[i + 1]!;
+    const arg = args[i];
+    if (arg === '--cwd') {
+      const cwdValue = args[i + 1];
+      if (!cwdValue || cwdValue.startsWith('-')) {
+        console.error('Error: --cwd requires a directory path');
+        process.exit(1);
+      }
+      cwd = cwdValue;
       i++;
-    } else if (args[i] === '--json') {
+    } else if (arg === '--json') {
       outputJson = true;
-    } else if (args[i] === '--agent' && args[i + 1]) {
-      agentOverride = args[i + 1];
+    } else if (arg === '--agent') {
+      const agentValue = args[i + 1];
+      if (!agentValue || agentValue.startsWith('-')) {
+        console.error('Error: --agent requires a plugin name');
+        process.exit(1);
+      }
+      agentOverride = agentValue;
       i++;
-    } else if (args[i] === '--help' || args[i] === '-h') {
+    } else if (arg === '--help' || arg === '-h') {
       printDoctorHelp();
       return;
+    } else if (arg.startsWith('-')) {
+      console.error(`Unknown option: ${arg}`);
+      printDoctorHelp();
+      process.exit(1);
     }
   }
 

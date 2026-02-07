@@ -121,9 +121,10 @@ describe('parseRemoteArgs', () => {
       expect(result.scope).toBe('project');
     });
 
-    test('ignores invalid scope values', () => {
+    test('returns error for invalid scope values', () => {
       const result = parseRemoteArgs(['push-config', 'prod', '--scope', 'invalid']);
       expect(result.scope).toBeUndefined();
+      expect(result.error).toContain('--scope must be');
     });
 
     test('parses push-config with --preview', () => {
@@ -149,6 +150,23 @@ describe('parseRemoteArgs', () => {
       expect(result.scope).toBe('global');
       expect(result.preview).toBe(true);
       expect(result.force).toBe(true);
+    });
+
+    test('returns error when --scope is missing a value', () => {
+      const result = parseRemoteArgs(['push-config', 'prod', '--scope']);
+      expect(result.error).toContain('--scope requires a value');
+    });
+  });
+
+  describe('flag validation', () => {
+    test('returns error when --token is missing a value', () => {
+      const result = parseRemoteArgs(['add', 'prod', 'server.com:7890', '--token']);
+      expect(result.error).toContain('--token requires a value');
+    });
+
+    test('returns error for unknown option', () => {
+      const result = parseRemoteArgs(['list', '--wat']);
+      expect(result.error).toContain('Unknown option');
     });
   });
 });

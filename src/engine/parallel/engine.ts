@@ -151,27 +151,39 @@ export class ParallelExecutionEngine implements EngineController {
 
     this.state.status = 'running';
     this.state.startedAt = new Date().toISOString();
+    let startError: unknown;
 
-    const tasks = await this.tracker.getTasks({ status: ['open', 'in_progress', 'completed'] });
-    this.emit({
-      type: 'engine:started',
-      timestamp: new Date().toISOString(),
-      sessionId: '',
-      totalTasks: this.state.totalTasks,
-      tasks,
-    });
+    try {
+      const tasks = await this.tracker.getTasks({ status: ['open', 'in_progress', 'completed'] });
+      this.emit({
+        type: 'engine:started',
+        timestamp: new Date().toISOString(),
+        sessionId: '',
+        totalTasks: this.state.totalTasks,
+        tasks,
+      });
 
-    await this.coordinator.start();
+      await this.coordinator.start();
+    } catch (error) {
+      startError = error;
+      if (!this.stopReason) {
+        this.stopReason = 'error';
+      }
+    } finally {
+      this.state.status = 'idle';
+      this.emit({
+        type: 'engine:stopped',
+        timestamp: new Date().toISOString(),
+        reason: this.stopReason ?? 'completed',
+        totalIterations: this.state.currentIteration,
+        tasksCompleted: this.state.tasksCompleted,
+      });
+      this.stopReason = null;
+    }
 
-    this.state.status = 'idle';
-    this.emit({
-      type: 'engine:stopped',
-      timestamp: new Date().toISOString(),
-      reason: this.stopReason ?? 'completed',
-      totalIterations: this.state.currentIteration,
-      tasksCompleted: this.state.tasksCompleted,
-    });
-    this.stopReason = null;
+    if (startError) {
+      throw startError;
+    }
   }
 
   pause(): void {

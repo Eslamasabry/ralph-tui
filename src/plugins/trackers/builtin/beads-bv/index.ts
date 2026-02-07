@@ -125,13 +125,15 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
  * Cache for the template content to avoid repeated file reads.
  */
 let templateCache: string | null = null;
+const TRACKER_COMMAND_TIMEOUT_MS = 5 * 60 * 1000;
 
 /**
  * Execute a bv command and return the output.
  */
 async function execBv(
   args: string[],
-  cwd?: string
+  cwd?: string,
+  timeoutMs = TRACKER_COMMAND_TIMEOUT_MS
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   return new Promise((resolve) => {
     const proc = spawn('bv', args, {
@@ -142,6 +144,25 @@ async function execBv(
 
     let stdout = '';
     let stderr = '';
+    let settled = false;
+    const settle = (result: { stdout: string; stderr: string; exitCode: number }): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeoutId);
+      resolve(result);
+    };
+
+    const timeoutId = setTimeout(() => {
+      stderr += `bv command timed out after ${timeoutMs}ms`;
+      try {
+        proc.kill('SIGTERM');
+      } catch {
+        // Ignore kill errors
+      }
+      settle({ stdout, stderr, exitCode: 124 });
+    }, timeoutMs);
 
     proc.stdout.on('data', (data: Buffer) => {
       stdout += data.toString();
@@ -152,12 +173,12 @@ async function execBv(
     });
 
     proc.on('close', (code) => {
-      resolve({ stdout, stderr, exitCode: code ?? 1 });
+      settle({ stdout, stderr, exitCode: code ?? 1 });
     });
 
     proc.on('error', (err) => {
       stderr += err.message;
-      resolve({ stdout, stderr, exitCode: 1 });
+      settle({ stdout, stderr, exitCode: 1 });
     });
   });
 }
@@ -167,7 +188,8 @@ async function execBv(
  */
 async function execBd(
   args: string[],
-  cwd?: string
+  cwd?: string,
+  timeoutMs = TRACKER_COMMAND_TIMEOUT_MS
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   return new Promise((resolve) => {
     const proc = spawn('bd', args, {
@@ -178,6 +200,25 @@ async function execBd(
 
     let stdout = '';
     let stderr = '';
+    let settled = false;
+    const settle = (result: { stdout: string; stderr: string; exitCode: number }): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeoutId);
+      resolve(result);
+    };
+
+    const timeoutId = setTimeout(() => {
+      stderr += `bd command timed out after ${timeoutMs}ms`;
+      try {
+        proc.kill('SIGTERM');
+      } catch {
+        // Ignore kill errors
+      }
+      settle({ stdout, stderr, exitCode: 124 });
+    }, timeoutMs);
 
     proc.stdout.on('data', (data: Buffer) => {
       stdout += data.toString();
@@ -188,12 +229,12 @@ async function execBd(
     });
 
     proc.on('close', (code) => {
-      resolve({ stdout, stderr, exitCode: code ?? 1 });
+      settle({ stdout, stderr, exitCode: code ?? 1 });
     });
 
     proc.on('error', (err) => {
       stderr += err.message;
-      resolve({ stdout, stderr, exitCode: 1 });
+      settle({ stdout, stderr, exitCode: 1 });
     });
   });
 }

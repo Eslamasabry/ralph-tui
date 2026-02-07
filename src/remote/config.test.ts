@@ -106,6 +106,11 @@ describe('parseHostPort', () => {
     test('returns null for empty port', () => {
       expect(parseHostPort('host:')).toBeNull();
     });
+
+    test('returns null for empty host', () => {
+      expect(parseHostPort(':7890')).toBeNull();
+      expect(parseHostPort('   :7890')).toBeNull();
+    });
   });
 });
 

@@ -12,11 +12,13 @@ export function parseSetupArgs(args: string[]): {
   force: boolean;
   cwd: string;
   help: boolean;
+  error?: string;
 } {
   const result = {
     force: false,
     cwd: process.cwd(),
     help: false,
+    error: undefined as string | undefined,
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -24,10 +26,19 @@ export function parseSetupArgs(args: string[]): {
 
     if (arg === '--force' || arg === '-f') {
       result.force = true;
-    } else if (arg === '--cwd' && args[i + 1]) {
-      result.cwd = args[++i]!;
+    } else if (arg === '--cwd') {
+      const cwdValue = args[i + 1];
+      if (!cwdValue || cwdValue.startsWith('-')) {
+        result.error = 'Error: --cwd requires a directory path';
+        break;
+      }
+      result.cwd = cwdValue;
+      i++;
     } else if (arg === '--help' || arg === '-h') {
       result.help = true;
+    } else if (arg.startsWith('-')) {
+      result.error = `Unknown option: ${arg}`;
+      break;
     }
   }
 
@@ -74,6 +85,12 @@ export async function executeSetupCommand(args: string[]): Promise<void> {
   if (parsed.help) {
     printSetupHelp();
     return;
+  }
+  if (parsed.error) {
+    printError(parsed.error);
+    console.log('');
+    printSetupHelp();
+    process.exit(1);
   }
 
   const result = await runSetupWizard({
