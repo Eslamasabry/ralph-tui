@@ -605,10 +605,18 @@ export function RunApp({
     onSubagentPanelVisibilityChange(subagentPanelVisible);
   }, [subagentPanelVisible, onSubagentPanelVisibilityChange]);
 
+  const lastReportedTabIndexRef = useRef<number | null>(null);
   useEffect(() => {
-    if (onSelectTab) {
-      onSelectTab(activeTabIndex);
+    if (!onSelectTab) {
+      return;
     }
+
+    if (lastReportedTabIndexRef.current === activeTabIndex) {
+      return;
+    }
+
+    lastReportedTabIndexRef.current = activeTabIndex;
+    onSelectTab(activeTabIndex);
   }, [activeTabIndex, onSelectTab]);
 
   const hasOpenedInitialEpicLoaderRef = useRef(false);

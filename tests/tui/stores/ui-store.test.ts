@@ -117,4 +117,22 @@ describe('ui-store', () => {
     expect(state.scrollPositions.logPane).toBe(42);
     expect(state.scrollLockPerPanel.logPane).toBe('user');
   });
+
+  test('ignores equivalent instance updates to avoid update loops', () => {
+    const store = createUIStore();
+    const before = store.getState();
+    let notifications = 0;
+    const unsubscribe = store.subscribe(() => {
+      notifications += 1;
+    });
+
+    store.dispatch({
+      type: 'ui/set-instances',
+      instances: [{ id: 'local', label: 'Local', isLocal: true, status: 'connected' }],
+    });
+
+    expect(notifications).toBe(0);
+    expect(store.getState()).toBe(before);
+    unsubscribe();
+  });
 });

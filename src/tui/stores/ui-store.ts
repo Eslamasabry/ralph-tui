@@ -264,6 +264,36 @@ function clampTabIndex(index: number, count: number): number {
   return Math.max(0, Math.min(index, count - 1));
 }
 
+function areInstanceTabsEqual(
+  current: readonly InstanceTabState[],
+  next: readonly InstanceTabState[]
+): boolean {
+  if (current === next) {
+    return true;
+  }
+
+  if (current.length !== next.length) {
+    return false;
+  }
+
+  for (let index = 0; index < current.length; index += 1) {
+    const currentTab = current[index];
+    const nextTab = next[index];
+    if (
+      !currentTab ||
+      !nextTab ||
+      currentTab.id !== nextTab.id ||
+      currentTab.label !== nextTab.label ||
+      currentTab.isLocal !== nextTab.isLocal ||
+      currentTab.status !== nextTab.status
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 function getFocusChain(state: Readonly<UIState>, view: ViewMode): PanelId[] {
   switch (view) {
     case 'tasks':
@@ -458,11 +488,23 @@ function uiReducer(state: Readonly<UIState>, action: UIAction): UIState {
       });
 
     case 'ui/set-instances': {
-      const safeInstances = action.instances.length > 0 ? [...action.instances] : [...DEFAULT_UI_STATE.instances];
+      const normalizedInstances = action.instances.length > 0 ? action.instances : DEFAULT_UI_STATE.instances;
+      const nextTabCount = Math.max(1, normalizedInstances.length);
+      const nextSelectedTabIndex = clampTabIndex(state.selectedTabIndex, nextTabCount);
+      const instancesChanged = !areInstanceTabsEqual(state.instances, normalizedInstances);
+
+      if (
+        !instancesChanged &&
+        state.tabCount === nextTabCount &&
+        state.selectedTabIndex === nextSelectedTabIndex
+      ) {
+        return state;
+      }
+
       return applyPatch(state, {
-        instances: safeInstances,
-        tabCount: Math.max(1, safeInstances.length),
-        selectedTabIndex: clampTabIndex(state.selectedTabIndex, Math.max(1, safeInstances.length)),
+        instances: instancesChanged ? [...normalizedInstances] : state.instances,
+        tabCount: nextTabCount,
+        selectedTabIndex: nextSelectedTabIndex,
       });
     }
 
