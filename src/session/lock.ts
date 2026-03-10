@@ -13,8 +13,10 @@ import {
   mkdir,
   access,
   constants,
+  rename,
 } from 'node:fs/promises';
 import { unlinkSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { promptBoolean } from '../setup/prompts.js';
 import type { LockFile } from './types.js';
 
@@ -179,7 +181,87 @@ async function writeLockFile(cwd: string, sessionId: string): Promise<void> {
     hostname: hostname(),
   };
 
-  await writeFile(lockPath, JSON.stringify(lock, null, 2));
+  await writeFile(lockPath, JSON.stringify(lock, null, 2), { flag: 'wx' });
+}
+
+/**
+ * Attempt to create a lock file exclusively.
+ * Returns false when another process created the lock concurrently.
+ */
+async function tryWriteLockFile(cwd: string, sessionId: string): Promise<boolean> {
+  try {
+    await writeLockFile(cwd, sessionId);
+    return true;
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (nodeError.code === 'EEXIST') {
+      return false;
+    }
+    throw error;
+  }
+}
+
+function isSameLockFile(left: LockFile, right: LockFile): boolean {
+  return left.pid === right.pid &&
+    left.sessionId === right.sessionId &&
+    left.acquiredAt === right.acquiredAt &&
+    left.cwd === right.cwd &&
+    left.hostname === right.hostname;
+}
+
+async function restoreClaimedLockFile(
+  lockPath: string,
+  claimedPath: string,
+  claimedContents: string
+): Promise<void> {
+  try {
+    await writeFile(lockPath, claimedContents, { flag: 'wx' });
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (nodeError.code !== 'EEXIST') {
+      throw error;
+    }
+  } finally {
+    try {
+      await unlink(claimedPath);
+    } catch {
+      // Ignore if another cleanup path already removed the temporary claim.
+    }
+  }
+}
+
+/**
+ * Claim the currently observed lock file before replacing it.
+ * This prevents stale-lock cleanup or force takeover from deleting a newer lock
+ * that appeared after the caller's initial check.
+ */
+async function claimLockFile(
+  cwd: string,
+  observedLock: LockFile
+): Promise<boolean> {
+  const lockPath = getLockPath(cwd);
+  const claimedPath = `${lockPath}.${process.pid}.${randomUUID()}.claim`;
+
+  try {
+    await rename(lockPath, claimedPath);
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (nodeError.code === 'ENOENT') {
+      return false;
+    }
+    throw error;
+  }
+
+  const claimedContents = await readFile(claimedPath, 'utf-8');
+  const claimedLock = JSON.parse(claimedContents) as LockFile;
+
+  if (!isSameLockFile(claimedLock, observedLock)) {
+    await restoreClaimedLockFile(lockPath, claimedPath, claimedContents);
+    return false;
+  }
+
+  await unlink(claimedPath);
+  return true;
 }
 
 /**
@@ -356,63 +438,94 @@ export async function acquireLockWithPrompt(
   } = {}
 ): Promise<LockAcquisitionResult> {
   const { force = false, nonInteractive = false } = options;
+  let staleCleanupApproved = false;
 
-  // Check current lock status
-  const lockStatus = await checkLock(cwd);
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const lockStatus = await checkLock(cwd);
 
-  // No lock exists - acquire immediately
-  if (!lockStatus.lock) {
-    await writeLockFile(cwd, sessionId);
-    return { acquired: true };
-  }
+    if (!lockStatus.lock) {
+      const acquired = await tryWriteLockFile(cwd, sessionId);
+      if (acquired) {
+        return { acquired: true };
+      }
+      continue;
+    }
 
-  // Lock exists and is held by a running process
-  if (lockStatus.isLocked && lockStatus.lock.pid !== process.pid && !force) {
-    const pid = lockStatus.lock.pid;
-    return {
-      acquired: false,
-      error: `Ralph already running in this repo (PID: ${pid})`,
-      existingPid: pid,
-    };
-  }
-
-  // Lock exists but process is not running (stale lock)
-  if (lockStatus.isStale) {
-    if (nonInteractive) {
-      // In non-interactive mode, warn and auto-clean
-      console.log(`Warning: Removing stale lock (PID: ${lockStatus.lock.pid})`);
-      await deleteLockFile(cwd);
-      await writeLockFile(cwd, sessionId);
+    if (lockStatus.lock.pid === process.pid && lockStatus.lock.sessionId === sessionId) {
       return { acquired: true };
     }
 
-    // Interactive mode - prompt user
-    const shouldClean = await promptCleanStaleLock(lockStatus.lock);
-
-    if (!shouldClean) {
+    if (lockStatus.isLocked && !force) {
+      const pid = lockStatus.lock.pid;
       return {
         acquired: false,
-        error: 'Stale lock cleanup declined by user',
+        error: `Ralph already running in this repo (PID: ${pid})`,
+        existingPid: pid,
       };
     }
 
-    await deleteLockFile(cwd);
-    await writeLockFile(cwd, sessionId);
+    if (lockStatus.isStale) {
+      if (!staleCleanupApproved) {
+        if (nonInteractive) {
+          staleCleanupApproved = true;
+        } else {
+          const shouldClean = await promptCleanStaleLock(lockStatus.lock);
+          if (!shouldClean) {
+            return {
+              acquired: false,
+              error: 'Stale lock cleanup declined by user',
+            };
+          }
+          staleCleanupApproved = true;
+        }
+      }
+
+      const claimed = await claimLockFile(cwd, lockStatus.lock);
+      if (!claimed) {
+        continue;
+      }
+      if (nonInteractive) {
+        console.log(`Warning: Removing stale lock (PID: ${lockStatus.lock.pid})`);
+      }
+      const acquired = await tryWriteLockFile(cwd, sessionId);
+      if (acquired) {
+        return { acquired: true };
+      }
+      continue;
+    }
+
+    if (force) {
+      const claimed = await claimLockFile(cwd, lockStatus.lock);
+      if (!claimed) {
+        continue;
+      }
+      console.log(`Warning: Forcing lock acquisition (previous PID: ${lockStatus.lock.pid})`);
+      const acquired = await tryWriteLockFile(cwd, sessionId);
+      if (acquired) {
+        return { acquired: true };
+      }
+      continue;
+    }
+  }
+
+  const finalStatus = await checkLock(cwd);
+  if (finalStatus.lock &&
+      finalStatus.lock.pid === process.pid &&
+      finalStatus.lock.sessionId === sessionId) {
     return { acquired: true };
   }
 
-  // Force flag set - override the lock
-  if (force) {
-    console.log(`Warning: Forcing lock acquisition (previous PID: ${lockStatus.lock.pid})`);
-    await deleteLockFile(cwd);
-    await writeLockFile(cwd, sessionId);
-    return { acquired: true };
+  if (finalStatus.lock && finalStatus.isLocked && finalStatus.lock.pid !== process.pid) {
+    return {
+      acquired: false,
+      error: `Ralph already running in this repo (PID: ${finalStatus.lock.pid})`,
+      existingPid: finalStatus.lock.pid,
+    };
   }
 
-  // Should not reach here, but handle gracefully
   return {
     acquired: false,
-    error: 'Unexpected lock state',
+    error: 'Failed to acquire lock due to concurrent changes',
   };
 }
 

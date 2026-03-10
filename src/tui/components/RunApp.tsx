@@ -21,7 +21,7 @@ import { colors } from '../theme.js';
 import { AppShell } from './AppShell.js';
 import { DataSourceProvider, type DataSourceTab } from './DataSourceProvider.js';
 import { ErrorBoundary, type ErrorBoundaryProps } from './ErrorBoundary.js';
-import { KeyboardManager, type KeyboardStores } from './KeyboardManager.js';
+import { KeyboardManager, type KeyboardStores, type RunPhase } from './KeyboardManager.js';
 import type { ConnectionToastMessage } from './Toast.js';
 import { formatConnectionToast } from './Toast.js';
 import {
@@ -133,6 +133,37 @@ function toDataSourceTabs(instanceTabs: InstanceTab[] | undefined): DataSourceTa
     isLocal: tab.isLocal,
     alias: tab.alias,
   }));
+}
+
+interface StartExecutionOptions {
+  previousStatus: RunPhase;
+  startOperation: Promise<void> | void;
+  getCurrentStatus: () => RunPhase;
+  restoreStatus: (status: RunPhase) => void;
+  pushError: (message: string) => void;
+}
+
+export function monitorStartExecution({
+  previousStatus,
+  startOperation,
+  getCurrentStatus,
+  restoreStatus,
+  pushError,
+}: StartExecutionOptions): void {
+  if (!startOperation || typeof (startOperation as Promise<void>).then !== 'function') {
+    restoreStatus(previousStatus);
+    pushError('Engine start is not configured.');
+    return;
+  }
+
+  void Promise.resolve(startOperation).catch((error: unknown) => {
+    if (getCurrentStatus() !== 'selecting') {
+      return;
+    }
+
+    restoreStatus(previousStatus);
+    pushError(error instanceof Error ? error.message : 'Engine failed to start.');
+  });
 }
 
 function createKeyboardStores(
@@ -381,50 +412,34 @@ function createKeyboardStores(
           const previousStatus = stores.phase.getState().status;
           stores.phase.dispatch({ type: 'phase/set-status', status: 'selecting' });
 
-          const startOperation = onStart ? onStart() : engine?.start();
-          if (!startOperation || typeof (startOperation as Promise<void>).then !== 'function') {
-            return;
-          }
-
-          let settled = false;
-          const timeout = setTimeout(() => {
-            if (settled) {
-              return;
-            }
-            settled = true;
+          try {
+            monitorStartExecution({
+              previousStatus,
+              startOperation: onStart ? onStart() : engine?.start(),
+              getCurrentStatus: () => stores.phase.getState().status,
+              restoreStatus: (status) => {
+                stores.phase.dispatch({ type: 'phase/set-status', status });
+              },
+              pushError: (message) => {
+                stores.ui.dispatch({
+                  type: 'ui/push-toast',
+                  toast: {
+                    message,
+                    variant: 'error',
+                  },
+                });
+              },
+            });
+          } catch (error: unknown) {
             stores.phase.dispatch({ type: 'phase/set-status', status: previousStatus });
             stores.ui.dispatch({
               type: 'ui/push-toast',
               toast: {
-                message: 'Engine failed to start.',
+                message: error instanceof Error ? error.message : 'Engine failed to start.',
                 variant: 'error',
               },
             });
-          }, 3000);
-
-          void Promise.resolve(startOperation)
-            .then(() => {
-              if (settled) {
-                return;
-              }
-              settled = true;
-              clearTimeout(timeout);
-            })
-            .catch((error: unknown) => {
-              if (settled) {
-                return;
-              }
-              settled = true;
-              clearTimeout(timeout);
-              stores.phase.dispatch({ type: 'phase/set-status', status: previousStatus });
-              stores.ui.dispatch({
-                type: 'ui/push-toast',
-                toast: {
-                  message: error instanceof Error ? error.message : 'Engine failed to start.',
-                  variant: 'error',
-                },
-              });
-            });
+          }
         },
         pause: () => {
           engine?.pause();

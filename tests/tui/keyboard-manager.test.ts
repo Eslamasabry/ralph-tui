@@ -7,6 +7,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   canPausePhase,
   canResumePhase,
+  getKeyboardBindingsForContext,
   routeKeyboardKey,
   type KeyboardStores,
   type RunPhase,
@@ -175,6 +176,14 @@ describe('routeKeyboardKey', () => {
     expect(recorder.actions).toEqual(['phase:start', 'phase:add:10', 'phase:remove:10']);
   });
 
+  test('allows starting from idle, stopped, and error phases', () => {
+    for (const phase of ['idle', 'stopped', 'error'] satisfies RunPhase[]) {
+      const { stores, recorder } = createKeyboardStores({ phase });
+      expect(routeKeyboardKey({ name: 's' }, stores)).toBe(true);
+      expect(recorder.actions).toEqual(['phase:start']);
+    }
+  });
+
   test('routes help and quit to overlay layer', () => {
     const { stores, recorder } = createKeyboardStores();
 
@@ -202,6 +211,14 @@ describe('routeKeyboardKey', () => {
     expect(swallowed).toBe(true);
     expect(closed).toBe(true);
     expect(recorder.actions).toEqual(['overlay:close']);
+  });
+
+  test('run summary restart closes the overlay before starting again', () => {
+    const { stores, recorder } = createKeyboardStores({ overlay: 'runSummary', phase: 'complete' });
+
+    expect(routeKeyboardKey({ name: 'r' }, stores)).toBe(true);
+
+    expect(recorder.actions).toEqual(['overlay:close', 'phase:start']);
   });
 
   test('routes view-layer keys by context', () => {
@@ -280,5 +297,31 @@ describe('routeKeyboardKey', () => {
 
     expect(handled).toBe(false);
     expect(recorder.actions).toEqual([]);
+  });
+
+  test('help bindings advertise start only for phases that can actually start', () => {
+    const stoppedBindings = getKeyboardBindingsForContext({
+      view: 'tasks',
+      overlay: null,
+      phase: 'stopped',
+      isViewingRemote: false,
+    });
+    const pausedBindings = getKeyboardBindingsForContext({
+      view: 'tasks',
+      overlay: null,
+      phase: 'paused',
+      isViewingRemote: false,
+    });
+
+    expect(stoppedBindings[0]).toEqual({
+      key: 's',
+      description: 'Start/continue',
+      category: 'Execution',
+    });
+    expect(pausedBindings[0]).toEqual({
+      key: 'p',
+      description: 'Resume',
+      category: 'Execution',
+    });
   });
 });

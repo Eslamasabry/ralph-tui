@@ -44,6 +44,10 @@ function toActivityEvent(event: BridgeEvent): ActivityEvent | null {
     return null;
   }
 
+  if (event.type === 'iteration:completed' && event.result.status === 'failed') {
+    return null;
+  }
+
   let category: ActivityEvent['category'] = 'system';
   let severity: ActivityEvent['severity'] = 'info';
   let description: string = event.type;
@@ -108,7 +112,9 @@ function toActivityEvent(event: BridgeEvent): ActivityEvent | null {
       taskTitle = event.task.title;
       break;
     case 'iteration:completed':
-      description = `Iteration ${event.result.iteration} completed for ${event.result.task.id}.`;
+      description = event.result.status === 'interrupted'
+        ? `Iteration ${event.result.iteration} ended without completing ${event.result.task.id}.`
+        : `Iteration ${event.result.iteration} completed for ${event.result.task.id}.`;
       iteration = event.result.iteration;
       taskId = event.result.task.id;
       taskTitle = event.result.task.title;
@@ -313,6 +319,10 @@ export function mapEngineEventToStoreActions(
       if (activityEvent) {
         dispatchHistory({ type: 'history/append-activity', event: activityEvent });
       }
+      dispatchOutput({ type: 'output/set-current-output', output: '' });
+      dispatchOutput({ type: 'output/set-cli-output', output: '' });
+      dispatchOutput({ type: 'output/set-segments', segments: [] });
+      dispatchOutput({ type: 'output/clear-parallel' });
       dispatchPhase({ type: 'phase/set-status', status: 'running' });
       dispatchPhase({ type: 'phase/set-iteration', currentIteration: 0 });
       dispatchPhase({
@@ -325,6 +335,9 @@ export function mapEngineEventToStoreActions(
         type: 'ui/set-tab-count',
         count: Math.max(1, stores.ui.getState().tabCount),
       });
+      if (stores.ui.getState().overlay === 'runSummary') {
+        dispatchUI({ type: 'ui/close-overlay' });
+      }
       dispatchUI({
         type: 'ui/push-toast',
         toast: {
@@ -356,7 +369,11 @@ export function mapEngineEventToStoreActions(
     case 'engine:stopped':
       dispatchPhase({
         type: 'phase/set-status',
-        status: event.reason === 'completed' ? 'complete' : 'stopped',
+        status: event.reason === 'completed'
+          ? 'complete'
+          : event.reason === 'error'
+            ? 'error'
+            : 'stopped',
       });
       dispatchPhase({
         type: 'phase/set-run-timing',
@@ -391,6 +408,7 @@ export function mapEngineEventToStoreActions(
       dispatchOutput({ type: 'output/set-current-output', output: '' });
       dispatchOutput({ type: 'output/set-cli-output', output: '' });
       dispatchOutput({ type: 'output/set-segments', segments: [] });
+      dispatchOutput({ type: 'output/clear-parallel-output', key: event.task.id });
       dispatchSubagent({ type: 'subagent/clear-on-task-switch' });
       return;
 
@@ -463,7 +481,10 @@ export function mapEngineEventToStoreActions(
       return;
 
     case 'iteration:completed':
-      dispatchPhase({ type: 'phase/set-status', status: 'selecting' });
+      dispatchPhase({
+        type: 'phase/set-status',
+        status: event.result.status === 'failed' ? 'error' : 'selecting',
+      });
       dispatchHistory({
         type: 'history/append-iteration',
         iteration: event.result,
@@ -691,6 +712,17 @@ export function mapEngineEventToStoreActions(
         type: 'pipeline/patch-merge-stats',
         patch: { queued: stores.pipeline.getState().mergeStats.queued + 1 },
       });
+      return;
+
+    case 'parallel:task-segments':
+      dispatchOutput({
+        type: 'output/set-parallel-segments',
+        key: event.taskId,
+        segments: event.segments,
+      });
+      if (stores.phase.getState().currentTaskId === event.taskId) {
+        dispatchOutput({ type: 'output/set-segments', segments: event.segments });
+      }
       return;
 
     case 'parallel:merge-succeeded':

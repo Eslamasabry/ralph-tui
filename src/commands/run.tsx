@@ -949,6 +949,66 @@ interface NotificationRunOptions {
   soundMode: NotificationSoundMode;
 }
 
+function toRunningSessionState(state: PersistedSessionState): PersistedSessionState {
+  return {
+    ...state,
+    status: 'running',
+    isPaused: false,
+    pausedAt: undefined,
+  };
+}
+
+function toInterruptedSessionState(state: PersistedSessionState): PersistedSessionState {
+  const clearedState = clearActiveTasks(state);
+  if (clearedState.status === 'completed' || clearedState.status === 'failed') {
+    return clearedState;
+  }
+
+  return {
+    ...clearedState,
+    status: 'interrupted',
+    isPaused: false,
+    pausedAt: undefined,
+  };
+}
+
+function toTerminalSessionState(
+  state: PersistedSessionState,
+  reason: 'completed' | 'max_iterations' | 'interrupted' | 'error' | 'no_tasks'
+): PersistedSessionState {
+  const clearedState = clearActiveTasks(state);
+
+  if (reason === 'completed') {
+    return completeSession(clearedState);
+  }
+
+  if (reason === 'error') {
+    return failSession(clearedState);
+  }
+
+  return toInterruptedSessionState(clearedState);
+}
+
+function getTerminalSessionStatus(
+  state: PersistedSessionState
+): 'completed' | 'failed' | 'interrupted' {
+  if (state.status === 'completed' || state.status === 'failed') {
+    return state.status;
+  }
+
+  return 'interrupted';
+}
+
+async function didRunComplete(engine: EngineController): Promise<boolean> {
+  const tracker = engine.getTracker();
+  if (!tracker) {
+    return false;
+  }
+
+  const remainingTasks = await tracker.getTasks({ status: ['open', 'in_progress', 'blocked'] });
+  return remainingTasks.length === 0;
+}
+
 async function runWithTui(
   engine: EngineController,
   persistedState: PersistedSessionState,
@@ -980,7 +1040,6 @@ async function runWithTui(
   engine.on((event) => {
     if (event.type === 'iteration:completed') {
       currentState = updateSessionAfterIteration(currentState, event.result);
-      // If task was completed, remove it from active tasks
       if (event.result.taskCompleted) {
         currentState = removeActiveTask(currentState, event.result.task.id);
       }
@@ -999,6 +1058,11 @@ async function runWithTui(
       savePersistedSession(currentState).catch(() => {
         // Log but don't fail on save errors
       });
+    } else if (event.type === 'task:blocked') {
+      currentState = removeActiveTask(currentState, event.task.id);
+      savePersistedSession(currentState).catch(() => {
+        // Log but don't fail on save errors
+      });
     } else if (event.type === 'engine:paused') {
       // Save paused state to session file
       currentState = pauseSession(currentState);
@@ -1007,29 +1071,38 @@ async function runWithTui(
       });
     } else if (event.type === 'engine:resumed') {
       // Clear paused state when resuming
-      currentState = { ...currentState, status: 'running', isPaused: false, pausedAt: undefined };
+      currentState = toRunningSessionState(currentState);
       savePersistedSession(currentState).catch(() => {
         // Log but don't fail on save errors
       });
     } else if (event.type === 'engine:started') {
       // Track when engine started for duration calculation
       engineStartTime = new Date();
+      currentState = toRunningSessionState(currentState);
+      savePersistedSession(currentState).catch(() => {
+        // Log but don't fail on save errors
+      });
     } else if (event.type === 'engine:warning') {
       // Log configuration warnings to stderr (visible after TUI exits)
       console.error(`\n⚠️  ${event.message}\n`);
-    } else if (event.type === 'all:complete') {
-      // Send completion notification if enabled
-      if (notificationOptions?.notificationsEnabled && engineStartTime) {
+    } else if (event.type === 'engine:stopped') {
+      engineStarted = false;
+      currentState = toTerminalSessionState(currentState, event.reason);
+      savePersistedSession(currentState).catch(() => {
+        // Log but don't fail on save errors
+      });
+
+      if (event.reason === 'completed' && notificationOptions?.notificationsEnabled && engineStartTime) {
         const durationMs = Date.now() - engineStartTime.getTime();
         sendCompletionNotification({
           durationMs,
-          taskCount: event.totalCompleted,
+          taskCount: event.tasksCompleted,
           sound: notificationOptions.soundMode,
         });
       }
-    } else if (event.type === 'engine:stopped' && event.reason === 'max_iterations') {
+
       // Send max iterations notification if enabled
-      if (notificationOptions?.notificationsEnabled && engineStartTime) {
+      if (event.reason === 'max_iterations' && notificationOptions?.notificationsEnabled && engineStartTime) {
         const durationMs = Date.now() - engineStartTime.getTime();
         const engineState = engine.getState();
         const tasksRemaining = engineState.totalTasks - event.tasksCompleted;
@@ -1041,12 +1114,8 @@ async function runWithTui(
           sound: notificationOptions.soundMode,
         });
       }
-    } else if (event.type === 'iteration:failed' && event.action === 'abort') {
-      // Track the error for notification when engine stops
-      lastError = event.error;
-    } else if (event.type === 'engine:stopped' && event.reason === 'error') {
-      // Send error notification if enabled
-      if (notificationOptions?.notificationsEnabled && engineStartTime) {
+
+      if (event.reason === 'error' && notificationOptions?.notificationsEnabled && engineStartTime) {
         const durationMs = Date.now() - engineStartTime.getTime();
         sendErrorNotification({
           errorSummary: lastError ?? 'Unknown error',
@@ -1055,6 +1124,9 @@ async function runWithTui(
           sound: notificationOptions.soundMode,
         });
       }
+    } else if (event.type === 'iteration:failed') {
+      // Send error notification if enabled
+      lastError = event.error;
     }
   });
 
@@ -1083,7 +1155,7 @@ async function runWithTui(
       }
     }
 
-    // Save current state (may be completed, interrupted, etc.)
+    currentState = toInterruptedSessionState(currentState);
     await savePersistedSession(currentState);
     await cleanup();
     // Resolve the quit promise to let the main function continue
@@ -1119,9 +1191,11 @@ async function runWithTui(
   const handleStart = async (): Promise<void> => {
     if (engineStarted) return; // Prevent double-start
     engineStarted = true;
-    // Start the engine (this runs the loop in the background)
-    // The TUI will show running status via engine events
-    await engine.start();
+    try {
+      await engine.start();
+    } finally {
+      engineStarted = false;
+    }
   };
 
   // Handler to update persisted state and save it
@@ -1242,6 +1316,10 @@ async function runHeadless(
         logger.engineStarted(event.totalTasks);
         // Track when engine started for duration calculation
         engineStartTime = new Date();
+        currentState = toRunningSessionState(currentState);
+        savePersistedSession(currentState).catch(() => {
+          // Silently continue on save errors
+        });
         break;
 
       case 'engine:warning':
@@ -1259,13 +1337,14 @@ async function runHeadless(
         break;
 
       case 'iteration:completed':
-        // Log iteration completion
-        logger.iterationComplete(
-          event.result.iteration,
-          event.result.task.id,
-          event.result.taskCompleted,
-          event.result.durationMs
-        );
+        if (event.result.status !== 'failed') {
+          logger.iterationComplete(
+            event.result.iteration,
+            event.result.task.id,
+            event.result.taskCompleted,
+            event.result.durationMs
+          );
+        }
 
         // Log task completion if applicable
         if (event.result.taskCompleted) {
@@ -1284,6 +1363,13 @@ async function runHeadless(
       case 'task:activated':
         // Track task as active when set to in_progress
         currentState = addActiveTask(currentState, event.task.id);
+        savePersistedSession(currentState).catch(() => {
+          // Silently continue on save errors
+        });
+        break;
+
+      case 'task:blocked':
+        currentState = removeActiveTask(currentState, event.task.id);
         savePersistedSession(currentState).catch(() => {
           // Silently continue on save errors
         });
@@ -1339,7 +1425,7 @@ async function runHeadless(
 
       case 'engine:resumed':
         logger.engineResumed(event.fromIteration);
-        currentState = { ...currentState, status: 'running', isPaused: false, pausedAt: undefined };
+        currentState = toRunningSessionState(currentState);
         savePersistedSession(currentState).catch(() => {
           // Silently continue on save errors
         });
@@ -1347,6 +1433,10 @@ async function runHeadless(
 
       case 'engine:stopped':
         logger.engineStopped(event.reason, event.totalIterations, event.tasksCompleted);
+        currentState = toTerminalSessionState(currentState, event.reason);
+        savePersistedSession(currentState).catch(() => {
+          // Silently continue on save errors
+        });
 
         // Log run summary for audit trail (US-007)
         if (engineStartTime) {
@@ -1370,7 +1460,15 @@ async function runHeadless(
           });
         }
 
-        // Send max iterations notification if enabled
+        if (event.reason === 'completed' && notificationOptions?.notificationsEnabled && engineStartTime) {
+          const durationMs = Date.now() - engineStartTime.getTime();
+          sendCompletionNotification({
+            durationMs,
+            taskCount: event.tasksCompleted,
+            sound: notificationOptions.soundMode,
+          });
+        }
+
         if (event.reason === 'max_iterations' && notificationOptions?.notificationsEnabled && engineStartTime) {
           const durationMs = Date.now() - engineStartTime.getTime();
           const engineState = engine.getState();
@@ -1383,7 +1481,6 @@ async function runHeadless(
             sound: notificationOptions.soundMode,
           });
         }
-        // Send error notification if enabled
         if (event.reason === 'error' && notificationOptions?.notificationsEnabled && engineStartTime) {
           const durationMs = Date.now() - engineStartTime.getTime();
           sendErrorNotification({
@@ -1397,15 +1494,6 @@ async function runHeadless(
 
       case 'all:complete':
         logger.allComplete(event.totalCompleted, event.totalIterations);
-        // Send completion notification if enabled
-        if (notificationOptions?.notificationsEnabled && engineStartTime) {
-          const durationMs = Date.now() - engineStartTime.getTime();
-          sendCompletionNotification({
-            durationMs,
-            taskCount: event.totalCompleted,
-            sound: notificationOptions.soundMode,
-          });
-        }
         break;
 
       case 'task:completed':
@@ -1434,8 +1522,7 @@ async function runHeadless(
       }
     }
 
-    // Save interrupted state
-    currentState = { ...currentState, status: 'interrupted' };
+    currentState = toInterruptedSessionState(currentState);
     await savePersistedSession(currentState);
 
     // Stop remote server if running
@@ -1481,7 +1568,7 @@ async function runHeadless(
       }
     }
 
-    currentState = { ...currentState, status: 'interrupted' };
+    currentState = toInterruptedSessionState(currentState);
     await savePersistedSession(currentState);
 
     // Stop remote server if running
@@ -1812,6 +1899,9 @@ export async function executeRunCommand(args: string[]): Promise<void> {
       'Failed to initialize engine:',
       error instanceof Error ? error.message : error
     );
+    await engine.dispose().catch(() => {
+      // Best-effort cleanup for partially initialized worktrees.
+    });
     await endSession(config.cwd, 'failed');
     await releaseLockNew(config.cwd);
     cleanupLockHandlers();
@@ -1912,6 +2002,9 @@ export async function executeRunCommand(args: string[]): Promise<void> {
         'Failed to start remote listener:',
         error instanceof Error ? error.message : error
       );
+      await engine.dispose().catch(() => {
+        // Best-effort cleanup for partially initialized worktrees.
+      });
       await endSession(config.cwd, 'failed');
       await releaseLockNew(config.cwd);
       cleanupLockHandlers();
@@ -1965,6 +2058,9 @@ export async function executeRunCommand(args: string[]): Promise<void> {
       'Execution error:',
       error instanceof Error ? error.message : error
     );
+    await engine.dispose().catch(() => {
+      // Best-effort cleanup after failed execution startup.
+    });
     // Save failed state
     persistedState = failSession(persistedState);
     await savePersistedSession(persistedState);
@@ -1974,20 +2070,22 @@ export async function executeRunCommand(args: string[]): Promise<void> {
     process.exit(1);
   }
 
-  // Check if all tasks completed successfully
-  const finalState = engine.getState();
-  const allComplete = finalState.tasksCompleted >= finalState.totalTasks ||
-    finalState.status === 'idle';
-
-  if (allComplete) {
-    // Mark as completed and clean up session file
+  const completed = persistedState.status === 'completed' ||
+    (persistedState.status !== 'failed' && await didRunComplete(engine));
+  if (completed && persistedState.status !== 'completed') {
     persistedState = completeSession(persistedState);
     await savePersistedSession(persistedState);
-    // Delete session file on successful completion
+  }
+
+  const terminalStatus = getTerminalSessionStatus(persistedState);
+
+  if (terminalStatus === 'completed') {
     await deletePersistedSession(config.cwd);
     console.log('\nSession completed successfully. Session file cleaned up.');
+  } else if (terminalStatus === 'failed') {
+    await savePersistedSession(persistedState);
+    console.log('\nSession failed. Review the logs before starting a new run.');
   } else {
-    // Save current state (session remains resumable)
     await savePersistedSession(persistedState);
     console.log('\nSession state saved. Use "ralph-tui resume" to continue.');
   }
@@ -1998,7 +2096,7 @@ export async function executeRunCommand(args: string[]): Promise<void> {
   }
 
   // End session and clean up lock
-  await endSession(config.cwd, allComplete ? 'completed' : 'interrupted');
+  await endSession(config.cwd, terminalStatus);
   await releaseLockNew(config.cwd);
   cleanupLockHandlers();
   console.log('\nRalph TUI finished.');

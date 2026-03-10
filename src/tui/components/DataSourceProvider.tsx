@@ -175,7 +175,6 @@ export function DataSourceProvider({
     resolveDataSourceForTab(resolvedTabs[initialTabIndex])
   );
   const listenersRef = useRef<Set<TabSwitchListener>>(new Set());
-  const localSnapshotRef = useRef<DataSourceSnapshot | null>(null);
 
   const subscribeTabSwitch = useCallback((listener: TabSwitchListener) => {
     listenersRef.current.add(listener);
@@ -229,10 +228,6 @@ export function DataSourceProvider({
     const isLocal = currentTab?.isLocal !== false;
 
     if (!isLocal) {
-      if (!localSnapshotRef.current) {
-        localSnapshotRef.current = createDataSourceSnapshot(stores);
-      }
-
       stores.ui.dispatch({
         type: 'ui/push-toast',
         toast: {
@@ -245,23 +240,8 @@ export function DataSourceProvider({
       return;
     }
 
-    const snapshot = localSnapshotRef.current;
-    if (snapshot) {
-      restoreDataSourceSnapshot(stores, snapshot);
-    }
-
     stores.ui.dispatch({ type: 'ui/set-tab-switching', switching: false });
-  }, [
-    activeTabIndex,
-    resolvedTabs,
-    stores.history,
-    stores.output,
-    stores.phase,
-    stores.pipeline,
-    stores.subagent,
-    stores.tasks,
-    stores.ui,
-  ]);
+  }, [activeTabIndex, resolvedTabs, stores.ui]);
 
   const contextValue = useMemo<DataSourceContextValue>(
     () => ({

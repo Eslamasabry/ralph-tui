@@ -274,7 +274,7 @@ export function canResumePhase(phase: RunPhase): boolean {
 }
 
 function canStartPhase(phase: RunPhase): boolean {
-  return phase === 'ready' || phase === 'paused' || phase === 'complete';
+  return phase === 'ready' || phase === 'idle' || phase === 'stopped' || phase === 'complete' || phase === 'error';
 }
 
 function canInterruptPhase(phase: RunPhase): boolean {
@@ -349,7 +349,10 @@ function handleOverlayLayer(input: KeyboardInput, stores: KeyboardStores, overla
 
   if (overlay === 'runSummary') {
     if (name === 'r') {
-      phaseStore.dispatchers.start?.();
+      if (canStartPhase(phaseStore.selectors.getPhase())) {
+        uiStore.dispatchers.closeOverlay?.();
+        phaseStore.dispatchers.start?.();
+      }
       return true;
     }
     if (name === 'e') {

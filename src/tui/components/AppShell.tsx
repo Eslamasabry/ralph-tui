@@ -10,15 +10,16 @@ import { join } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import type { SandboxConfig, SandboxMode } from '../../config/types.js';
 import type { ConnectionStatus, InstanceTab } from '../../remote/client.js';
-import type { IterationStatus, SubagentTreeNode } from '../../engine/types.js';
+import type { EngineStatus, IterationStatus, SubagentTreeNode } from '../../engine/types.js';
 import type { ChatMessage } from '../../chat/types.js';
 import type { StoredConfig } from '../../config/types.js';
 import type { AgentPluginMeta } from '../../plugins/agents/types.js';
 import type { TrackerPluginMeta } from '../../plugins/trackers/types.js';
 import type { TrackerTask } from '../../plugins/trackers/types.js';
 import type { InstanceManager } from '../../remote/instance-manager.js';
+import type { RemoteEngineState } from '../../remote/types.js';
 import { addRemote, getRemote, removeRemote } from '../../remote/config.js';
-import { colors } from '../theme.js';
+import { colors, type RalphStatus } from '../theme.js';
 import { ActiveView, type ViewRegistry } from './ActiveView.js';
 import { ActivityView } from './ActivityView.js';
 import { ChatView } from './ChatView.js';
@@ -63,6 +64,7 @@ import {
   useTuiUIDispatch,
   useTuiUISelector,
 } from '../stores/tui-provider.js';
+import { convertTasksWithDependencyStatus, trackerTaskToTaskItem } from '../stores/task-store.js';
 import { VIEW_TAB_ORDER, type ViewMode } from '../stores/ui-store.js';
 import type { TaskItem } from '../types.js';
 
@@ -139,7 +141,7 @@ export interface AppShellProps {
   resolvedSandboxMode?: Exclude<SandboxMode, 'auto'>;
 }
 
-function phaseToIterationStatus(phase: string): IterationStatus {
+function phaseToIterationStatus(phase: string): IterationStatus | undefined {
   if (phase === 'error') {
     return 'failed';
   }
@@ -149,10 +151,31 @@ function phaseToIterationStatus(phase: string): IterationStatus {
   if (phase === 'paused' || phase === 'stopped') {
     return 'interrupted';
   }
-  if (phase === 'ready' || phase === 'idle') {
+  if (
+    phase === 'running' ||
+    phase === 'executing' ||
+    phase === 'selecting' ||
+    phase === 'pausing'
+  ) {
     return 'running';
   }
-  return 'running';
+  return undefined;
+}
+
+function engineStatusToPhaseStatus(status: EngineStatus): RalphStatus {
+  switch (status) {
+    case 'running':
+      return 'running';
+    case 'pausing':
+      return 'pausing';
+    case 'paused':
+      return 'paused';
+    case 'stopping':
+      return 'stopped';
+    case 'idle':
+    default:
+      return 'idle';
+  }
 }
 
 function toInstanceTabs(instances: InstanceTab[]): InstanceTab[] {
@@ -278,14 +301,14 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: 
  * Main V2 shell that renders the currently selected UIStore view.
  */
 export function AppShell(props: AppShellProps): ReactNode {
-  const phase = useTuiPhaseSelector((state) => state);
+  const localPhase = useTuiPhaseSelector((state) => state);
   const ui = useTuiUISelector((state) => state);
-  const tasksState = useTuiTaskSelector((state) => state);
-  const output = useTuiOutputSelector((state) => state);
-  const rawLog = useTuiRawLog();
-  const history = useTuiHistorySelector((state) => state);
+  const localTasksState = useTuiTaskSelector((state) => state);
+  const localOutput = useTuiOutputSelector((state) => state);
+  const localRawLog = useTuiRawLog();
+  const localHistory = useTuiHistorySelector((state) => state);
   const pipeline = useTuiPipelineSelector((state) => state);
-  const subagent = useTuiSubagentSelector((state) => state);
+  const localSubagent = useTuiSubagentSelector((state) => state);
   const uiDispatch = useTuiUIDispatch();
   const historyDispatch = useTuiHistoryDispatch();
   const pipelineDispatch = useTuiPipelineDispatch();
@@ -299,6 +322,10 @@ export function AppShell(props: AppShellProps): ReactNode {
   const [epicLoaderError, setEpicLoaderError] = useState<string | undefined>(undefined);
 
   const [editingRemote, setEditingRemote] = useState<ExistingRemoteData | undefined>(undefined);
+  const [remoteSnapshot, setRemoteSnapshot] = useState<RemoteEngineState | null>(null);
+  const [remoteTasks, setRemoteTasks] = useState<TrackerTask[] | null>(null);
+  const [remoteStateLoading, setRemoteStateLoading] = useState(false);
+  const [remoteStateError, setRemoteStateError] = useState<string | undefined>(undefined);
 
   const runtimeCwd = props.cwd ?? process.cwd();
 
@@ -325,6 +352,166 @@ export function AppShell(props: AppShellProps): ReactNode {
     return selectedTab?.alias ?? selectedTab?.label;
   }, [isViewingRemote, selectedTab]);
 
+  useEffect(() => {
+    if (!isViewingRemote) {
+      setRemoteSnapshot(null);
+      setRemoteTasks(null);
+      setRemoteStateLoading(false);
+      setRemoteStateError(undefined);
+      return;
+    }
+
+    const instanceManager = props.instanceManager;
+    if (!instanceManager || selectedTab?.status !== 'connected') {
+      setRemoteSnapshot(null);
+      setRemoteTasks(null);
+      setRemoteStateLoading(false);
+      setRemoteStateError(undefined);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadRemoteState = async (showLoading: boolean): Promise<void> => {
+      if (showLoading) {
+        setRemoteStateLoading(true);
+      }
+
+      try {
+        const [nextSnapshot, nextTasks] = await Promise.all([
+          withTimeout(instanceManager.getRemoteState(), 5000, 'Failed to fetch remote state.'),
+          withTimeout(instanceManager.getRemoteTasks(), 5000, 'Failed to fetch remote tasks.'),
+        ]);
+
+        if (cancelled) {
+          return;
+        }
+
+        setRemoteSnapshot(nextSnapshot);
+        setRemoteTasks(nextTasks ?? nextSnapshot?.tasks ?? []);
+        setRemoteStateError(undefined);
+      } catch (error: unknown) {
+        if (cancelled) {
+          return;
+        }
+
+        setRemoteStateError(error instanceof Error ? error.message : 'Failed to fetch remote state.');
+      } finally {
+        if (!cancelled) {
+          setRemoteStateLoading(false);
+        }
+      }
+    };
+
+    setRemoteSnapshot(null);
+    setRemoteTasks(null);
+    setRemoteStateError(undefined);
+    void loadRemoteState(true);
+
+    const interval = setInterval(() => {
+      void loadRemoteState(false);
+    }, 2000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [isViewingRemote, props.instanceManager, selectedTab?.id, selectedTab?.status]);
+
+  const phase = useMemo(() => {
+    if (!isViewingRemote) {
+      return localPhase;
+    }
+
+    const startedAtMs = remoteSnapshot?.startedAt
+      ? new Date(remoteSnapshot.startedAt).getTime()
+      : undefined;
+
+    return {
+      ...localPhase,
+      status: remoteSnapshot ? engineStatusToPhaseStatus(remoteSnapshot.status) : 'idle',
+      currentIteration: remoteSnapshot?.currentIteration ?? 0,
+      maxIterations: remoteSnapshot?.maxIterations ?? 0,
+      currentTaskId: remoteSnapshot?.currentTask?.id,
+      currentTaskTitle: remoteSnapshot?.currentTask?.title,
+      runStartedAtMs: startedAtMs,
+      runEndedAtMs: undefined,
+      activeAgentState: remoteSnapshot?.activeAgent ?? null,
+      rateLimitState: remoteSnapshot?.rateLimitState ?? null,
+      trackerRealtimeStatus: remoteSnapshot?.trackerRealtimeStatus,
+      currentModel: remoteSnapshot?.currentModel,
+    };
+  }, [isViewingRemote, localPhase, remoteSnapshot]);
+
+  const tasksState = useMemo(() => {
+    if (!isViewingRemote) {
+      return localTasksState;
+    }
+
+    const trackerTasks = remoteTasks ?? remoteSnapshot?.tasks ?? [];
+    return {
+      ...localTasksState,
+      tasks: convertTasksWithDependencyStatus(trackerTasks),
+      isLoading: remoteStateLoading,
+      isRefreshing: false,
+    };
+  }, [isViewingRemote, localTasksState, remoteTasks, remoteSnapshot, remoteStateLoading]);
+
+  const output = useMemo(() => {
+    if (!isViewingRemote) {
+      return localOutput;
+    }
+
+    return {
+      ...localOutput,
+      currentOutput: remoteSnapshot?.currentOutput ?? '',
+      currentCliOutput: remoteSnapshot?.currentStderr ?? '',
+      currentSegments: [],
+    };
+  }, [isViewingRemote, localOutput, remoteSnapshot]);
+
+  const rawLog = useMemo(() => {
+    if (!isViewingRemote) {
+      return localRawLog;
+    }
+
+    return remoteSnapshot?.currentStderr || remoteSnapshot?.currentOutput || remoteStateError || '';
+  }, [isViewingRemote, localRawLog, remoteSnapshot, remoteStateError]);
+
+  const history = useMemo(() => {
+    if (!isViewingRemote) {
+      return localHistory;
+    }
+
+    const iterations = remoteSnapshot?.iterations ?? [];
+    const selectedIndex = Math.max(0, Math.min(localHistory.selectedIndex, Math.max(0, iterations.length - 1)));
+    const detailIteration = localHistory.detailIteration
+      ? iterations.find((iteration) => iteration.iteration === localHistory.detailIteration?.iteration) ?? null
+      : null;
+
+    return {
+      ...localHistory,
+      iterations,
+      totalIterations: Math.max(iterations.length, remoteSnapshot?.currentIteration ?? 0),
+      selectedIndex,
+      detailIteration,
+      activityEvents: [],
+    };
+  }, [isViewingRemote, localHistory, remoteSnapshot]);
+
+  const subagent = useMemo(() => {
+    if (!isViewingRemote) {
+      return localSubagent;
+    }
+
+    const remoteTree = remoteSnapshot?.subagentTree ?? [];
+    return {
+      ...localSubagent,
+      remoteTree,
+      tree: remoteTree,
+    };
+  }, [isViewingRemote, localSubagent, remoteSnapshot]);
+
   const visibleTasks = useMemo(() => {
     if (tasksState.showClosedTasks) {
       return tasksState.tasks;
@@ -332,17 +519,49 @@ export function AppShell(props: AppShellProps): ReactNode {
     return tasksState.tasks.filter((task) => task.status !== 'closed');
   }, [tasksState.showClosedTasks, tasksState.tasks]);
 
+  const remoteCurrentTask = useMemo(() => {
+    if (!isViewingRemote || !remoteSnapshot?.currentTask) {
+      return null;
+    }
+
+    return trackerTaskToTaskItem(remoteSnapshot.currentTask);
+  }, [isViewingRemote, remoteSnapshot]);
+
   const selectedTask = useMemo(
-    () => resolveSelectedTask(visibleTasks, ui.selectedTaskId, tasksState.selectedIndex),
-    [visibleTasks, ui.selectedTaskId, tasksState.selectedIndex]
+    () => resolveSelectedTask(visibleTasks, ui.selectedTaskId, tasksState.selectedIndex) ?? remoteCurrentTask,
+    [visibleTasks, ui.selectedTaskId, tasksState.selectedIndex, remoteCurrentTask]
   );
 
   const taskStats = useMemo(() => getTaskStats(tasksState.tasks), [tasksState.tasks]);
 
-  const currentSubagentTree = (ui.selectedTabIndex > 0 ? subagent.remoteTree : subagent.tree) as SubagentTreeNode[];
+  const currentSubagentTree = (isViewingRemote ? subagent.remoteTree : subagent.tree) as SubagentTreeNode[];
 
-  const trackerName =
-    props.trackerType ?? props.storedConfig?.defaultTracker ?? props.storedConfig?.tracker ?? 'beads';
+  const selectedTaskOutput = useMemo(() => {
+    if (isViewingRemote || !selectedTask) {
+      return {
+        iterationOutput: output.currentOutput,
+        cliOutput: output.currentCliOutput,
+        iterationSegments: output.currentSegments,
+      };
+    }
+
+    const parallelOutput = output.parallelOutputs.get(selectedTask.id);
+    const parallelSegments = output.parallelSegments.get(selectedTask.id);
+    const isCurrentTask = selectedTask.id === phase.currentTaskId;
+
+    return {
+      iterationOutput: parallelOutput ?? (isCurrentTask ? output.currentOutput : ''),
+      cliOutput: isCurrentTask ? output.currentCliOutput : '',
+      iterationSegments: parallelSegments ?? (isCurrentTask ? output.currentSegments : []),
+    };
+  }, [isViewingRemote, output, phase.currentTaskId, selectedTask]);
+
+  const trackerName = isViewingRemote
+    ? remoteSnapshot?.trackerName ?? 'remote'
+    : props.trackerType ?? props.storedConfig?.defaultTracker ?? props.storedConfig?.tracker ?? 'beads';
+  const agentName = isViewingRemote
+    ? remoteSnapshot?.agentName ?? remoteSnapshot?.activeAgent?.plugin
+    : props.agentPlugin;
   const epicLoaderMode: EpicLoaderMode = props.trackerType === 'json' ? 'file-prompt' : 'list';
 
   const pushToast = useCallback(
@@ -757,9 +976,9 @@ export function AppShell(props: AppShellProps): ReactNode {
               <RightPanel
                 selectedTask={selectedTask}
                 currentIteration={phase.currentIteration}
-                iterationOutput={output.currentOutput}
-                cliOutput={output.currentCliOutput}
-                iterationSegments={output.currentSegments}
+                iterationOutput={selectedTaskOutput.iterationOutput}
+                cliOutput={selectedTaskOutput.cliOutput}
+                iterationSegments={selectedTaskOutput.iterationSegments}
                 viewMode={ui.detailsViewMode}
                 agentName={phase.activeAgentState?.plugin}
                 currentModel={phase.currentModel}
@@ -1085,17 +1304,23 @@ export function AppShell(props: AppShellProps): ReactNode {
           totalTasks={taskStats.total}
           currentIteration={phase.currentIteration}
           maxIterations={phase.maxIterations}
-          agentName={props.agentPlugin}
+          agentName={agentName}
           trackerName={trackerName}
           activeAgentState={phase.activeAgentState}
           rateLimitState={phase.rateLimitState}
           currentModel={phase.currentModel}
-          sandboxConfig={props.sandboxConfig}
-          resolvedSandboxMode={props.resolvedSandboxMode}
+          sandboxConfig={isViewingRemote ? remoteSnapshot?.sandboxConfig : props.sandboxConfig}
+          resolvedSandboxMode={
+            isViewingRemote ? remoteSnapshot?.resolvedSandboxMode : props.resolvedSandboxMode
+          }
           trackerRealtimeStatus={phase.trackerRealtimeStatus}
           remoteInfo={
             isViewingRemote
-              ? { name: tabs[ui.selectedTabIndex]?.label ?? 'remote', host: 'remote', port: 0 }
+              ? {
+                  name: tabs[ui.selectedTabIndex]?.label ?? 'remote',
+                  host: selectedTab?.host ?? 'remote',
+                  port: selectedTab?.port ?? 0,
+                }
               : undefined
           }
         />
@@ -1153,10 +1378,12 @@ export function AppShell(props: AppShellProps): ReactNode {
         <Footer
           shortcutHints={footerHint}
           sandboxMode={
-            props.resolvedSandboxMode
-              ? props.sandboxConfig?.network === false
-                ? `${props.resolvedSandboxMode} (no-net)`
-                : props.resolvedSandboxMode
+            (isViewingRemote ? remoteSnapshot?.resolvedSandboxMode : props.resolvedSandboxMode)
+              ? (isViewingRemote ? remoteSnapshot?.sandboxConfig : props.sandboxConfig)?.network === false
+                ? `${isViewingRemote ? remoteSnapshot?.resolvedSandboxMode : props.resolvedSandboxMode} (no-net)`
+                : isViewingRemote
+                  ? remoteSnapshot?.resolvedSandboxMode ?? null
+                  : props.resolvedSandboxMode
               : null
           }
           remoteAlias={isViewingRemote ? selectedRemoteAlias ?? selectedTab?.label ?? null : null}

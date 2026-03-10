@@ -13,6 +13,7 @@ import {
   mkdir,
   access,
   constants,
+  rename,
 } from 'node:fs/promises';
 import type {
   LockFile,
@@ -110,6 +111,89 @@ async function readLockFile(cwd: string): Promise<LockFile | null> {
 }
 
 /**
+ * Attempt to create a lock file exclusively.
+ * Returns false when another process created the lock concurrently.
+ */
+async function tryWriteLockFile(cwd: string, sessionId: string): Promise<boolean> {
+  await ensureSessionDir(cwd);
+  const lockPath = getLockPath(cwd);
+
+  const lock: LockFile = {
+    pid: process.pid,
+    sessionId,
+    acquiredAt: new Date().toISOString(),
+    cwd,
+    hostname: hostname(),
+  };
+
+  try {
+    await writeFile(lockPath, JSON.stringify(lock, null, 2), { flag: 'wx' });
+    return true;
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (nodeError.code === 'EEXIST') {
+      return false;
+    }
+    throw error;
+  }
+}
+
+function isSameLockFile(left: LockFile, right: LockFile): boolean {
+  return left.pid === right.pid &&
+    left.sessionId === right.sessionId &&
+    left.acquiredAt === right.acquiredAt &&
+    left.cwd === right.cwd &&
+    left.hostname === right.hostname;
+}
+
+async function restoreClaimedLockFile(
+  lockPath: string,
+  claimedPath: string,
+  claimedContents: string
+): Promise<void> {
+  try {
+    await writeFile(lockPath, claimedContents, { flag: 'wx' });
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (nodeError.code !== 'EEXIST') {
+      throw error;
+    }
+  } finally {
+    try {
+      await unlink(claimedPath);
+    } catch {
+      // Ignore if the temporary claim is already gone.
+    }
+  }
+}
+
+async function claimLockFile(cwd: string, observedLock: LockFile): Promise<boolean> {
+  const lockPath = getLockPath(cwd);
+  const claimedPath = `${lockPath}.${process.pid}.${randomUUID()}.claim`;
+
+  try {
+    await rename(lockPath, claimedPath);
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (nodeError.code === 'ENOENT') {
+      return false;
+    }
+    throw error;
+  }
+
+  const claimedContents = await readFile(claimedPath, 'utf-8');
+  const claimedLock = JSON.parse(claimedContents) as LockFile;
+
+  if (!isSameLockFile(claimedLock, observedLock)) {
+    await restoreClaimedLockFile(lockPath, claimedPath, claimedContents);
+    return false;
+  }
+
+  await unlink(claimedPath);
+  return true;
+}
+
+/**
  * Read session metadata if it exists
  */
 async function readSessionMetadata(
@@ -179,26 +263,40 @@ export async function acquireLock(
   cwd: string,
   sessionId: string
 ): Promise<boolean> {
-  await ensureSessionDir(cwd);
-  const lockPath = getLockPath(cwd);
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const existingLock = await readLockFile(cwd);
+    if (!existingLock) {
+      const acquired = await tryWriteLockFile(cwd, sessionId);
+      if (acquired) {
+        return true;
+      }
+      continue;
+    }
 
-  // Check for existing lock
-  const existingLock = await readLockFile(cwd);
-  if (existingLock && existingLock.pid !== process.pid && isProcessRunning(existingLock.pid)) {
+    if (existingLock.pid === process.pid && existingLock.sessionId === sessionId) {
+      return true;
+    }
+
+    if (isProcessRunning(existingLock.pid)) {
+      return false;
+    }
+
+    const claimed = await claimLockFile(cwd, existingLock);
+    if (!claimed) {
+      continue;
+    }
+    const acquired = await tryWriteLockFile(cwd, sessionId);
+    if (acquired) {
+      return true;
+    }
+  }
+
+  const finalLock = await readLockFile(cwd);
+  if (!finalLock) {
     return false;
   }
 
-  // Write our lock file
-  const lock: LockFile = {
-    pid: process.pid,
-    sessionId,
-    acquiredAt: new Date().toISOString(),
-    cwd,
-    hostname: hostname(),
-  };
-
-  await writeFile(lockPath, JSON.stringify(lock, null, 2));
-  return true;
+  return finalLock.pid === process.pid && finalLock.sessionId === sessionId;
 }
 
 /**

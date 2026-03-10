@@ -7,7 +7,7 @@ import { describe, expect, test } from 'bun:test';
 import { testRender } from '@opentui/react/test-utils';
 import { act, createElement } from 'react';
 import { AppShell, getAppShellViewFromHotkey, getNextAppShellView } from '../../src/tui/components/AppShell.js';
-import { RunApp } from '../../src/tui/components/RunApp.js';
+import { RunApp, monitorStartExecution } from '../../src/tui/components/RunApp.js';
 import { createTuiStores, TuiProvider } from '../../src/tui/stores/index.js';
 
 async function setupRunApp() {
@@ -57,6 +57,139 @@ describe('RunApp', () => {
     }
   });
 
+  test('renders remote task state instead of stale local task state on remote tabs', async () => {
+    const stores = createTuiStores({
+      phase: {
+        status: 'running',
+        currentTaskId: 'local-1',
+        currentTaskTitle: 'Local task',
+      },
+      tasks: {
+        tasks: [{ id: 'local-1', title: 'Local task', status: 'actionable' }],
+      },
+      output: {
+        currentOutput: 'local output',
+      },
+      ui: {
+        selectedTabIndex: 1,
+        instances: [
+          { id: 'local', label: 'Local', isLocal: true, status: 'connected' },
+          { id: 'remote-a', label: 'prod-a', isLocal: false, status: 'connected' },
+        ],
+      },
+    });
+
+    const remoteTask = {
+      id: 'remote-1',
+      title: 'Remote task',
+      status: 'in_progress' as const,
+      priority: 1 as const,
+      description: 'Remote task body',
+    };
+
+    const instanceManager = {
+      async getRemoteState() {
+        return {
+          status: 'running' as const,
+          currentIteration: 4,
+          currentTask: remoteTask,
+          totalTasks: 1,
+          tasksCompleted: 0,
+          iterations: [],
+          startedAt: '2026-03-10T12:00:00.000Z',
+          currentOutput: 'remote output',
+          currentStderr: 'remote stderr',
+          activeAgent: null,
+          rateLimitState: null,
+          maxIterations: 10,
+          tasks: [remoteTask],
+          agentName: 'claude',
+          trackerName: 'beads',
+          currentModel: 'anthropic/claude-3-7-sonnet',
+          subagentTree: [],
+        };
+      },
+      async getRemoteTasks() {
+        return [remoteTask];
+      },
+    };
+
+    const app = await testRender(
+      createElement(
+        TuiProvider,
+        { stores },
+        createElement(AppShell, {
+          instanceManager: instanceManager as never,
+        })
+      ),
+      {
+        width: 120,
+        height: 36,
+      }
+    );
+
+    try {
+      await act(async () => {
+        await app.renderOnce();
+        await Promise.resolve();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      await app.renderOnce();
+
+      const frame = app.captureCharFrame();
+      expect(frame).toContain('Remote task');
+      expect(frame).not.toContain('Local task');
+    } finally {
+      act(() => {
+        app.renderer.destroy();
+      });
+    }
+  });
+
+  test('renders selected task output instead of the global live buffer in parallel mode', async () => {
+    const stores = createTuiStores({
+      phase: {
+        status: 'running',
+        currentTaskId: 'task-1',
+        currentTaskTitle: 'Current task',
+      },
+      tasks: {
+        selectedIndex: 1,
+        tasks: [
+          { id: 'task-1', title: 'Current task', status: 'active' },
+          { id: 'task-2', title: 'Selected task', status: 'actionable' },
+        ],
+      },
+      output: {
+        currentOutput: 'current task output',
+        parallelOutputs: new Map([['task-2', 'selected task output']]),
+      },
+      ui: {
+        detailsViewMode: 'output',
+      },
+    });
+
+    const app = await testRender(
+      createElement(TuiProvider, { stores }, createElement(AppShell)),
+      {
+        width: 120,
+        height: 36,
+      }
+    );
+
+    try {
+      await app.renderOnce();
+      const frame = app.captureCharFrame();
+
+      expect(frame).toContain('selected task output');
+      expect(frame).not.toContain('current task output');
+    } finally {
+      act(() => {
+        app.renderer.destroy();
+      });
+    }
+  });
+
   test('view switching helpers map hotkeys and tab order', () => {
     expect(getAppShellViewFromHotkey('1')).toBeNull();
     expect(getAppShellViewFromHotkey('2')).toBeNull();
@@ -70,5 +203,61 @@ describe('RunApp', () => {
     expect(getNextAppShellView('iterations', 1)).toBe('activity');
     expect(getNextAppShellView('settings', 1)).toBe('tasks');
     expect(getNextAppShellView('tasks', -1)).toBe('settings');
+  });
+});
+
+describe('monitorStartExecution', () => {
+  test('restores the previous phase when start fails before the run leaves selecting', async () => {
+    let phase: 'ready' | 'selecting' = 'selecting';
+    const errors: string[] = [];
+
+    monitorStartExecution({
+      previousStatus: 'ready',
+      startOperation: Promise.reject(new Error('start failed')),
+      getCurrentStatus: () => phase,
+      restoreStatus: (status) => {
+        phase = status as typeof phase;
+      },
+      pushError: (message) => {
+        errors.push(message);
+      },
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(phase).toBe('ready');
+    expect(errors).toEqual(['start failed']);
+  });
+
+  test('ignores late start failures after the phase has moved past selecting', async () => {
+    let phase: 'ready' | 'selecting' | 'running' = 'selecting';
+    const errors: string[] = [];
+    let rejectStart: (error: Error) => void = () => {};
+
+    const startOperation = new Promise<void>((_resolve, reject) => {
+      rejectStart = reject;
+    });
+
+    monitorStartExecution({
+      previousStatus: 'ready',
+      startOperation,
+      getCurrentStatus: () => phase,
+      restoreStatus: (status) => {
+        phase = status as typeof phase;
+      },
+      pushError: (message) => {
+        errors.push(message);
+      },
+    });
+
+    phase = 'running';
+    rejectStart(new Error('late failure'));
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(phase).toBe('running');
+    expect(errors).toEqual([]);
   });
 });

@@ -14,6 +14,8 @@ import {
   savePersistedSession,
   deletePersistedSession,
   pauseSession,
+  completeSession,
+  failSession,
   updateSessionAfterIteration,
   setSubagentPanelVisible,
   acquireLock,
@@ -36,6 +38,53 @@ import { getAgentRegistry } from '../plugins/agents/registry.js';
 import { getTrackerRegistry } from '../plugins/trackers/registry.js';
 import { RunApp } from '../tui/components/RunApp.js';
 import { getAppVersion } from '../utils/version.js';
+
+function toRunningSessionState(state: PersistedSessionState): PersistedSessionState {
+  return {
+    ...state,
+    status: 'running',
+    isPaused: false,
+    pausedAt: undefined,
+  };
+}
+
+function toInterruptedSessionState(state: PersistedSessionState): PersistedSessionState {
+  if (state.status === 'completed' || state.status === 'failed') {
+    return state;
+  }
+
+  return {
+    ...state,
+    status: 'interrupted',
+    isPaused: false,
+    pausedAt: undefined,
+  };
+}
+
+function toTerminalSessionState(
+  state: PersistedSessionState,
+  reason: 'completed' | 'max_iterations' | 'interrupted' | 'error' | 'no_tasks'
+): PersistedSessionState {
+  if (reason === 'completed') {
+    return completeSession(state);
+  }
+
+  if (reason === 'error') {
+    return failSession(state);
+  }
+
+  return toInterruptedSessionState(state);
+}
+
+async function didRunComplete(engine: EngineController): Promise<boolean> {
+  const tracker = engine.getTracker();
+  if (!tracker) {
+    return false;
+  }
+
+  const remainingTasks = await tracker.getTasks({ status: ['open', 'in_progress', 'blocked'] });
+  return remainingTasks.length === 0;
+}
 
 /**
  * Parse CLI arguments for the resume command
@@ -112,6 +161,11 @@ async function runWithTui(
       savePersistedSession(currentState).catch(() => {
         // Log but don't fail on save errors
       });
+    } else if (event.type === 'engine:started') {
+      currentState = toRunningSessionState(currentState);
+      savePersistedSession(currentState).catch(() => {
+        // Log but don't fail on save errors
+      });
     } else if (event.type === 'engine:paused') {
       // Save paused state to session file
       currentState = pauseSession(currentState);
@@ -120,7 +174,12 @@ async function runWithTui(
       });
     } else if (event.type === 'engine:resumed') {
       // Clear paused state when resuming
-      currentState = { ...currentState, status: 'running', isPaused: false, pausedAt: undefined };
+      currentState = toRunningSessionState(currentState);
+      savePersistedSession(currentState).catch(() => {
+        // Log but don't fail on save errors
+      });
+    } else if (event.type === 'engine:stopped') {
+      currentState = toTerminalSessionState(currentState, event.reason);
       savePersistedSession(currentState).catch(() => {
         // Log but don't fail on save errors
       });
@@ -135,7 +194,7 @@ async function runWithTui(
 
   const handleSignal = async (): Promise<void> => {
     // Save interrupted state
-    currentState = { ...currentState, status: 'interrupted' };
+    currentState = toInterruptedSessionState(currentState);
     await savePersistedSession(currentState);
     await cleanup();
     process.exit(0);
@@ -174,6 +233,10 @@ async function runWithTui(
   );
 
   await engine.start();
+  if (currentState.status !== 'completed' && currentState.status !== 'failed' && await didRunComplete(engine)) {
+    currentState = completeSession(currentState);
+    await savePersistedSession(currentState);
+  }
   await cleanup();
   return currentState;
 }
@@ -192,6 +255,10 @@ async function runHeadless(
     switch (event.type) {
       case 'engine:started':
         console.log(`\nResumed Ralph. Total tasks: ${event.totalTasks}`);
+        currentState = toRunningSessionState(currentState);
+        savePersistedSession(currentState).catch(() => {
+          // Log but don't fail on save errors
+        });
         break;
 
       case 'iteration:started':
@@ -225,7 +292,7 @@ async function runHeadless(
 
       case 'engine:resumed':
         console.log('\nResumed...');
-        currentState = { ...currentState, status: 'running', isPaused: false, pausedAt: undefined };
+        currentState = toRunningSessionState(currentState);
         savePersistedSession(currentState).catch(() => {
           // Log but don't fail on save errors
         });
@@ -235,6 +302,10 @@ async function runHeadless(
         console.log(`\nRalph stopped. Reason: ${event.reason}`);
         console.log(`Total iterations: ${event.totalIterations}`);
         console.log(`Tasks completed: ${event.tasksCompleted}`);
+        currentState = toTerminalSessionState(currentState, event.reason);
+        savePersistedSession(currentState).catch(() => {
+          // Log but don't fail on save errors
+        });
         break;
 
       case 'all:complete':
@@ -246,7 +317,7 @@ async function runHeadless(
   const handleSignal = async (): Promise<void> => {
     console.log('\nInterrupted, stopping...');
     // Save interrupted state
-    currentState = { ...currentState, status: 'interrupted' };
+    currentState = toInterruptedSessionState(currentState);
     await savePersistedSession(currentState);
     await engine.dispose();
     await releaseLock(cwd);
@@ -257,6 +328,10 @@ async function runHeadless(
   process.on('SIGTERM', handleSignal);
 
   await engine.start();
+  if (currentState.status !== 'completed' && currentState.status !== 'failed' && await didRunComplete(engine)) {
+    currentState = completeSession(currentState);
+    await savePersistedSession(currentState);
+  }
   await engine.dispose();
   await releaseLock(cwd);
   return currentState;
@@ -418,6 +493,9 @@ export async function executeResumeCommand(args: string[]): Promise<void> {
       'Failed to initialize engine:',
       error instanceof Error ? error.message : error
     );
+    await engine.dispose().catch(() => {
+      // Best-effort cleanup for partially initialized worktrees.
+    });
     await releaseLock(cwd);
     process.exit(1);
   }
@@ -439,6 +517,9 @@ export async function executeResumeCommand(args: string[]): Promise<void> {
       'Execution error:',
       error instanceof Error ? error.message : error
     );
+    await engine.dispose().catch(() => {
+      // Best-effort cleanup after failed execution startup.
+    });
     await releaseLock(cwd);
     process.exit(1);
   }
@@ -447,6 +528,8 @@ export async function executeResumeCommand(args: string[]): Promise<void> {
   if (finalState.status === 'completed') {
     await deletePersistedSession(cwd);
     console.log('Session completed and cleaned up.');
+  } else if (finalState.status === 'failed') {
+    console.log('\nSession failed. Review the logs before starting a new run.');
   } else if (finalState.status === 'paused') {
     console.log('\nSession paused. Use "ralph-tui resume" to continue.');
   } else {

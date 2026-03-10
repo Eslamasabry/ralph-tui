@@ -140,6 +140,21 @@ export class ParallelExecutionEngine implements EngineController {
     this.emit({ type: 'tasks:refreshed', timestamp: new Date().toISOString(), tasks });
   }
 
+  private async resolveStopReason(): Promise<
+    'completed' | 'max_iterations' | 'interrupted' | 'error' | 'no_tasks'
+  > {
+    if (this.stopReason) {
+      return this.stopReason;
+    }
+
+    if (!this.tracker) {
+      return 'interrupted';
+    }
+
+    const remainingTasks = await this.tracker.getTasks({ status: ['open', 'in_progress', 'blocked'] });
+    return remainingTasks.length === 0 ? 'completed' : 'interrupted';
+  }
+
   async start(): Promise<void> {
     if (!this.tracker) {
       throw new Error('Parallel engine not initialized');
@@ -171,10 +186,26 @@ export class ParallelExecutionEngine implements EngineController {
       }
     } finally {
       this.state.status = 'idle';
+      let stopReason: 'completed' | 'max_iterations' | 'interrupted' | 'error' | 'no_tasks';
+      try {
+        stopReason = await this.resolveStopReason();
+      } catch {
+        stopReason = startError ? 'error' : 'interrupted';
+      }
+
+      if (stopReason === 'completed') {
+        this.emit({
+          type: 'all:complete',
+          timestamp: new Date().toISOString(),
+          totalCompleted: this.state.tasksCompleted,
+          totalIterations: this.state.currentIteration,
+        });
+      }
+
       this.emit({
         type: 'engine:stopped',
         timestamp: new Date().toISOString(),
-        reason: this.stopReason ?? 'completed',
+        reason: stopReason,
         totalIterations: this.state.currentIteration,
         tasksCompleted: this.state.tasksCompleted,
       });
@@ -373,11 +404,15 @@ export class ParallelExecutionEngine implements EngineController {
     if (event.type === 'parallel:task-finished') {
       const iteration = this.taskIterations.get(event.task.id) ?? ++this.iterationCounter;
       const completed = event.completed;
-      const status = completed ? 'completed' : event.result.status === 'failed' ? 'failed' : 'completed';
+      const status = completed
+        ? 'completed'
+        : event.result.status === 'failed'
+          ? 'failed'
+          : 'interrupted';
 
       const iterationResult: IterationResult = {
         iteration,
-        status: status === 'failed' ? 'failed' : 'completed',
+        status,
         task: event.task,
         agentResult: event.result,
         taskCompleted: completed,
@@ -398,6 +433,17 @@ export class ParallelExecutionEngine implements EngineController {
           timestamp: new Date().toISOString(),
           task: event.task,
           iteration,
+        });
+      }
+
+      if (iterationResult.status === 'failed') {
+        this.emit({
+          type: 'iteration:failed',
+          timestamp: new Date().toISOString(),
+          iteration,
+          task: event.task,
+          error: event.result.error ?? 'Parallel task execution failed.',
+          action: 'skip',
         });
       }
 

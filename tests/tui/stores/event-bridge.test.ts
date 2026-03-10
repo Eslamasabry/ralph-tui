@@ -231,4 +231,108 @@ describe('event-bridge', () => {
 
     bridge.destroy();
   });
+
+  test('engine start clears stale output buffers and closes the run summary overlay', () => {
+    const engine = new FakeEngine();
+    const stores = createTuiStores({
+      output: {
+        currentOutput: 'stale stdout',
+        currentCliOutput: 'stale stderr',
+        parallelOutputs: new Map([['task-1', 'parallel stdout']]),
+      },
+      ui: {
+        overlay: 'runSummary',
+      },
+    });
+    const bridge = createEventBridge(engine, stores, { batchIntervalMs: 10_000 });
+
+    engine.emit({
+      type: 'engine:started',
+      timestamp: makeTimestamp(),
+      sessionId: 'session-1',
+      totalTasks: 1,
+      tasks: [makeTask()],
+    });
+
+    bridge.flush();
+
+    expect(stores.output.getState().currentOutput).toBe('');
+    expect(stores.output.getState().currentCliOutput).toBe('');
+    expect(stores.output.getState().parallelOutputs.size).toBe(0);
+    expect(stores.ui.getState().overlay).toBeNull();
+
+    bridge.destroy();
+  });
+
+  test('failed iterations keep error phase without appending a misleading completed activity', () => {
+    const engine = new FakeEngine();
+    const stores = createTuiStores();
+    const bridge = createEventBridge(engine, stores, { batchIntervalMs: 10_000 });
+    const task = makeTask({ id: 'task-5', title: 'Failure history' });
+
+    engine.emit({
+      type: 'iteration:failed',
+      timestamp: makeTimestamp(),
+      iteration: 5,
+      task,
+      error: 'merge conflict',
+      action: 'skip',
+    });
+    engine.emit({
+      type: 'iteration:completed',
+      timestamp: makeTimestamp(),
+      result: {
+        iteration: 5,
+        status: 'failed',
+        task,
+        taskCompleted: false,
+        promiseComplete: false,
+        durationMs: 1000,
+        error: 'merge conflict',
+        startedAt: makeTimestamp(),
+        endedAt: makeTimestamp(),
+      },
+    });
+
+    bridge.flush();
+
+    expect(stores.phase.getState().status).toBe('error');
+    expect(stores.history.getState().iterations).toHaveLength(1);
+    expect(stores.history.getState().activityEvents).toHaveLength(1);
+    expect(stores.history.getState().activityEvents[0]?.eventType).toBe('failed');
+
+    bridge.destroy();
+  });
+
+  test('parallel task segments are routed to per-task buffers', () => {
+    const engine = new FakeEngine();
+    const stores = createTuiStores();
+    const bridge = createEventBridge(engine, stores, { batchIntervalMs: 10_000 });
+    const task = makeTask({ id: 'task-3', title: 'Segmented task' });
+
+    engine.emit({
+      type: 'iteration:started',
+      timestamp: makeTimestamp(),
+      iteration: 3,
+      task,
+    });
+    engine.emitParallel({
+      type: 'parallel:task-segments',
+      timestamp: makeTimestamp(),
+      workerId: 'worker-1',
+      taskId: task.id,
+      segments: [{ text: 'hello', color: 'green' }],
+    });
+
+    bridge.flush();
+
+    expect(stores.output.getState().parallelSegments.get(task.id)).toEqual([
+      { text: 'hello', color: 'green' },
+    ]);
+    expect(stores.output.getState().currentSegments).toEqual([
+      { text: 'hello', color: 'green' },
+    ]);
+
+    bridge.destroy();
+  });
 });

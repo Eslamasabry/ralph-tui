@@ -4,6 +4,8 @@
  */
 
 import { describe, expect, test } from 'bun:test';
+import { testRender } from '@opentui/react/test-utils';
+import { act, createElement, useEffect } from 'react';
 import {
   buildTabSwitchEvent,
   clampTabIndex,
@@ -11,9 +13,11 @@ import {
   isSameDataSource,
   createDataSourceSnapshot,
   restoreDataSourceSnapshot,
+  DataSourceProvider,
+  useDataSource,
   type DataSourceTab,
 } from '../../src/tui/components/DataSourceProvider.js';
-import { createTuiStores } from '../../src/tui/stores/tui-provider.js';
+import { createTuiStores, TuiProvider } from '../../src/tui/stores/tui-provider.js';
 
 describe('clampTabIndex', () => {
   test('clamps to zero when tab count is empty', () => {
@@ -107,5 +111,71 @@ describe('snapshot helpers', () => {
     expect(stores.output.getState().currentOutput).toBe('alpha');
     expect(stores.tasks.getState().tasks).toHaveLength(1);
     expect(stores.tasks.getState().tasks[0]?.id).toBe('t1');
+  });
+});
+
+describe('DataSourceProvider', () => {
+  test('does not restore stale local store snapshots after visiting a remote tab', async () => {
+    const stores = createTuiStores({
+      phase: { status: 'running' },
+      output: { currentOutput: 'alpha' },
+    });
+
+    let switchTab: ((index: number) => void) | null = null;
+
+    function Harness() {
+      const dataSource = useDataSource();
+
+      useEffect(() => {
+        switchTab = dataSource.switchTab;
+      }, [dataSource]);
+
+      return null;
+    }
+
+    const app = await testRender(
+      createElement(
+        TuiProvider,
+        { stores },
+        createElement(
+          DataSourceProvider,
+          {
+            tabs: [
+              { id: 'local', isLocal: true },
+              { id: 'remote-a', alias: 'prod-a', isLocal: false },
+            ],
+          },
+          createElement(Harness)
+        )
+      ),
+      {
+        width: 40,
+        height: 8,
+      }
+    );
+
+    try {
+      await app.renderOnce();
+
+      act(() => {
+        switchTab?.(1);
+      });
+      await app.renderOnce();
+
+      stores.phase.dispatch({ type: 'phase/set-status', status: 'complete' });
+      stores.output.dispatch({ type: 'output/set-current-output', output: 'fresh-output' });
+
+      act(() => {
+        switchTab?.(0);
+      });
+      await app.renderOnce();
+
+      expect(stores.phase.getState().status).toBe('complete');
+      expect(stores.output.getState().currentOutput).toBe('fresh-output');
+    } finally {
+      act(() => {
+        app.renderer.destroy();
+      });
+    }
   });
 });
