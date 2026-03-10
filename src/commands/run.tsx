@@ -1544,6 +1544,7 @@ async function runHeadless(
   const gracefulShutdown = async (): Promise<void> => {
     logger.info('system', 'Interrupted, stopping gracefully...');
     logger.info('system', '(Press Ctrl+C again within 1s to force quit)');
+    await stopEngineForShutdown(engine);
 
     // Reset any active (in_progress) tasks back to open
     const activeTasks = getActiveTasks(currentState);
@@ -1590,6 +1591,7 @@ async function runHeadless(
   // Handle SIGTERM (always graceful, no double-press)
   const handleSigterm = async (): Promise<void> => {
     logger.info('system', 'Received SIGTERM, stopping gracefully...');
+    await stopEngineForShutdown(engine);
 
     // Reset any active (in_progress) tasks back to open
     const activeTasks = getActiveTasks(currentState);

@@ -5,7 +5,7 @@
 import type { RalphConfig } from '../../config/types.js';
 import { spawn } from 'node:child_process';
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import type { TrackerPlugin, TrackerTask } from '../../plugins/trackers/types.js';
 import type { AgentPlugin, AgentExecutionResult } from '../../plugins/agents/types.js';
 import { getAgentRegistry } from '../../plugins/agents/registry.js';
@@ -84,6 +84,7 @@ export class ParallelCoordinator {
   private summaryLogDir: string;
   private summaryCounts = new Map<string, number>();
   private summaryStartAt: string | null = null;
+  private activeWorkerTasks = new Set<Promise<void>>();
 
   constructor(config: RalphConfig, options: ParallelCoordinatorOptions) {
     this.config = config;
@@ -541,12 +542,27 @@ export class ParallelCoordinator {
       this.activeTaskLeases.set(task.id, { workerId: idleWorker.workerId, claimedAt: Date.now() });
       this.taskAffinity.set(task.id, idleWorker.workerId);
       this.emit({ type: 'parallel:task-claimed', timestamp: new Date().toISOString(), workerId: idleWorker.workerId, task });
-      void this.runTaskOnWorker(idleWorker, task).catch((error) => {
-        const reason = error instanceof Error ? error.message : String(error);
-        this.logWarn(
-          `Unhandled worker execution error for ${task.id} on ${idleWorker.workerId}: ${reason}`
-        );
-      });
+      const taskPromise = this.runTaskOnWorker(idleWorker, task)
+        .catch((error) => {
+          const reason = error instanceof Error ? error.message : String(error);
+          this.logWarn(
+            `Unhandled worker execution error for ${task.id} on ${idleWorker.workerId}: ${reason}`
+          );
+        })
+        .finally(() => {
+          this.activeWorkerTasks.delete(taskPromise);
+        });
+      this.activeWorkerTasks.add(taskPromise);
+    }
+
+    if (this.activeWorkerTasks.size > 0) {
+      this.logInfo(`Waiting for ${this.activeWorkerTasks.size} active worker(s) to finish.`);
+      await Promise.allSettled(Array.from(this.activeWorkerTasks));
+    }
+
+    if (this.hasPendingCoordinatorWork()) {
+      this.logInfo('Waiting for queued merge and sync work to finish.');
+      await this.drainPendingCoordinatorWork();
     }
 
     this.emit({ type: 'parallel:stopped', timestamp: new Date().toISOString() });
@@ -981,6 +997,31 @@ export class ParallelCoordinator {
       this.validationQueue.length > 0 ||
       this.validationBatchTimer !== null
     );
+  }
+
+  private hasPendingCoordinatorWork(): boolean {
+    return (
+      this.mergeQueue.length > 0 ||
+      this.merging ||
+      this.pendingMergeCounts.size > 0 ||
+      this.validationRunning ||
+      this.validationQueue.length > 0 ||
+      this.validationBatchTimer !== null ||
+      this.pendingMainSyncTasks.size > 0 ||
+      this.mainSyncRunning
+    );
+  }
+
+  private async drainPendingCoordinatorWork(timeoutMs = 30_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (this.hasPendingCoordinatorWork()) {
+      if (Date.now() >= deadline) {
+        this.logWarn('Timed out waiting for merge/sync work to drain during shutdown.');
+        return;
+      }
+      await this.trySyncPendingMainTasks();
+      await this.delay(100);
+    }
   }
 
   private async handleMergeFailure(
@@ -2844,15 +2885,7 @@ export class ParallelCoordinator {
     if (lines.length === 0) {
       return false;
     }
-    return lines.every((line) => {
-      const path = line.slice(3).trim();
-      return (
-        path.startsWith('.beads/') ||
-        path.startsWith('.ralph-tui/') ||
-        path.startsWith('logs/') ||
-        path.startsWith('worktrees/')
-      );
-    });
+    return lines.every((line) => this.isSafeDirtyPath(line.slice(3).trim(), repoPath));
   }
 
   private async getRepoStatusLines(repoPath: string): Promise<string[]> {
@@ -2865,15 +2898,39 @@ export class ParallelCoordinator {
       .split('\n')
       .map((line) => line.replace(/\r$/, ''))
       .filter(Boolean)
-      .filter((line) => {
-        const path = line.slice(3).trim();
-        return !(
-          path.startsWith('.beads/') ||
-          path.startsWith('.ralph-tui/') ||
-          path.startsWith('logs/') ||
-          path.startsWith('worktrees/')
-        );
-      });
+      .filter((line) => !this.isSafeDirtyPath(line.slice(3).trim(), this.config.cwd));
+  }
+
+  private isSafeDirtyPath(statusPath: string, repoPath: string): boolean {
+    const normalizedPath = statusPath.replace(/\\/g, '/');
+    if (
+      normalizedPath.startsWith('.beads/') ||
+      normalizedPath.startsWith('.ralph-tui/') ||
+      normalizedPath.startsWith('logs/') ||
+      normalizedPath.startsWith('worktrees/')
+    ) {
+      return true;
+    }
+
+    if (this.config.tracker.plugin !== 'json') {
+      return false;
+    }
+
+    const configuredTrackerPaths = [
+      this.config.tracker.options.path,
+      this.config.tracker.options.prdPath,
+      this.config.prdPath,
+    ].filter((value): value is string => typeof value === 'string' && value.length > 0);
+
+    for (const configuredPath of configuredTrackerPaths) {
+      const resolvedPath = resolve(repoPath, configuredPath);
+      const relativePath = relative(repoPath, resolvedPath).replace(/\\/g, '/');
+      if (relativePath === normalizedPath) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   private async resolveCommit(ref: string): Promise<string> {
