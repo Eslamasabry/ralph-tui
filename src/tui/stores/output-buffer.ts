@@ -18,6 +18,7 @@ export interface OutputBufferState {
   currentCliOutput: string;
   currentSegments: FormattedSegment[];
   parallelOutputs: Map<string, string>;
+  parallelCliOutputs: Map<string, string>;
   parallelSegments: Map<string, FormattedSegment[]>;
   version: number;
 }
@@ -33,6 +34,8 @@ export type OutputBufferAction =
   | { type: 'output/append-segments'; segments: FormattedSegment[] }
   | { type: 'output/set-parallel-output'; key: string; output: string }
   | { type: 'output/append-parallel-output'; key: string; chunk: string }
+  | { type: 'output/set-parallel-cli-output'; key: string; output: string }
+  | { type: 'output/append-parallel-cli-output'; key: string; chunk: string }
   | { type: 'output/set-parallel-segments'; key: string; segments: FormattedSegment[] }
   | { type: 'output/clear-parallel-output'; key: string }
   | { type: 'output/clear-parallel' };
@@ -65,6 +68,7 @@ function createInitialState(initialState: Partial<OutputBufferState> = {}): Outp
     currentCliOutput: initialState.currentCliOutput ?? '',
     currentSegments: cloneSegments(initialState.currentSegments ?? []),
     parallelOutputs: new Map(initialState.parallelOutputs ?? []),
+    parallelCliOutputs: new Map(initialState.parallelCliOutputs ?? []),
     parallelSegments: new Map(
       Array.from(initialState.parallelSegments ?? [], ([key, segments]) => [key, cloneSegments(segments)])
     ),
@@ -159,6 +163,28 @@ function outputBufferReducer(
       return withVersion(state, { parallelOutputs: nextOutputs });
     }
 
+    case 'output/set-parallel-cli-output': {
+      if (state.parallelCliOutputs.get(action.key) === action.output) {
+        return state;
+      }
+      const nextOutputs = new Map(state.parallelCliOutputs);
+      nextOutputs.set(action.key, trimToCap(action.output, OUTPUT_CAP_BYTES));
+      return withVersion(state, { parallelCliOutputs: nextOutputs });
+    }
+
+    case 'output/append-parallel-cli-output': {
+      if (!action.chunk) {
+        return state;
+      }
+      const nextOutputs = new Map(state.parallelCliOutputs);
+      const previousOutput = nextOutputs.get(action.key) ?? '';
+      nextOutputs.set(
+        action.key,
+        trimToCap(previousOutput + action.chunk, OUTPUT_CAP_BYTES)
+      );
+      return withVersion(state, { parallelCliOutputs: nextOutputs });
+    }
+
     case 'output/set-parallel-segments': {
       const nextSegments = new Map(state.parallelSegments);
       nextSegments.set(action.key, cloneSegments(action.segments));
@@ -166,28 +192,41 @@ function outputBufferReducer(
     }
 
     case 'output/clear-parallel-output': {
-      if (!state.parallelOutputs.has(action.key) && !state.parallelSegments.has(action.key)) {
+      if (
+        !state.parallelOutputs.has(action.key) &&
+        !state.parallelCliOutputs.has(action.key) &&
+        !state.parallelSegments.has(action.key)
+      ) {
         return state;
       }
 
       const nextOutputs = new Map(state.parallelOutputs);
       nextOutputs.delete(action.key);
 
+      const nextCliOutputs = new Map(state.parallelCliOutputs);
+      nextCliOutputs.delete(action.key);
+
       const nextSegments = new Map(state.parallelSegments);
       nextSegments.delete(action.key);
 
       return withVersion(state, {
         parallelOutputs: nextOutputs,
+        parallelCliOutputs: nextCliOutputs,
         parallelSegments: nextSegments,
       });
     }
 
     case 'output/clear-parallel':
-      if (state.parallelOutputs.size === 0 && state.parallelSegments.size === 0) {
+      if (
+        state.parallelOutputs.size === 0 &&
+        state.parallelCliOutputs.size === 0 &&
+        state.parallelSegments.size === 0
+      ) {
         return state;
       }
       return withVersion(state, {
         parallelOutputs: new Map(),
+        parallelCliOutputs: new Map(),
         parallelSegments: new Map(),
       });
 

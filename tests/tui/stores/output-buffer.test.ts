@@ -15,6 +15,7 @@ describe('output-buffer store', () => {
     expect(state.currentCliOutput).toBe('');
     expect(state.currentSegments).toEqual([]);
     expect(state.parallelOutputs.size).toBe(0);
+    expect(state.parallelCliOutputs.size).toBe(0);
     expect(state.parallelSegments.size).toBe(0);
     expect(state.version).toBe(0);
   });
@@ -42,6 +43,18 @@ describe('output-buffer store', () => {
     const state = store.getState();
     expect(state.parallelOutputs.get('task-1:1')).toBe('AB');
     expect(state.parallelOutputs.get('task-2:1')).toBe('X');
+  });
+
+  test('stores parallel CLI output independently by key', () => {
+    const store = createOutputBufferStore();
+
+    store.dispatch({ type: 'output/set-parallel-cli-output', key: 'task-1:1', output: 'err-A' });
+    store.dispatch({ type: 'output/append-parallel-cli-output', key: 'task-1:1', chunk: 'err-B' });
+    store.dispatch({ type: 'output/set-parallel-cli-output', key: 'task-2:1', output: 'warn-X' });
+
+    const state = store.getState();
+    expect(state.parallelCliOutputs.get('task-1:1')).toBe('err-Aerr-B');
+    expect(state.parallelCliOutputs.get('task-2:1')).toBe('warn-X');
   });
 
   test('enforces 500KB cap for current output using FIFO trimming', () => {
@@ -77,12 +90,14 @@ describe('output-buffer store', () => {
     store.dispatch({ type: 'output/clear-parallel-output', key: 'task-1:1' });
 
     expect(store.getState().parallelOutputs.has('task-1:1')).toBe(false);
+    expect(store.getState().parallelCliOutputs.has('task-1:1')).toBe(false);
     expect(store.getState().parallelOutputs.has('task-2:1')).toBe(true);
 
     store.dispatch({ type: 'output/clear-parallel' });
 
     const state = store.getState();
     expect(state.parallelOutputs.size).toBe(0);
+    expect(state.parallelCliOutputs.size).toBe(0);
     expect(state.parallelSegments.size).toBe(0);
   });
 

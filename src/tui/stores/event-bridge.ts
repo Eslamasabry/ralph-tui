@@ -319,6 +319,7 @@ export function mapEngineEventToStoreActions(
       if (activityEvent) {
         dispatchHistory({ type: 'history/append-activity', event: activityEvent });
       }
+      dispatchPipeline({ type: 'pipeline/reset' });
       dispatchOutput({ type: 'output/set-current-output', output: '' });
       dispatchOutput({ type: 'output/set-cli-output', output: '' });
       dispatchOutput({ type: 'output/set-segments', segments: [] });
@@ -894,11 +895,19 @@ export function createEventBridge(
       }
 
       if (event.taskId) {
-        dispatchOutput({
-          type: 'output/append-parallel-output',
-          key: event.taskId,
-          chunk: event.data,
-        });
+        dispatchOutput(
+          event.stream === 'stderr'
+            ? {
+                type: 'output/append-parallel-cli-output',
+                key: event.taskId,
+                chunk: event.data,
+              }
+            : {
+                type: 'output/append-parallel-output',
+                key: event.taskId,
+                chunk: event.data,
+              }
+        );
       }
 
       scheduleFlush();

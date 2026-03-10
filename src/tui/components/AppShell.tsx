@@ -546,12 +546,13 @@ export function AppShell(props: AppShellProps): ReactNode {
     }
 
     const parallelOutput = output.parallelOutputs.get(selectedTask.id);
+    const parallelCliOutput = output.parallelCliOutputs.get(selectedTask.id);
     const parallelSegments = output.parallelSegments.get(selectedTask.id);
     const isCurrentTask = selectedTask.id === phase.currentTaskId;
 
     return {
       iterationOutput: parallelOutput ?? (isCurrentTask ? output.currentOutput : ''),
-      cliOutput: isCurrentTask ? output.currentCliOutput : '',
+      cliOutput: parallelCliOutput ?? (isCurrentTask ? output.currentCliOutput : ''),
       iterationSegments: parallelSegments ?? (isCurrentTask ? output.currentSegments : []),
     };
   }, [isViewingRemote, output, phase.currentTaskId, selectedTask]);
@@ -1103,7 +1104,7 @@ export function AppShell(props: AppShellProps): ReactNode {
           taskTitle={selectedTask?.title}
           taskId={selectedTask?.id}
           currentIteration={phase.currentIteration}
-          iterationOutput={rawLog}
+          iterationOutput={selectedTaskOutput.cliOutput || selectedTaskOutput.iterationOutput || rawLog}
           currentModel={phase.currentModel}
           agentName={phase.activeAgentState?.plugin}
           isFocused={ui.focusPerView[ui.viewMode] === 'logPane'}

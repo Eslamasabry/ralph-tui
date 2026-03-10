@@ -1009,6 +1009,37 @@ async function didRunComplete(engine: EngineController): Promise<boolean> {
   return remainingTasks.length === 0;
 }
 
+async function stopEngineForShutdown(
+  engine: EngineController,
+  timeoutMs = 15000
+): Promise<void> {
+  if (engine.getState().status === 'idle') {
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    const settle = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeoutId);
+      unsubscribe();
+      resolve();
+    };
+
+    const unsubscribe = engine.on((event) => {
+      if (event.type === 'engine:stopped') {
+        settle();
+      }
+    });
+
+    const timeoutId = setTimeout(settle, timeoutMs);
+    engine.stop();
+  });
+}
+
 async function runWithTui(
   engine: EngineController,
   persistedState: PersistedSessionState,
@@ -1144,6 +1175,8 @@ async function runWithTui(
   // Graceful shutdown: reset active tasks, save state, clean up, and resolve the quit promise
   // This is called when the user explicitly quits (q key or Ctrl+C confirmation)
   const gracefulShutdown = async (): Promise<void> => {
+    await stopEngineForShutdown(engine);
+
     // Reset any active (in_progress) tasks back to open
     // This prevents tasks from being stuck in_progress after shutdown
     const activeTasks = getActiveTasks(currentState);

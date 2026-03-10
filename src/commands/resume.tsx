@@ -86,6 +86,37 @@ async function didRunComplete(engine: EngineController): Promise<boolean> {
   return remainingTasks.length === 0;
 }
 
+async function stopEngineForShutdown(
+  engine: EngineController,
+  timeoutMs = 15000
+): Promise<void> {
+  if (engine.getState().status === 'idle') {
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    const settle = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeoutId);
+      unsubscribe();
+      resolve();
+    };
+
+    const unsubscribe = engine.on((event) => {
+      if (event.type === 'engine:stopped') {
+        settle();
+      }
+    });
+
+    const timeoutId = setTimeout(settle, timeoutMs);
+    engine.stop();
+  });
+}
+
 /**
  * Parse CLI arguments for the resume command
  */
@@ -194,6 +225,7 @@ async function runWithTui(
 
   const handleSignal = async (): Promise<void> => {
     // Save interrupted state
+    await stopEngineForShutdown(engine);
     currentState = toInterruptedSessionState(currentState);
     await savePersistedSession(currentState);
     await cleanup();
@@ -219,7 +251,8 @@ async function runWithTui(
       cwd={cwd}
       onQuit={async () => {
         // Save interrupted state
-        currentState = { ...currentState, status: 'interrupted' };
+        await stopEngineForShutdown(engine);
+        currentState = toInterruptedSessionState(currentState);
         await savePersistedSession(currentState);
         await cleanup();
         process.exit(0);
@@ -317,6 +350,7 @@ async function runHeadless(
   const handleSignal = async (): Promise<void> => {
     console.log('\nInterrupted, stopping...');
     // Save interrupted state
+    await stopEngineForShutdown(engine);
     currentState = toInterruptedSessionState(currentState);
     await savePersistedSession(currentState);
     await engine.dispose();

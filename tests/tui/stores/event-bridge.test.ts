@@ -235,10 +235,29 @@ describe('event-bridge', () => {
   test('engine start clears stale output buffers and closes the run summary overlay', () => {
     const engine = new FakeEngine();
     const stores = createTuiStores({
+      pipeline: {
+        runFailures: [
+          {
+            taskId: 'stale-task',
+            taskTitle: 'Stale task',
+            reason: 'stale failure',
+            phase: 'execution',
+          },
+        ],
+        mergeStats: {
+          queued: 1,
+          merged: 2,
+          failed: 3,
+          resolved: 4,
+          worktrees: 5,
+          syncPending: 6,
+        },
+      },
       output: {
         currentOutput: 'stale stdout',
         currentCliOutput: 'stale stderr',
         parallelOutputs: new Map([['task-1', 'parallel stdout']]),
+        parallelCliOutputs: new Map([['task-1', 'parallel stderr']]),
       },
       ui: {
         overlay: 'runSummary',
@@ -259,7 +278,32 @@ describe('event-bridge', () => {
     expect(stores.output.getState().currentOutput).toBe('');
     expect(stores.output.getState().currentCliOutput).toBe('');
     expect(stores.output.getState().parallelOutputs.size).toBe(0);
+    expect(stores.output.getState().parallelCliOutputs.size).toBe(0);
+    expect(stores.pipeline.getState().runFailures).toEqual([]);
+    expect(stores.pipeline.getState().mergeStats.failed).toBe(0);
     expect(stores.ui.getState().overlay).toBeNull();
+
+    bridge.destroy();
+  });
+
+  test('routes per-task stderr into the parallel CLI buffer instead of stdout', () => {
+    const engine = new FakeEngine();
+    const stores = createTuiStores();
+    const bridge = createEventBridge(engine, stores, { batchIntervalMs: 10_000 });
+
+    engine.emit({
+      type: 'agent:output',
+      timestamp: makeTimestamp(),
+      data: 'stderr line',
+      stream: 'stderr',
+      iteration: 1,
+      taskId: 'task-1:1',
+    });
+
+    bridge.flush();
+
+    expect(stores.output.getState().parallelOutputs.get('task-1:1')).toBeUndefined();
+    expect(stores.output.getState().parallelCliOutputs.get('task-1:1')).toBe('stderr line');
 
     bridge.destroy();
   });
