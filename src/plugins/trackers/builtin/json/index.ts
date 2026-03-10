@@ -657,8 +657,13 @@ export class JsonTrackerPlugin extends BaseTrackerPlugin {
         return undefined;
       }
 
+      const nextPasses = statusToPasses(status);
+      if (story.passes === nextPasses) {
+        return storyToTask(story, prd.name);
+      }
+
       // Update the passes field based on status
-      story.passes = statusToPasses(status);
+      story.passes = nextPasses;
 
       // Write back to file
       await this.writePrd(prd);

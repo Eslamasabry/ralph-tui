@@ -260,6 +260,28 @@ describe('JsonTrackerPlugin', () => {
       expect(task?.status).toBe('completed');
     });
 
+    test('does not rewrite the file when status is unchanged', async () => {
+      const original = {
+        name: 'Test Project',
+        userStories: [
+          { id: 'US-001', title: 'Task 1', passes: false },
+          { id: 'US-002', title: 'Task 2', passes: true },
+        ],
+        metadata: {
+          updatedAt: '2026-03-10T00:00:00.000Z',
+        },
+      };
+      await writeFile(prdPath, JSON.stringify(original, null, 2), 'utf-8');
+      await plugin.initialize({ path: prdPath });
+
+      const before = await readFile(prdPath, 'utf-8');
+      const task = await plugin.updateTaskStatus('US-001', 'open');
+      const after = await readFile(prdPath, 'utf-8');
+
+      expect(task?.status).toBe('open');
+      expect(after).toBe(before);
+    });
+
     test('returns undefined for non-existent task', async () => {
       await plugin.initialize({ path: prdPath });
       const task = await plugin.updateTaskStatus('US-999', 'completed');
