@@ -445,6 +445,19 @@ export class ParallelExecutionEngine implements EngineController {
           error: event.result.error ?? 'Parallel task execution failed.',
           action: 'skip',
         });
+        if (this.shouldLogTrackerEvents()) {
+          void appendTrackerEvent(this.config.cwd, {
+            type: 'iteration:failed',
+            timestamp: event.result.endedAt ?? new Date().toISOString(),
+            tracker: this.config.tracker.plugin,
+            iteration,
+            taskId: event.task.id,
+            taskTitle: event.task.title,
+            error: event.result.error ?? 'Parallel task execution failed.',
+            action: 'skip',
+          });
+        }
+        return;
       }
 
       this.emit({

@@ -76,6 +76,28 @@ function toTerminalSessionState(
   return toInterruptedSessionState(state);
 }
 
+function syncTerminalProgress(
+  state: PersistedSessionState,
+  totalIterations: number,
+  tasksCompleted: number
+): PersistedSessionState {
+  return {
+    ...state,
+    currentIteration: Math.max(state.currentIteration, totalIterations),
+    tasksCompleted: Math.max(state.tasksCompleted, tasksCompleted),
+  };
+}
+
+function syncFailedIterationProgress(
+  state: PersistedSessionState,
+  iteration: number
+): PersistedSessionState {
+  return {
+    ...state,
+    currentIteration: Math.max(state.currentIteration, iteration),
+  };
+}
+
 async function didRunComplete(engine: EngineController): Promise<boolean> {
   const tracker = engine.getTracker();
   if (!tracker) {
@@ -192,6 +214,11 @@ async function runWithTui(
       savePersistedSession(currentState).catch(() => {
         // Log but don't fail on save errors
       });
+    } else if (event.type === 'iteration:failed') {
+      currentState = syncFailedIterationProgress(currentState, event.iteration);
+      savePersistedSession(currentState).catch(() => {
+        // Log but don't fail on save errors
+      });
     } else if (event.type === 'engine:started') {
       currentState = toRunningSessionState(currentState);
       savePersistedSession(currentState).catch(() => {
@@ -210,6 +237,7 @@ async function runWithTui(
         // Log but don't fail on save errors
       });
     } else if (event.type === 'engine:stopped') {
+      currentState = syncTerminalProgress(currentState, event.totalIterations, event.tasksCompleted);
       currentState = toTerminalSessionState(currentState, event.reason);
       savePersistedSession(currentState).catch(() => {
         // Log but don't fail on save errors
@@ -313,6 +341,10 @@ async function runHeadless(
 
       case 'iteration:failed':
         console.error(`Iteration ${event.iteration} FAILED: ${event.error}`);
+        currentState = syncFailedIterationProgress(currentState, event.iteration);
+        savePersistedSession(currentState).catch(() => {
+          // Log but don't fail on save errors
+        });
         break;
 
       case 'engine:paused':
@@ -335,6 +367,7 @@ async function runHeadless(
         console.log(`\nRalph stopped. Reason: ${event.reason}`);
         console.log(`Total iterations: ${event.totalIterations}`);
         console.log(`Tasks completed: ${event.tasksCompleted}`);
+        currentState = syncTerminalProgress(currentState, event.totalIterations, event.tasksCompleted);
         currentState = toTerminalSessionState(currentState, event.reason);
         savePersistedSession(currentState).catch(() => {
           // Log but don't fail on save errors
