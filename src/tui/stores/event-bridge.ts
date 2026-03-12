@@ -368,6 +368,16 @@ export function mapEngineEventToStoreActions(
       return;
 
     case 'engine:stopped':
+      if (event.reason === 'completed' && stores.ui.getState().overlay !== 'runSummary') {
+        dispatchUI({
+          type: 'ui/push-toast',
+          toast: {
+            message: 'All tasks complete! Press Enter for summary.',
+            variant: 'success',
+          },
+        });
+        dispatchUI({ type: 'ui/open-overlay', overlay: 'runSummary' });
+      }
       dispatchPhase({
         type: 'phase/set-status',
         status: event.reason === 'completed'

@@ -146,6 +146,192 @@ describe('RunApp', () => {
     }
   });
 
+  test('clears stale remote task state when a remote refresh fails', async () => {
+    const stores = createTuiStores({
+      ui: {
+        selectedTabIndex: 1,
+        instances: [
+          { id: 'local', label: 'Local', isLocal: true, status: 'connected' },
+          { id: 'remote-a', label: 'prod-a', isLocal: false, status: 'connected' },
+        ],
+      },
+    });
+
+    const remoteTask = {
+      id: 'remote-1',
+      title: 'Remote task',
+      status: 'in_progress' as const,
+      priority: 1 as const,
+      description: 'Remote task body',
+    };
+
+    const stateResponses = [
+      () => Promise.resolve({
+        status: 'running' as const,
+        currentIteration: 2,
+        currentTask: remoteTask,
+        totalTasks: 1,
+        tasksCompleted: 0,
+        iterations: [],
+        startedAt: '2026-03-10T12:00:00.000Z',
+        currentOutput: 'remote output',
+        currentStderr: 'remote stderr',
+        activeAgent: null,
+        rateLimitState: null,
+        maxIterations: 10,
+        tasks: [remoteTask],
+        agentName: 'claude',
+        trackerName: 'beads',
+        currentModel: 'anthropic/claude-3-7-sonnet',
+        subagentTree: [],
+      }),
+      () => Promise.reject(new Error('Failed to fetch remote state.')),
+    ];
+    const taskResponses = [
+      () => Promise.resolve([remoteTask]),
+      () => Promise.reject(new Error('Failed to fetch remote tasks.')),
+    ];
+
+    const instanceManager = {
+      async getRemoteState() {
+        const nextResponse = stateResponses.shift();
+        return nextResponse ? nextResponse() : Promise.reject(new Error('No state response queued.'));
+      },
+      async getRemoteTasks() {
+        const nextResponse = taskResponses.shift();
+        return nextResponse ? nextResponse() : Promise.reject(new Error('No task response queued.'));
+      },
+    };
+
+    const app = await testRender(
+      createElement(
+        TuiProvider,
+        { stores },
+        createElement(AppShell, {
+          instanceManager: instanceManager as never,
+        })
+      ),
+      {
+        width: 120,
+        height: 36,
+      }
+    );
+
+    try {
+      await app.renderOnce();
+      await act(async () => {
+        await Promise.resolve();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      await app.renderOnce();
+
+      expect(app.captureCharFrame()).toContain('Remote task');
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 2100));
+        await Promise.resolve();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      await app.renderOnce();
+
+      const frame = app.captureCharFrame();
+      expect(frame).not.toContain('Remote task');
+      expect(frame).toContain('Idle');
+    } finally {
+      act(() => {
+        app.renderer.destroy();
+      });
+    }
+  });
+
+  test('does not render live remote output for a non-current selected remote task', async () => {
+    const stores = createTuiStores({
+      ui: {
+        selectedTabIndex: 1,
+        selectedTaskId: 'remote-2',
+        viewMode: 'logs',
+        instances: [
+          { id: 'local', label: 'Local', isLocal: true, status: 'connected' },
+          { id: 'remote-a', label: 'prod-a', isLocal: false, status: 'connected' },
+        ],
+      },
+    });
+
+    const currentRemoteTask = {
+      id: 'remote-1',
+      title: 'Current remote task',
+      status: 'in_progress' as const,
+      priority: 1 as const,
+      description: 'Current remote task body',
+    };
+    const selectedRemoteTask = {
+      id: 'remote-2',
+      title: 'Selected remote task',
+      status: 'open' as const,
+      priority: 2 as const,
+      description: 'Selected remote task body',
+    };
+
+    const instanceManager = {
+      async getRemoteState() {
+        return {
+          status: 'running' as const,
+          currentIteration: 4,
+          currentTask: currentRemoteTask,
+          totalTasks: 2,
+          tasksCompleted: 0,
+          iterations: [],
+          startedAt: '2026-03-10T12:00:00.000Z',
+          currentOutput: 'current remote stdout',
+          currentStderr: 'current remote stderr',
+          activeAgent: null,
+          rateLimitState: null,
+          maxIterations: 10,
+          tasks: [currentRemoteTask, selectedRemoteTask],
+          agentName: 'claude',
+          trackerName: 'beads',
+          currentModel: 'anthropic/claude-3-7-sonnet',
+          subagentTree: [],
+        };
+      },
+      async getRemoteTasks() {
+        return [currentRemoteTask, selectedRemoteTask];
+      },
+    };
+
+    const app = await testRender(
+      createElement(
+        TuiProvider,
+        { stores },
+        createElement(AppShell, {
+          instanceManager: instanceManager as never,
+        })
+      ),
+      {
+        width: 120,
+        height: 36,
+      }
+    );
+
+    try {
+      await app.renderOnce();
+      await act(async () => {
+        await Promise.resolve();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      await app.renderOnce();
+
+      const frame = app.captureCharFrame();
+      expect(frame).toContain('Selected remote task');
+      expect(frame).not.toContain('current remote stdout');
+      expect(frame).not.toContain('current remote stderr');
+    } finally {
+      act(() => {
+        app.renderer.destroy();
+      });
+    }
+  });
+
   test('renders selected task output instead of the global live buffer in parallel mode', async () => {
     const stores = createTuiStores({
       phase: {
@@ -258,6 +444,28 @@ describe('monitorStartExecution', () => {
     await Promise.resolve();
 
     expect(phase).toBe('running');
+    expect(errors).toEqual([]);
+  });
+
+  test('does not report a startup failure while start remains pending', async () => {
+    let phase: 'ready' | 'selecting' = 'selecting';
+    const errors: string[] = [];
+
+    monitorStartExecution({
+      previousStatus: 'ready',
+      startOperation: new Promise<void>(() => {}),
+      getCurrentStatus: () => phase,
+      restoreStatus: (status) => {
+        phase = status as typeof phase;
+      },
+      pushError: (message) => {
+        errors.push(message);
+      },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    expect(phase).toBe('selecting');
     expect(errors).toEqual([]);
   });
 });

@@ -308,6 +308,28 @@ describe('event-bridge', () => {
     bridge.destroy();
   });
 
+  test('completed engine stop opens the run summary overlay when all:complete is absent', () => {
+    const engine = new FakeEngine();
+    const stores = createTuiStores();
+    const bridge = createEventBridge(engine, stores, { batchIntervalMs: 10_000 });
+
+    engine.emit({
+      type: 'engine:stopped',
+      timestamp: makeTimestamp(),
+      reason: 'completed',
+      totalIterations: 7,
+    });
+
+    bridge.flush();
+
+    expect(stores.phase.getState().status).toBe('complete');
+    expect(stores.history.getState().totalIterations).toBe(7);
+    expect(stores.ui.getState().overlay).toBe('runSummary');
+    expect(stores.ui.getState().toasts.some((toast) => toast.message.includes('summary'))).toBe(true);
+
+    bridge.destroy();
+  });
+
   test('failed iterations keep error phase without appending a misleading completed activity', () => {
     const engine = new FakeEngine();
     const stores = createTuiStores();

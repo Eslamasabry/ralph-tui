@@ -4,7 +4,7 @@
  */
 
 import type { ReactNode } from 'react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { readFile } from 'node:fs/promises';
@@ -326,6 +326,7 @@ export function AppShell(props: AppShellProps): ReactNode {
   const [remoteTasks, setRemoteTasks] = useState<TrackerTask[] | null>(null);
   const [remoteStateLoading, setRemoteStateLoading] = useState(false);
   const [remoteStateError, setRemoteStateError] = useState<string | undefined>(undefined);
+  const remoteStateRequestIdRef = useRef(0);
 
   const runtimeCwd = props.cwd ?? process.cwd();
 
@@ -354,6 +355,7 @@ export function AppShell(props: AppShellProps): ReactNode {
 
   useEffect(() => {
     if (!isViewingRemote) {
+      remoteStateRequestIdRef.current += 1;
       setRemoteSnapshot(null);
       setRemoteTasks(null);
       setRemoteStateLoading(false);
@@ -363,6 +365,7 @@ export function AppShell(props: AppShellProps): ReactNode {
 
     const instanceManager = props.instanceManager;
     if (!instanceManager || selectedTab?.status !== 'connected') {
+      remoteStateRequestIdRef.current += 1;
       setRemoteSnapshot(null);
       setRemoteTasks(null);
       setRemoteStateLoading(false);
@@ -373,6 +376,9 @@ export function AppShell(props: AppShellProps): ReactNode {
     let cancelled = false;
 
     const loadRemoteState = async (showLoading: boolean): Promise<void> => {
+      const requestId = remoteStateRequestIdRef.current + 1;
+      remoteStateRequestIdRef.current = requestId;
+
       if (showLoading) {
         setRemoteStateLoading(true);
       }
@@ -383,7 +389,7 @@ export function AppShell(props: AppShellProps): ReactNode {
           withTimeout(instanceManager.getRemoteTasks(), 5000, 'Failed to fetch remote tasks.'),
         ]);
 
-        if (cancelled) {
+        if (cancelled || requestId !== remoteStateRequestIdRef.current) {
           return;
         }
 
@@ -391,13 +397,15 @@ export function AppShell(props: AppShellProps): ReactNode {
         setRemoteTasks(nextTasks ?? nextSnapshot?.tasks ?? []);
         setRemoteStateError(undefined);
       } catch (error: unknown) {
-        if (cancelled) {
+        if (cancelled || requestId !== remoteStateRequestIdRef.current) {
           return;
         }
 
+        setRemoteSnapshot(null);
+        setRemoteTasks(null);
         setRemoteStateError(error instanceof Error ? error.message : 'Failed to fetch remote state.');
       } finally {
-        if (!cancelled) {
+        if (!cancelled && requestId === remoteStateRequestIdRef.current) {
           setRemoteStateLoading(false);
         }
       }
@@ -414,6 +422,7 @@ export function AppShell(props: AppShellProps): ReactNode {
 
     return () => {
       cancelled = true;
+      remoteStateRequestIdRef.current += 1;
       clearInterval(interval);
     };
   }, [isViewingRemote, props.instanceManager, selectedTab?.id, selectedTab?.status]);
@@ -537,7 +546,19 @@ export function AppShell(props: AppShellProps): ReactNode {
   const currentSubagentTree = (isViewingRemote ? subagent.remoteTree : subagent.tree) as SubagentTreeNode[];
 
   const selectedTaskOutput = useMemo(() => {
-    if (isViewingRemote || !selectedTask) {
+    if (isViewingRemote) {
+      const remoteCurrentTaskId = remoteSnapshot?.currentTask?.id;
+      const showLiveRemoteOutput =
+        !selectedTask || !remoteCurrentTaskId || selectedTask.id === remoteCurrentTaskId;
+
+      return {
+        iterationOutput: showLiveRemoteOutput ? output.currentOutput : '',
+        cliOutput: showLiveRemoteOutput ? output.currentCliOutput : '',
+        iterationSegments: showLiveRemoteOutput ? output.currentSegments : [],
+      };
+    }
+
+    if (!selectedTask) {
       return {
         iterationOutput: output.currentOutput,
         cliOutput: output.currentCliOutput,
@@ -555,7 +576,15 @@ export function AppShell(props: AppShellProps): ReactNode {
       cliOutput: parallelCliOutput ?? (isCurrentTask ? output.currentCliOutput : ''),
       iterationSegments: parallelSegments ?? (isCurrentTask ? output.currentSegments : []),
     };
-  }, [isViewingRemote, output, phase.currentTaskId, selectedTask]);
+  }, [isViewingRemote, output, phase.currentTaskId, remoteSnapshot, selectedTask]);
+
+  const logPaneOutput = useMemo(() => {
+    if (isViewingRemote) {
+      return selectedTaskOutput.cliOutput || selectedTaskOutput.iterationOutput || remoteStateError || '';
+    }
+
+    return selectedTaskOutput.cliOutput || selectedTaskOutput.iterationOutput || rawLog;
+  }, [isViewingRemote, rawLog, remoteStateError, selectedTaskOutput]);
 
   const trackerName = isViewingRemote
     ? remoteSnapshot?.trackerName ?? 'remote'
@@ -1104,7 +1133,7 @@ export function AppShell(props: AppShellProps): ReactNode {
           taskTitle={selectedTask?.title}
           taskId={selectedTask?.id}
           currentIteration={phase.currentIteration}
-          iterationOutput={selectedTaskOutput.cliOutput || selectedTaskOutput.iterationOutput || rawLog}
+          iterationOutput={logPaneOutput}
           currentModel={phase.currentModel}
           agentName={phase.activeAgentState?.plugin}
           isFocused={ui.focusPerView[ui.viewMode] === 'logPane'}

@@ -1009,6 +1009,80 @@ async function didRunComplete(engine: EngineController): Promise<boolean> {
   return remainingTasks.length === 0;
 }
 
+interface ActiveTaskResetResult {
+  nextState: PersistedSessionState;
+  resettableTaskIds: string[];
+  skippedTaskIds: string[];
+  resetCount: number;
+}
+
+async function resetTrackedActiveTasks(
+  engine: EngineController,
+  state: PersistedSessionState
+): Promise<ActiveTaskResetResult> {
+  const activeTaskIds = getActiveTasks(state);
+  if (activeTaskIds.length === 0) {
+    return {
+      nextState: state,
+      resettableTaskIds: [],
+      skippedTaskIds: [],
+      resetCount: 0,
+    };
+  }
+
+  const tracker = engine.getTracker();
+  if (!tracker) {
+    const resetCount = await engine.resetTasksToOpen(activeTaskIds);
+    const nextState = resetCount > 0 ? clearActiveTasks(state) : state;
+    return {
+      nextState,
+      resettableTaskIds: [...activeTaskIds],
+      skippedTaskIds: [],
+      resetCount,
+    };
+  }
+
+  let nextState = state;
+  const resettableTaskIds: string[] = [];
+  const skippedTaskIds: string[] = [];
+
+  for (const taskId of activeTaskIds) {
+    let shouldReset = false;
+
+    try {
+      const task = await tracker.getTask(taskId);
+      shouldReset = task?.status === 'in_progress';
+    } catch {
+      shouldReset = false;
+    }
+
+    if (shouldReset) {
+      resettableTaskIds.push(taskId);
+      continue;
+    }
+
+    skippedTaskIds.push(taskId);
+    nextState = removeActiveTask(nextState, taskId);
+  }
+
+  let resetCount = 0;
+  if (resettableTaskIds.length > 0) {
+    resetCount = await engine.resetTasksToOpen(resettableTaskIds);
+    if (resetCount > 0) {
+      for (const taskId of resettableTaskIds) {
+        nextState = removeActiveTask(nextState, taskId);
+      }
+    }
+  }
+
+  return {
+    nextState,
+    resettableTaskIds,
+    skippedTaskIds,
+    resetCount,
+  };
+}
+
 async function stopEngineForShutdown(
   engine: EngineController,
   timeoutMs = 15000
@@ -1177,15 +1251,13 @@ async function runWithTui(
   const gracefulShutdown = async (): Promise<void> => {
     await stopEngineForShutdown(engine);
 
-    // Reset any active (in_progress) tasks back to open
-    // This prevents tasks from being stuck in_progress after shutdown
-    const activeTasks = getActiveTasks(currentState);
-    if (activeTasks.length > 0) {
-      const resetCount = await engine.resetTasksToOpen(activeTasks);
-      if (resetCount > 0) {
-        // Clear active tasks from state now that they've been reset
-        currentState = clearActiveTasks(currentState);
-      }
+    const resetResult = await resetTrackedActiveTasks(engine, currentState);
+    currentState = resetResult.nextState;
+    if (
+      resetResult.skippedTaskIds.length > 0 &&
+      resetResult.resettableTaskIds.length === 0
+    ) {
+      currentState = clearActiveTasks(currentState);
     }
 
     currentState = toInterruptedSessionState(currentState);
@@ -1546,15 +1618,14 @@ async function runHeadless(
     logger.info('system', '(Press Ctrl+C again within 1s to force quit)');
     await stopEngineForShutdown(engine);
 
-    // Reset any active (in_progress) tasks back to open
-    const activeTasks = getActiveTasks(currentState);
-    if (activeTasks.length > 0) {
-      logger.info('system', `Resetting ${activeTasks.length} in_progress task(s) to open...`);
-      const resetCount = await engine.resetTasksToOpen(activeTasks);
-      if (resetCount > 0) {
-        currentState = clearActiveTasks(currentState);
-      }
+    const resetResult = await resetTrackedActiveTasks(engine, currentState);
+    if (resetResult.resettableTaskIds.length > 0) {
+      logger.info(
+        'system',
+        `Resetting ${resetResult.resettableTaskIds.length} in_progress task(s) to open...`
+      );
     }
+    currentState = resetResult.nextState;
 
     currentState = toInterruptedSessionState(currentState);
     await savePersistedSession(currentState);
@@ -1593,15 +1664,14 @@ async function runHeadless(
     logger.info('system', 'Received SIGTERM, stopping gracefully...');
     await stopEngineForShutdown(engine);
 
-    // Reset any active (in_progress) tasks back to open
-    const activeTasks = getActiveTasks(currentState);
-    if (activeTasks.length > 0) {
-      logger.info('system', `Resetting ${activeTasks.length} in_progress task(s) to open...`);
-      const resetCount = await engine.resetTasksToOpen(activeTasks);
-      if (resetCount > 0) {
-        currentState = clearActiveTasks(currentState);
-      }
+    const resetResult = await resetTrackedActiveTasks(engine, currentState);
+    if (resetResult.resettableTaskIds.length > 0) {
+      logger.info(
+        'system',
+        `Resetting ${resetResult.resettableTaskIds.length} in_progress task(s) to open...`
+      );
     }
+    currentState = resetResult.nextState;
 
     currentState = toInterruptedSessionState(currentState);
     await savePersistedSession(currentState);
