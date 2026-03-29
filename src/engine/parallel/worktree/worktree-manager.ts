@@ -170,7 +170,8 @@ export class WorktreeManager {
     try {
       await access(this.managedMetaPath(worktreePath));
       return true;
-    } catch {
+    } catch (error) {
+      // File doesn't exist or not accessible - not a managed worktree
       return false;
     }
   }
@@ -372,8 +373,9 @@ export class WorktreeManager {
 
     try {
       await rm(worktreePath, { recursive: true, force: true });
-    } catch {
-      // ignore missing path
+    } catch (error) {
+      // Ignore missing path - worktree may already be removed
+      console.debug(`[worktree] Failed to remove path ${worktreePath}: ${error instanceof Error ? error.message : 'unknown error'}`);
     }
   }
 
@@ -416,7 +418,8 @@ export class WorktreeManager {
         try {
           await access(path);
           status = 'active';
-        } catch {
+        } catch (error) {
+          // Path not accessible - worktree is stale
           status = 'stale';
         }
       }
@@ -550,8 +553,9 @@ export class WorktreeManager {
 
     try {
       await rm(worktreePath, { recursive: true, force: true });
-    } catch {
-      // ignore
+    } catch (error) {
+      // Ignore removal errors - path may already be gone
+      console.debug(`[worktree] Failed to remove worktree path: ${error instanceof Error ? error.message : 'unknown error'}`);
     }
   }
 }
