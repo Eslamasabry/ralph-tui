@@ -3,6 +3,7 @@
  * Tracks active views, panel focus, overlays, tab state, and transient feedback.
  */
 
+import { randomUUID } from 'node:crypto';
 import type { DetailsViewMode } from '../types.js';
 import {
   applyPatch,
@@ -570,7 +571,7 @@ function uiReducer(state: Readonly<UIState>, action: UIAction): UIState {
 
     case 'ui/push-toast': {
       const toast: ToastState = {
-        id: action.toast.id ?? `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        id: action.toast.id ?? randomUUID(),
         message: action.toast.message,
         variant: action.toast.variant,
         autoDismissMs: action.toast.autoDismissMs,
