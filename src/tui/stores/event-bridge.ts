@@ -831,6 +831,7 @@ export function createEventBridge(
   let pendingOutputStdout = '';
   let pendingOutputStderr = '';
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
+  let flushInProgress = false;
   const dispatchOutput = (action: Parameters<typeof stores.output.dispatch>[0]): void => {
     try {
       stores.output.dispatch(action);
@@ -854,42 +855,52 @@ export function createEventBridge(
       flushTimer = null;
     }
 
-    if (pendingOutputStdout.length > 0) {
-      dispatchOutput({
-        type: 'output/append-current-output',
-        chunk: pendingOutputStdout,
-      });
-
-      const cappedOutput = trimOutputToCap(
-        stores.output.getState().currentOutput,
-        outputCapBytes
-      );
-      if (cappedOutput !== stores.output.getState().currentOutput) {
-        dispatchOutput({
-          type: 'output/set-current-output',
-          output: cappedOutput,
-        });
-      }
-      pendingOutputStdout = '';
-    }
-
-    if (pendingOutputStderr.length > 0) {
-      dispatchOutput({
-        type: 'output/append-cli-output',
-        chunk: pendingOutputStderr,
-      });
-      pendingOutputStderr = '';
-    }
-
-    if (pendingEvents.length === 0) {
+    // Prevent concurrent flushes - this can happen if flush takes longer than batchIntervalMs
+    if (flushInProgress) {
       return;
     }
+    flushInProgress = true;
 
-    const eventsToFlush = pendingEvents;
-    pendingEvents = [];
+    try {
+      if (pendingOutputStdout.length > 0) {
+        dispatchOutput({
+          type: 'output/append-current-output',
+          chunk: pendingOutputStdout,
+        });
 
-    for (const event of eventsToFlush) {
-      mapEngineEventToStoreActions(event, stores);
+        const cappedOutput = trimOutputToCap(
+          stores.output.getState().currentOutput,
+          outputCapBytes
+        );
+        if (cappedOutput !== stores.output.getState().currentOutput) {
+          dispatchOutput({
+            type: 'output/set-current-output',
+            output: cappedOutput,
+          });
+        }
+        pendingOutputStdout = '';
+      }
+
+      if (pendingOutputStderr.length > 0) {
+        dispatchOutput({
+          type: 'output/append-cli-output',
+          chunk: pendingOutputStderr,
+        });
+        pendingOutputStderr = '';
+      }
+
+      if (pendingEvents.length === 0) {
+        return;
+      }
+
+      const eventsToFlush = pendingEvents;
+      pendingEvents = [];
+
+      for (const event of eventsToFlush) {
+        mapEngineEventToStoreActions(event, stores);
+      }
+    } finally {
+      flushInProgress = false;
     }
   };
 
