@@ -624,7 +624,14 @@ export class ParallelCoordinator {
 
     if (this.activeWorkerTasks.size > 0) {
       this.logInfo(`Waiting for ${this.activeWorkerTasks.size} active worker(s) to finish.`);
-      await Promise.allSettled(Array.from(this.activeWorkerTasks));
+      // Add timeout to prevent hanging forever on stuck workers
+      const timeoutMs = 30000; // 30 seconds
+      await Promise.race([
+        Promise.allSettled(Array.from(this.activeWorkerTasks)),
+        new Promise((_, reject) => setTimeout(() => reject(new Error(`Worker tasks did not complete within ${timeoutMs}ms`)), timeoutMs))
+      ]).catch((error) => {
+        this.logWarn(`Timeout waiting for worker tasks: ${error instanceof Error ? error.message : 'unknown error'}`);
+      });
     }
 
     if (this.hasPendingCoordinatorWork()) {
