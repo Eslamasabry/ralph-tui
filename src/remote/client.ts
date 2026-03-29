@@ -175,6 +175,8 @@ export class RemoteClient {
   private _status: ConnectionStatus = 'disconnected';
   /** Pending requests waiting for responses, keyed by message ID */
   private pendingRequests: Map<string, PendingRequest<unknown>> = new Map();
+  /** Maximum number of pending requests to prevent unbounded growth */
+  private readonly MAX_PENDING_REQUESTS = 100;
   /** Whether subscribed to engine events */
   private _subscribed = false;
   /** Request timeout in milliseconds */
@@ -214,6 +216,24 @@ export class RemoteClient {
     this.serverToken = token;
     this.eventHandler = eventHandler;
     this.reconnectConfig = { ...DEFAULT_RECONNECT_CONFIG, ...reconnectConfig };
+  }
+
+  /**
+   * Enforce size limit on pending requests Map.
+   * Rejects oldest requests when limit is exceeded.
+   */
+  private enforcePendingRequestsLimit(): void {
+    if (this.pendingRequests.size >= this.MAX_PENDING_REQUESTS) {
+      const entriesToRemove = Math.floor(this.MAX_PENDING_REQUESTS * 0.1); // Remove 10% of limit
+      let removed = 0;
+      for (const [id, pending] of this.pendingRequests) {
+        if (removed >= entriesToRemove) break;
+        clearTimeout(pending.timeout);
+        pending.reject(new Error('Request dropped due to too many pending requests'));
+        this.pendingRequests.delete(id);
+        removed++;
+      }
+    }
   }
 
   private getWebSocketUrl(): string {
@@ -478,6 +498,7 @@ export class RemoteClient {
         reject(new Error('Request timeout'));
       }, this.requestTimeout);
 
+      this.enforcePendingRequestsLimit();
       this.pendingRequests.set(id, { resolve: resolve as (value: unknown) => void, reject, timeout });
       this.ws!.send(JSON.stringify(fullMessage));
     });
