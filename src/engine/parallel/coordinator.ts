@@ -68,6 +68,13 @@ export class ParallelCoordinator {
   private lastMainSyncAttemptAt = 0;
   private pendingMainSyncRetryCount = 0;
   private readonly maxMainSyncRetries = 10;
+
+  // Size limits for Maps to prevent unbounded growth
+  private readonly MAX_PROCESSED_COMMITS = 10000;
+  private readonly MAX_COMMIT_RECOVERY_ATTEMPTS = 1000;
+  private readonly MAX_TASK_FAILURE_COUNTS = 1000;
+  private readonly MAX_NOT_READY_COOLDOWNS = 500;
+  private readonly MAX_ACTIVE_TASK_LEASES = 100;
   private lastMainSyncSkipAt = 0;
   private mainSyncWorktree: MainSyncWorktree | null = null;
   private mainSyncRunning = false;
@@ -97,6 +104,36 @@ export class ParallelCoordinator {
   }
 
   private maxWorkers: number;
+
+  /**
+   * Enforce size limit on a Map by removing oldest entries.
+   */
+  private enforceMapSizeLimit<K, V>(map: Map<K, V>, limit: number): void {
+    if (map.size >= limit) {
+      const entriesToRemove = Math.floor(limit * 0.1); // Remove 10% of limit
+      let removed = 0;
+      for (const [key] of map) {
+        if (removed >= entriesToRemove) break;
+        map.delete(key);
+        removed++;
+      }
+    }
+  }
+
+  /**
+   * Enforce size limit on processedCommits Set.
+   */
+  private enforceProcessedCommitsLimit(): void {
+    if (this.processedCommits.size >= this.MAX_PROCESSED_COMMITS) {
+      const entriesToRemove = Math.floor(this.MAX_PROCESSED_COMMITS * 0.1);
+      let removed = 0;
+      for (const commit of this.processedCommits) {
+        if (removed >= entriesToRemove) break;
+        this.processedCommits.delete(commit);
+        removed++;
+      }
+    }
+  }
 
   on(listener: (event: ParallelEvent) => void): () => void {
     this.listeners.push(listener);
@@ -170,7 +207,8 @@ export class ParallelCoordinator {
   private setNotReadyCooldown(taskId: string, attemptCount: number): void {
     const baseDelayMs = 1000;
     const maxDelayMs = 15000;
-    const delayMs = Math.min(baseDelayMs * Math.pow(2, attemptCount - 1), maxDelayMs);
+    const delayMs = Math.min(baseDelayMs * Math.pow(2, attemptCount -  1), maxDelayMs);
+    this.enforceMapSizeLimit(this.notReadyCooldowns, this.MAX_NOT_READY_COOLDOWNS);
     this.notReadyCooldowns.set(taskId, Date.now() + delayMs);
   }
 
@@ -557,6 +595,7 @@ export class ParallelCoordinator {
 
       this.notReadyAttempts.delete(task.id);
       this.notReadyCooldowns.delete(task.id);
+      this.enforceMapSizeLimit(this.activeTaskLeases, this.MAX_ACTIVE_TASK_LEASES);
       this.activeTaskLeases.set(task.id, { workerId: idleWorker.workerId, claimedAt: Date.now() });
       this.taskAffinity.set(task.id, idleWorker.workerId);
       this.emit({ type: 'parallel:task-claimed', timestamp: new Date().toISOString(), workerId: idleWorker.workerId, task });
@@ -595,6 +634,11 @@ export class ParallelCoordinator {
       clearTimeout(this.validationBatchTimer);
       this.validationBatchTimer = null;
     }
+    // Clear transient state Maps
+    this.notReadyCooldowns.clear();
+    this.notReadyAttempts.clear();
+    this.activeTaskLeases.clear();
+    this.taskAffinity.clear();
     this.logInfo('Parallel execution stop requested.');
   }
 
@@ -631,6 +675,24 @@ export class ParallelCoordinator {
       await this.mainSyncWorktree.cleanup();
       this.mainSyncWorktree = null;
     }
+
+    // Clear all Maps and Sets to prevent memory leaks
+    this.mergeQueue = [];
+    this.queuedMergeKeys.clear();
+    this.processedCommits.clear();
+    this.pendingMergeCounts.clear();
+    this.workerBaseCommits.clear();
+    this.blockedTaskIds.clear();
+    this.activeTaskPlans.clear();
+    this.activeImpactTables.clear();
+    this.pendingMainSyncTasks.clear();
+    this.commitRecoveryAttempts.clear();
+    this.taskFailureCounts.clear();
+    this.notReadyCooldowns.clear();
+    this.notReadyAttempts.clear();
+    this.activeTaskLeases.clear();
+    this.taskAffinity.clear();
+    this.validationQueue = [];
   }
 
   pause(): void {
@@ -892,6 +954,7 @@ export class ParallelCoordinator {
     }
 
     const failures = (this.taskFailureCounts.get(taskId) ?? 0) + 1;
+    this.enforceMapSizeLimit(this.taskFailureCounts, this.MAX_TASK_FAILURE_COUNTS);
     this.taskFailureCounts.set(taskId, failures);
     const maxFailures = 3;
 
@@ -1063,6 +1126,7 @@ export class ParallelCoordinator {
   ): Promise<void> {
     this.queuedMergeKeys.delete(this.buildMergeKey(entry.task.id, entry.commit));
     if (entry.commit !== 'none') {
+      this.enforceProcessedCommitsLimit();
       this.processedCommits.add(entry.commit);
     }
     this.logWarn(
@@ -1144,6 +1208,7 @@ export class ParallelCoordinator {
   ): Promise<void> {
     this.queuedMergeKeys.delete(this.buildMergeKey(entry.task.id, entry.commit));
     if (entry.commit !== 'none') {
+      this.enforceProcessedCommitsLimit();
       this.processedCommits.add(entry.commit);
     }
     this.logInfo(
@@ -2785,6 +2850,7 @@ export class ParallelCoordinator {
       return false;
     }
 
+    this.enforceMapSizeLimit(this.commitRecoveryAttempts, this.MAX_COMMIT_RECOVERY_ATTEMPTS);
     this.commitRecoveryAttempts.set(task.id, attempts + 1);
 
     const prompt = await this.buildRecoveryPrompt(task, statusLines, lastResult, worker.worktreePath);

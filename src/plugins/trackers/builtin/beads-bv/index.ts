@@ -128,6 +128,11 @@ let templateCache: string | null = null;
 const TRACKER_COMMAND_TIMEOUT_MS = 5 * 60 * 1000;
 
 /**
+ * Maximum number of task reasoning entries to prevent unbounded memory growth.
+ */
+const MAX_TASK_REASONING_CACHE_SIZE = 500;
+
+/**
  * Execute a bv command and return the output.
  */
 async function execBv(
@@ -652,11 +657,17 @@ export class BeadsBvTrackerPlugin extends BeadsTrackerPlugin {
 
   /**
    * Cache task reasoning from triage output.
+   * Enforces MAX_TASK_REASONING_CACHE_SIZE to prevent unbounded growth.
    */
   private cacheTaskReasoning(triageOutput: BvTriageOutput): void {
     this.taskReasoningCache.clear();
 
     for (const rec of triageOutput.triage.recommendations) {
+      // Enforce size limit to prevent unbounded growth
+      if (this.taskReasoningCache.size >= MAX_TASK_REASONING_CACHE_SIZE) {
+        break;
+      }
+
       const reasoning: TaskReasoning = {
         taskId: rec.id,
         score: rec.score,
