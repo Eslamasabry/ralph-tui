@@ -305,8 +305,12 @@ export class RemoteClient {
           }
         };
 
+        let connectionHandled = false;
+
         this.ws.onerror = () => {
           // Don't immediately reject - let onclose handle it for reconnection logic
+          if (connectionHandled) return;
+          connectionHandled = true;
           if (this._status === 'connecting') {
             this._status = 'disconnected';
             this.eventHandler({ type: 'disconnected', error: 'Connection error' });
@@ -315,6 +319,8 @@ export class RemoteClient {
         };
 
         this.ws.onclose = () => {
+          if (connectionHandled) return;
+          connectionHandled = true;
           const wasConnected = this._status === 'connected';
           this.cleanupConnection();
 
@@ -1057,7 +1063,10 @@ export class RemoteClient {
         // Don't schedule here to avoid double-incrementing reconnectAttempts
       };
 
+      let reconnectHandled = false;
       this.ws.onclose = () => {
+        if (reconnectHandled) return;
+        reconnectHandled = true;
         if (this._status === 'connected' && !this.intentionalDisconnect) {
           // Connection lost again - try to reconnect
           this.cleanupConnection();
