@@ -60,6 +60,7 @@ export class TrackerRegistry {
 
   private plugins: Map<string, RegisteredPlugin> = new Map();
   private loadedInstances: Map<string, TrackerPlugin> = new Map();
+  private pendingInstances: Map<string, Promise<TrackerPlugin>> = new Map();
   private initialized = false;
 
   private constructor() {
@@ -286,6 +287,25 @@ export class TrackerRegistry {
       return cached;
     }
 
+    // If initialization is already in progress, wait for it
+    const pending = this.pendingInstances.get(cacheKey);
+    if (pending) {
+      return pending;
+    }
+
+    // Create initialization promise
+    const initPromise = this.initializeInstance(config, cacheKey);
+    this.pendingInstances.set(cacheKey, initPromise);
+
+    try {
+      const instance = await initPromise;
+      return instance;
+    } finally {
+      this.pendingInstances.delete(cacheKey);
+    }
+  }
+
+  private async initializeInstance(config: TrackerPluginConfig, cacheKey: string): Promise<TrackerPlugin> {
     // Create and initialize new instance
     const instance = this.createInstance(config.plugin);
     if (!instance) {
