@@ -1515,7 +1515,15 @@ export class ParallelCoordinator {
       if (!this.validationBatchTimer) {
         this.validationBatchTimer = setTimeout(() => {
           this.validationBatchTimer = null;
-          void this.processValidationQueue();
+          void this.processValidationQueue().then(() => {
+            // If there are still items in queue (validation was running), reschedule
+            if (this.validationQueue.length > 0 && !this.validationBatchTimer) {
+              this.validationBatchTimer = setTimeout(() => {
+                this.validationBatchTimer = null;
+                void this.processValidationQueue();
+              }, this.config.qualityGates.batchWindowMs);
+            }
+          });
         }, this.config.qualityGates.batchWindowMs);
       }
       return;
