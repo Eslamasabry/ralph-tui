@@ -351,7 +351,7 @@ export class RemoteClient {
    * Send a message to the remote instance.
    */
   send(message: WSMessage): void {
-    if (this.ws && this._status === 'connected') {
+    if (this.ws && this._status === 'connected' && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(message));
     }
   }
@@ -493,6 +493,11 @@ export class RemoteClient {
     } as WSMessage;
 
     return new Promise<WSMessage>((resolve, reject) => {
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
       const timeout = setTimeout(() => {
         this.pendingRequests.delete(id);
         reject(new Error('Request timeout'));
@@ -500,7 +505,7 @@ export class RemoteClient {
 
       this.enforcePendingRequestsLimit();
       this.pendingRequests.set(id, { resolve: resolve as (value: unknown) => void, reject, timeout });
-      this.ws!.send(JSON.stringify(fullMessage));
+      this.ws.send(JSON.stringify(fullMessage));
     });
   }
 
