@@ -457,7 +457,8 @@ export class JsonTrackerPlugin extends BaseTrackerPlugin {
       try {
         await access(this.filePath, constants.R_OK | constants.W_OK);
         this.ready = true;
-      } catch {
+      } catch (error) {
+        // File not accessible, but this is expected during initialization
         this.ready = false;
       }
     }
@@ -472,7 +473,9 @@ export class JsonTrackerPlugin extends BaseTrackerPlugin {
       await access(this.filePath, constants.R_OK | constants.W_OK);
       this.ready = true;
       return true;
-    } catch {
+    } catch (error) {
+      // File not accessible - log for debugging but don't throw
+      console.debug(`[JsonTracker] File not accessible: ${this.filePath}`);
       this.ready = false;
       return false;
     }
@@ -827,7 +830,8 @@ export class JsonTrackerPlugin extends BaseTrackerPlugin {
       this.cacheTime = 0;
       this.ready = true;
       return true;
-    } catch {
+    } catch (error) {
+      console.warn(`[JsonTracker] Cannot access file path ${resolvedPath}:`, error);
       return false;
     }
   }
@@ -921,8 +925,9 @@ export class JsonTrackerPlugin extends BaseTrackerPlugin {
 
       const content = await readFile(fullPath, 'utf-8');
       return content;
-    } catch {
+    } catch (error) {
       // Source PRD not found or not readable - this is fine, it's optional
+      console.debug(`[JsonTracker] Source PRD not readable: ${error instanceof Error ? error.message : 'unknown error'}`);
       return '';
     }
   }
@@ -953,7 +958,8 @@ export class JsonTrackerPlugin extends BaseTrackerPlugin {
         completedCount: prd.userStories.filter((s) => s.passes).length,
         totalCount: prd.userStories.length,
       };
-    } catch {
+    } catch (error) {
+      console.warn(`[JsonTracker] Failed to get PRD context: ${error instanceof Error ? error.message : 'unknown error'}`);
       return null;
     }
   }
