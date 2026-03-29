@@ -273,8 +273,9 @@ export async function clearProgress(cwd: string): Promise<void> {
 
   try {
     await writeFile(filePath, getDefaultProgressHeader(), 'utf-8');
-  } catch {
-    // Ignore errors
+  } catch (error) {
+    // Log errors but don't throw - progress clearing is not critical
+    console.error(`[logs/progress] Failed to clear progress file: ${error instanceof Error ? error.message : 'unknown error'}`);
   }
 }
 

@@ -75,8 +75,9 @@ export async function appendTrackerEvent(cwd: string, event: TrackerLogEvent): P
       const dirPath = dirname(filePath);
       await mkdir(dirPath, { recursive: true });
       await appendFile(filePath, `${JSON.stringify(event)}\n`, 'utf-8');
-    } catch {
-      // Ignore logging errors to avoid interrupting execution
+    } catch (error) {
+      // Log logging errors to stderr - don't interrupt execution but don't lose the error
+      console.error(`[logs/tracker-events] Failed to write event to ${target}: ${error instanceof Error ? error.message : 'unknown error'}`);
     }
   }
 }

@@ -281,8 +281,9 @@ export async function logRunSummary(
 			await appendFile(logPath, logEntry);
 			await appendFile(logPath, report);
 			await appendFile(logPath, '\n');
-		} catch {
-			// Ignore logging failures
+		} catch (error) {
+			// Log logging failures to stderr - don't interrupt execution but don't lose the error
+			console.error(`[logs/run-summary] Failed to write summary to ${logPath}: ${error instanceof Error ? error.message : 'unknown error'}`);
 		}
 	}
 }
