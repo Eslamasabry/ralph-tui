@@ -98,8 +98,10 @@ export class ParallelExecutionEngine implements EngineController {
     for (const listener of this.listeners) {
       try {
         listener(event);
-      } catch {
-        // ignore listener errors
+      } catch (error) {
+        // Log listener errors but don't let one failing listener break others
+        console.error(`[parallel-engine] Event listener failed for ${event.type}:`,
+          error instanceof Error ? error.message : String(error));
       }
     }
   }
@@ -108,8 +110,10 @@ export class ParallelExecutionEngine implements EngineController {
     for (const listener of this.parallelListeners) {
       try {
         listener(event);
-      } catch {
-        // ignore listener errors
+      } catch (error) {
+        // Log listener errors but don't let one failing listener break others
+        console.error(`[parallel-engine] Parallel listener failed for ${event.type}:`,
+          error instanceof Error ? error.message : String(error));
       }
     }
   }
@@ -366,13 +370,15 @@ export class ParallelExecutionEngine implements EngineController {
       });
 
       if (this.shouldLogTrackerEvents()) {
-        void appendTrackerEvent(this.config.cwd, {
+        appendTrackerEvent(this.config.cwd, {
           type: 'iteration:started',
           timestamp: event.timestamp,
           tracker: this.config.tracker.plugin,
           iteration,
           taskId: event.task.id,
           taskTitle: event.task.title,
+        }).catch(err => {
+          console.error('[parallel-engine] Failed to log iteration started:', err);
         });
       }
       return;
@@ -446,7 +452,7 @@ export class ParallelExecutionEngine implements EngineController {
           action: 'skip',
         });
         if (this.shouldLogTrackerEvents()) {
-          void appendTrackerEvent(this.config.cwd, {
+          appendTrackerEvent(this.config.cwd, {
             type: 'iteration:failed',
             timestamp: event.result.endedAt ?? new Date().toISOString(),
             tracker: this.config.tracker.plugin,
@@ -455,6 +461,8 @@ export class ParallelExecutionEngine implements EngineController {
             taskTitle: event.task.title,
             error: event.result.error ?? 'Parallel task execution failed.',
             action: 'skip',
+          }).catch(err => {
+            console.error('[parallel-engine] Failed to log iteration failed:', err);
           });
         }
         return;
@@ -467,7 +475,7 @@ export class ParallelExecutionEngine implements EngineController {
       });
 
       if (this.shouldLogTrackerEvents()) {
-        void appendTrackerEvent(this.config.cwd, {
+        appendTrackerEvent(this.config.cwd, {
           type: 'iteration:completed',
           timestamp: event.result.endedAt ?? new Date().toISOString(),
           tracker: this.config.tracker.plugin,
@@ -477,6 +485,8 @@ export class ParallelExecutionEngine implements EngineController {
           status: iterationResult.status,
           durationMs: iterationResult.durationMs ?? 0,
           taskCompleted: completed,
+        }).catch(err => {
+          console.error('[parallel-engine] Failed to log iteration completed:', err);
         });
       }
     }

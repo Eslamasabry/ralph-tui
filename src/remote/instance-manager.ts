@@ -259,8 +259,9 @@ export class InstanceManager {
       await client.connect();
       // Update last connected timestamp
       await updateLastConnected(tab.alias);
-    } catch {
-      // Error handling is done in the event handler
+    } catch (error) {
+      // Error handling is done in the event handler, but log for debugging
+      console.warn(`[remote] Failed to connect client for ${tab.alias}:`, error);
     }
   }
 

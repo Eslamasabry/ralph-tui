@@ -118,8 +118,9 @@ export class ParallelCoordinator {
     for (const listener of this.listeners) {
       try {
         listener(event);
-      } catch {
-        // ignore listener errors
+      } catch (error) {
+        // Log listener errors but don't let one failing listener break others
+        this.logWarn(`Event listener failed for ${event.type}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
   }
@@ -136,7 +137,9 @@ export class ParallelCoordinator {
 
   private logToFile(level: 'INFO' | 'WARN', message: string): void {
     const line = `${new Date().toISOString()} [${level}] ${message}\n`;
-    void this.appendRuntimeLog(line);
+    this.appendRuntimeLog(line).catch(err => {
+      this.logWarn(`Failed to write runtime log: ${err instanceof Error ? err.message : String(err)}`);
+    });
   }
 
   private countEvent(event: ParallelEvent): void {
@@ -159,8 +162,8 @@ export class ParallelCoordinator {
       await mkdir(this.summaryLogDir, { recursive: true });
       const filename = `summary-${Date.now()}.json`;
       await writeFile(join(this.summaryLogDir, filename), JSON.stringify(summary, null, 2), 'utf-8');
-    } catch {
-      // ignore summary failures
+    } catch (error) {
+      this.logWarn(`Failed to write summary: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -172,15 +175,18 @@ export class ParallelCoordinator {
   }
 
   private logEvent(event: ParallelEvent): void {
-    void this.appendEventLog(event);
+    this.appendEventLog(event).catch(err => {
+      this.logWarn(`Failed to append event log: ${err instanceof Error ? err.message : String(err)}`);
+    });
   }
 
   private async appendRuntimeLog(line: string): Promise<void> {
     try {
       await mkdir(dirname(this.runtimeLogPath), { recursive: true });
       await appendFile(this.runtimeLogPath, line, 'utf-8');
-    } catch {
-      // ignore logging failures
+    } catch (error) {
+      // Log to console since file logging failed
+      console.error('[parallel] Failed to write runtime log:', error);
     }
   }
 
@@ -384,13 +390,25 @@ export class ParallelCoordinator {
 
     const worktreeMap = await this.worktreeManager.createWorktrees(workerOptions);
 
-    for (let i = 0; i < this.maxWorkers; i++) {
-      const workerId = `worker-${i + 1}`;
-      const worktreePath = worktreeMap.get(workerId)!;
-      const agent = await this.createAgentInstance(agentRegistry);
-      const worker = new ParallelWorker(workerId, worktreePath, agent, this.config);
-      this.workerBaseCommits.set(workerId, baseCommit);
-      this.workers.push(worker);
+    try {
+      for (let i = 0; i < this.maxWorkers; i++) {
+        const workerId = `worker-${i + 1}`;
+        const worktreePath = worktreeMap.get(workerId)!;
+        const agent = await this.createAgentInstance(agentRegistry);
+        const worker = new ParallelWorker(workerId, worktreePath, agent, this.config);
+        this.workerBaseCommits.set(workerId, baseCommit);
+        this.workers.push(worker);
+      }
+    } catch (error) {
+      // Clean up any workers/agents that were created before the failure
+      this.logWarn(`Worker initialization failed, cleaning up ${this.workers.length} partial workers: ${error instanceof Error ? error.message : String(error)}`);
+      for (const worker of this.workers) {
+        await worker.dispose().catch(err => {
+          this.logWarn(`Failed to dispose worker during cleanup: ${err instanceof Error ? err.message : String(err)}`);
+        });
+      }
+      this.workers = [];
+      throw error;
     }
     this.logInfo(`Worker pool ready (${this.workers.length}).`);
   }
@@ -635,7 +653,9 @@ export class ParallelCoordinator {
             data,
             stream: 'stdout',
           });
-          void this.appendTaskOutput(taskLogPath, 'stdout', data);
+          this.appendTaskOutput(taskLogPath, 'stdout', data).catch(err => {
+            this.logWarn(`Failed to append stdout log: ${err instanceof Error ? err.message : String(err)}`);
+          });
         },
         onStdoutSegments: (segments) => {
           this.emit({
@@ -655,7 +675,9 @@ export class ParallelCoordinator {
             data,
             stream: 'stderr',
           });
-          void this.appendTaskOutput(taskLogPath, 'stderr', data);
+          this.appendTaskOutput(taskLogPath, 'stderr', data).catch(err => {
+            this.logWarn(`Failed to append stderr log: ${err instanceof Error ? err.message : String(err)}`);
+          });
         },
       });
 
@@ -2516,32 +2538,36 @@ export class ParallelCoordinator {
       const agentRegistry = getAgentRegistry();
       const agent = await this.createAgentInstance(agentRegistry);
       const resolver = new ParallelWorker(mergeWorkerId, worktreePath, agent, this.config);
-      const result = await resolver.executeTask(entry.task, prompt);
-      await resolver.dispose();
+      
+      try {
+        const result = await resolver.executeTask(entry.task, prompt);
 
-      if (!result.completed) {
-        this.logWarn(`Merge resolution agent did not complete for ${entry.task.id}.`);
-        return { success: false, reason: 'Merge resolution agent did not complete', conflictFiles };
-      }
-
-      const unresolved = await this.execGitIn(worktreePath, ['diff', '--name-only', '--diff-filter=U']);
-      if (unresolved.stdout.trim().length > 0) {
-        this.logWarn(`Conflicts remain after auto-resolve for ${entry.task.id}.`);
-        return { success: false, reason: 'Conflicts remain after auto-resolve', conflictFiles };
-      }
-
-      await this.execGitIn(worktreePath, ['add', '-A']);
-      const continueResult = await this.execGitIn(worktreePath, ['cherry-pick', '--continue']);
-      if (continueResult.exitCode !== 0) {
-        const cherryHead = await this.execGitIn(worktreePath, ['rev-parse', '-q', '--verify', 'CHERRY_PICK_HEAD']);
-        if (cherryHead.exitCode === 0) {
-          return { success: false, reason: continueResult.stderr.trim() || 'Cherry-pick continue failed' };
+        if (!result.completed) {
+          this.logWarn(`Merge resolution agent did not complete for ${entry.task.id}.`);
+          return { success: false, reason: 'Merge resolution agent did not complete', conflictFiles };
         }
-      }
 
-      const headCommit = await this.execGitIn(worktreePath, ['rev-parse', 'HEAD']);
-      this.logInfo(`Merge resolution succeeded for ${entry.task.id} (${headCommit.stdout.trim().slice(0, 7)}).`);
-      return { success: true, commit: headCommit.stdout.trim(), conflictFiles };
+        const unresolved = await this.execGitIn(worktreePath, ['diff', '--name-only', '--diff-filter=U']);
+        if (unresolved.stdout.trim().length > 0) {
+          this.logWarn(`Conflicts remain after auto-resolve for ${entry.task.id}.`);
+          return { success: false, reason: 'Conflicts remain after auto-resolve', conflictFiles };
+        }
+
+        await this.execGitIn(worktreePath, ['add', '-A']);
+        const continueResult = await this.execGitIn(worktreePath, ['cherry-pick', '--continue']);
+        if (continueResult.exitCode !== 0) {
+          const cherryHead = await this.execGitIn(worktreePath, ['rev-parse', '-q', '--verify', 'CHERRY_PICK_HEAD']);
+          if (cherryHead.exitCode === 0) {
+            return { success: false, reason: continueResult.stderr.trim() || 'Cherry-pick continue failed' };
+          }
+        }
+
+        const headCommit = await this.execGitIn(worktreePath, ['rev-parse', 'HEAD']);
+        this.logInfo(`Merge resolution succeeded for ${entry.task.id} (${headCommit.stdout.trim().slice(0, 7)}).`);
+        return { success: true, commit: headCommit.stdout.trim(), conflictFiles };
+      } finally {
+        await resolver.dispose();
+      }
     } catch (error) {
       this.logWarn(
         `Merge resolution failed for ${entry.task.id}: ${error instanceof Error ? error.message : 'unknown error'}.`
@@ -2963,7 +2989,7 @@ export class ParallelCoordinator {
     return env;
   }
 
-  private execGitIn(path: string, args: string[]): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  private execGitIn(path: string, args: string[], timeoutMs: number = 30000): Promise<{ stdout: string; stderr: string; exitCode: number }> {
     return new Promise((resolve) => {
       const proc = spawn('git', ['-C', path, ...args], {
         env: this.getIsolatedGitEnv(),
@@ -2972,6 +2998,13 @@ export class ParallelCoordinator {
 
       let stdout = '';
       let stderr = '';
+      let killed = false;
+
+      // Set up timeout
+      const timer = setTimeout(() => {
+        killed = true;
+        proc.kill('SIGKILL');
+      }, timeoutMs);
 
       proc.stdout.on('data', (data: Buffer) => {
         stdout += data.toString();
@@ -2982,10 +3015,16 @@ export class ParallelCoordinator {
       });
 
       proc.on('close', (code: number | null) => {
-        resolve({ stdout, stderr, exitCode: code ?? 1 });
+        clearTimeout(timer);
+        if (killed) {
+          resolve({ stdout, stderr: `${stderr}\n[timeout after ${timeoutMs}ms]`, exitCode: 1 });
+        } else {
+          resolve({ stdout, stderr, exitCode: code ?? 1 });
+        }
       });
 
       proc.on('error', (err: Error) => {
+        clearTimeout(timer);
         resolve({ stdout, stderr: err.message, exitCode: 1 });
       });
     });

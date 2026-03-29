@@ -207,7 +207,8 @@ async function readSessionMetadata(
   try {
     const content = await readFile(sessionPath, 'utf-8');
     return JSON.parse(content) as SessionMetadata;
-  } catch {
+  } catch (error) {
+    console.error(`[session] Failed to read session metadata from ${sessionPath}:`, error);
     return null;
   }
 }
@@ -306,8 +307,11 @@ export async function releaseLock(cwd: string): Promise<void> {
   const lockPath = getLockPath(cwd);
   try {
     await unlink(lockPath);
-  } catch {
-    // Ignore if lock doesn't exist
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (nodeError.code !== 'ENOENT') {
+      console.warn(`[session] Failed to release lock at ${lockPath}:`, error);
+    }
   }
 }
 

@@ -49,6 +49,7 @@ import {
   revokeClientTokens,
   cleanupExpiredTokens,
   getOrCreateServerToken,
+  constantTimeCompare,
 } from './token.js';
 import { createAuditLogger, type AuditLogger } from './audit.js';
 import type { EngineController, EngineEvent, SubagentTreeNode } from '../engine/types.js';
@@ -1332,8 +1333,9 @@ export class RemoteServer {
   ): void {
     const clientId = `${clientState.id}@${clientState.ip}`;
 
-    // Verify the provided token matches what we have for this client
-    if (message.connectionToken !== clientState.connectionToken) {
+    // Verify the provided token matches what we have for this client using constant-time comparison
+    // to prevent timing attacks
+    if (!clientState.connectionToken || !constantTimeCompare(message.connectionToken, clientState.connectionToken)) {
       const response = createMessage<TokenRefreshResponseMessage>('token_refresh_response', {
         success: false,
         error: 'Connection token mismatch',

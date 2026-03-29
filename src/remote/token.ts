@@ -251,7 +251,7 @@ export async function rotateToken(): Promise<string> {
 /**
  * Constant-time string comparison to prevent timing attacks.
  */
-function constantTimeCompare(a: string, b: string): boolean {
+export function constantTimeCompare(a: string, b: string): boolean {
   if (a.length !== b.length) {
     // Still do a comparison to maintain constant time
     // The _unused variable prevents timing attacks by doing work even when lengths differ

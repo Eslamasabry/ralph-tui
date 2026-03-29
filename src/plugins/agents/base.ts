@@ -111,6 +111,7 @@ interface RunningExecution {
   resolve: (result: AgentExecutionResult) => void;
   reject: (error: Error) => void;
   timeoutId?: ReturnType<typeof setTimeout>;
+  killTimeoutId?: ReturnType<typeof setTimeout>;
 }
 
 /**
@@ -396,12 +397,14 @@ export abstract class BaseAgentPlugin implements AgentPlugin {
         execution.timeoutId = setTimeout(() => {
           if (this.executions.has(executionId)) {
             proc.kill('SIGTERM');
-            // Give it 5 seconds to terminate gracefully
-            setTimeout(() => {
+            // Give it 5 seconds to terminate gracefully, then SIGKILL
+            const killTimeoutId = setTimeout(() => {
               if (this.executions.has(executionId)) {
                 proc.kill('SIGKILL');
               }
             }, 5000);
+            // Store the kill timeout so it can be cleared on normal exit
+            execution.killTimeoutId = killTimeoutId;
           }
         }, timeout);
       }
@@ -499,6 +502,10 @@ export abstract class BaseAgentPlugin implements AgentPlugin {
     // Clear timeout if set
     if (execution.timeoutId) {
       clearTimeout(execution.timeoutId);
+    }
+    // Clear kill timeout if set (prevents memory leak from nested timeout)
+    if (execution.killTimeoutId) {
+      clearTimeout(execution.killTimeoutId);
     }
 
     const endedAt = new Date();

@@ -1042,8 +1042,9 @@ export class RemoteClient {
           this.scheduleReconnect();
         }
       };
-    } catch {
+    } catch (error) {
       // Failed to create WebSocket - schedule another attempt
+      console.warn('[RemoteClient] Failed to create WebSocket for reconnect:', error);
       this.cleanupConnection();
       this.scheduleReconnect();
     }

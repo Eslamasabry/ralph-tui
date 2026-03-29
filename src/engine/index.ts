@@ -386,8 +386,10 @@ export class ExecutionEngine {
     for (const listener of this.listeners) {
       try {
         listener(event);
-      } catch {
-        // Ignore listener errors
+      } catch (error) {
+        // Log listener errors but don't let one failing listener break others
+        console.error(`[engine] Event listener failed for ${event.type}:`, 
+          error instanceof Error ? error.message : String(error));
       }
     }
   }
@@ -401,7 +403,7 @@ export class ExecutionEngine {
       return;
     }
 
-    void appendTrackerEvent(this.config.cwd, {
+    appendTrackerEvent(this.config.cwd, {
       type: 'iteration:failed',
       timestamp: new Date().toISOString(),
       tracker: this.config.tracker.plugin,
@@ -410,6 +412,8 @@ export class ExecutionEngine {
       taskTitle: task.title,
       error,
       action,
+    }).catch(err => {
+      console.error('[engine] Failed to log iteration failure:', err);
     });
   }
 
@@ -1016,13 +1020,15 @@ export class ExecutionEngine {
           });
 
           if (this.shouldLogTrackerEvents()) {
-            void appendTrackerEvent(this.config.cwd, {
+            appendTrackerEvent(this.config.cwd, {
               type: 'iteration:started',
               timestamp: new Date().toISOString(),
               tracker: this.config.tracker.plugin,
               iteration,
               taskId: task.id,
               taskTitle: task.title,
+            }).catch(err => {
+              console.error('[engine] Failed to log iteration started:', err);
             });
           }
 
@@ -1357,7 +1363,7 @@ export class ExecutionEngine {
           });
 
           if (this.shouldLogTrackerEvents()) {
-            void appendTrackerEvent(this.config.cwd, {
+            appendTrackerEvent(this.config.cwd, {
               type: 'iteration:completed',
               timestamp: endedAt.toISOString(),
               tracker: this.config.tracker.plugin,
@@ -1367,6 +1373,8 @@ export class ExecutionEngine {
               status: result.status,
               durationMs,
               taskCompleted,
+            }).catch(err => {
+              console.error('[engine] Failed to log iteration completed:', err);
             });
           }
 
