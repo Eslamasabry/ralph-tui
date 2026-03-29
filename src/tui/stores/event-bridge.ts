@@ -832,15 +832,17 @@ export function createEventBridge(
   const dispatchOutput = (action: Parameters<typeof stores.output.dispatch>[0]): void => {
     try {
       stores.output.dispatch(action);
-    } catch {
-      // Fault isolation for output store writes.
+    } catch (error) {
+      // Fault isolation for output store writes - log but don't crash
+      console.error('[event-bridge] Output store dispatch failed:', error);
     }
   };
   const dispatchTasks = (action: Parameters<typeof stores.tasks.dispatch>[0]): void => {
     try {
       stores.tasks.dispatch(action);
-    } catch {
-      // Fault isolation for task store writes.
+    } catch (error) {
+      // Fault isolation for task store writes - log but don't crash
+      console.error('[event-bridge] Task store dispatch failed:', error);
     }
   };
 
