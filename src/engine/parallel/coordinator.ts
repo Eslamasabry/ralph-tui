@@ -75,6 +75,7 @@ export class ParallelCoordinator {
   private readonly MAX_TASK_FAILURE_COUNTS = 1000;
   private readonly MAX_NOT_READY_COOLDOWNS = 500;
   private readonly MAX_ACTIVE_TASK_LEASES = 100;
+  private readonly MAX_ACTIVE_WORKER_TASKS = 100;
   private lastMainSyncSkipAt = 0;
   private mainSyncWorktree: MainSyncWorktree | null = null;
   private mainSyncRunning = false;
@@ -610,6 +611,10 @@ export class ParallelCoordinator {
           this.activeWorkerTasks.delete(taskPromise);
         });
       this.activeWorkerTasks.add(taskPromise);
+      if (this.activeWorkerTasks.size > this.MAX_ACTIVE_WORKER_TASKS) {
+        this.logWarn(`Active worker tasks (${this.activeWorkerTasks.size}) exceeds limit (${this.MAX_ACTIVE_WORKER_TASKS}). Waiting for some to complete.`);
+        await Promise.race(this.activeWorkerTasks);
+      }
     }
 
     if (this.activeWorkerTasks.size > 0) {
@@ -693,6 +698,7 @@ export class ParallelCoordinator {
     this.activeTaskLeases.clear();
     this.taskAffinity.clear();
     this.validationQueue = [];
+    this.activeWorkerTasks.clear();
   }
 
   pause(): void {
