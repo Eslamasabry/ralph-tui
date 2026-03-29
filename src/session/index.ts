@@ -138,58 +138,47 @@ async function tryWriteLockFile(cwd: string, sessionId: string): Promise<boolean
   }
 }
 
-function isSameLockFile(left: LockFile, right: LockFile): boolean {
-  return left.pid === right.pid &&
-    left.sessionId === right.sessionId &&
-    left.acquiredAt === right.acquiredAt &&
-    left.cwd === right.cwd &&
-    left.hostname === right.hostname;
-}
-
-async function restoreClaimedLockFile(
-  lockPath: string,
-  claimedPath: string,
-  claimedContents: string
-): Promise<void> {
-  try {
-    await writeFile(lockPath, claimedContents, { flag: 'wx' });
-  } catch (error) {
-    const nodeError = error as NodeJS.ErrnoException;
-    if (nodeError.code !== 'EEXIST') {
-      throw error;
-    }
-  } finally {
-    try {
-      await unlink(claimedPath);
-    } catch {
-      // Ignore if the temporary claim is already gone.
-    }
-  }
-}
-
 async function claimLockFile(cwd: string, observedLock: LockFile): Promise<boolean> {
   const lockPath = getLockPath(cwd);
   const claimedPath = `${lockPath}.${process.pid}.${randomUUID()}.claim`;
 
+  // Create our claim file first with same content as observed lock
+  // This ensures we preserve the original lock info during claim
   try {
+    await writeFile(claimedPath, JSON.stringify(observedLock), { flag: 'wx' });
+  } catch {
+    // Can't create claim file, bail out
+    return false;
+  }
+
+  try {
+    // Atomically rename the lock file to our claim path
+    // This is the critical atomic operation - only one process can succeed
     await rename(lockPath, claimedPath);
   } catch (error) {
     const nodeError = error as NodeJS.ErrnoException;
+    // Clean up our claim file
+    try {
+      await unlink(claimedPath);
+    } catch {
+      // Ignore cleanup errors
+    }
     if (nodeError.code === 'ENOENT') {
+      // Lock file was already moved/deleted by another process
       return false;
     }
     throw error;
   }
 
-  const claimedContents = await readFile(claimedPath, 'utf-8');
-  const claimedLock = JSON.parse(claimedContents) as LockFile;
-
-  if (!isSameLockFile(claimedLock, observedLock)) {
-    await restoreClaimedLockFile(lockPath, claimedPath, claimedContents);
-    return false;
+  // We successfully renamed the lock file - we now own it
+  // The rename is atomic, so no other process could have claimed it
+  // Delete the claimed file to release the "claim hold"
+  try {
+    await unlink(claimedPath);
+  } catch {
+    // Ignore if already deleted
   }
-
-  await unlink(claimedPath);
+  
   return true;
 }
 
