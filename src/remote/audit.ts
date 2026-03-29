@@ -157,15 +157,17 @@ export class AuditLogger {
         // Remove existing .old file if present
         try {
           await unlink(oldPath);
-        } catch {
-          // Ignore if doesn't exist
+        } catch (error) {
+          // Ignore if doesn't exist or other errors
+          console.debug(`[audit] Failed to remove old log file: ${error instanceof Error ? error.message : 'unknown error'}`);
         }
 
         // Rename current to .old
         await rename(this.logPath, oldPath);
       }
-    } catch {
-      // File doesn't exist yet, no rotation needed
+    } catch (error) {
+      // File doesn't exist yet or stat failed, no rotation needed
+      console.debug(`[audit] Log rotation check failed: ${error instanceof Error ? error.message : 'unknown error'}`);
     }
   }
 
@@ -182,17 +184,20 @@ export class AuditLogger {
       const recentLines = lines.slice(-limit);
       const entries: AuditLogEntry[] = [];
 
-      for (const line of recentLines) {
-        try {
-          entries.push(JSON.parse(line) as AuditLogEntry);
-        } catch {
-          // Skip malformed lines
+        for (const line of recentLines) {
+          try {
+            entries.push(JSON.parse(line) as AuditLogEntry);
+          } catch (error) {
+            // Skip malformed lines - log for debugging
+            console.debug(`[audit] Skipping malformed audit log line: ${error instanceof Error ? error.message : 'unknown error'}`);
+          }
         }
-      }
 
       // Return in reverse chronological order
       return entries.reverse();
-    } catch {
+    } catch (error) {
+      // File doesn't exist or can't be read
+      console.debug(`[audit] Failed to read recent entries: ${error instanceof Error ? error.message : 'unknown error'}`);
       return [];
     }
   }
