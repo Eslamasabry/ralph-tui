@@ -2674,8 +2674,8 @@ export class ParallelCoordinator {
       return { success: false, reason: error instanceof Error ? error.message : 'Merge resolution failed', conflictFiles };
     } finally {
       await this.worktreeManager.removeWorktree(mergeWorkerId).catch((err) => {
-        // Log worktree cleanup errors - orphaned worktrees can accumulate
-        this.logWarn(
+        // Log worktree cleanup errors at error level - orphaned worktrees can accumulate
+        this.logError(
           `Failed to remove merge worktree ${mergeWorkerId}: ${err instanceof Error ? err.message : 'unknown error'}.`
         );
       });

@@ -490,9 +490,10 @@ export class RemoteServer {
 
     try {
       message = JSON.parse(rawMessage) as WSMessage;
-    } catch {
-      this.sendError(ws, 'INVALID_JSON', 'Invalid JSON message');
-      await this.auditLogger.logFailure(clientId, 'message_parse', 'Invalid JSON');
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Invalid JSON';
+      this.sendError(ws, 'INVALID_JSON', `Invalid JSON message: ${errorMsg}`);
+      await this.auditLogger.logFailure(clientId, 'message_parse', `Invalid JSON: ${errorMsg}`);
       return;
     }
 
