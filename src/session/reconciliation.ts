@@ -381,8 +381,9 @@ export async function logReconciliationResult(
     try {
       await mkdir(dirname(logPath), { recursive: true });
       await appendFile(logPath, `${report}\n`);
-    } catch {
-      // Ignore logging failures
+    } catch (error) {
+      // Log reconciliation failures - this is a critical operation
+      console.error(`[session/reconciliation] Failed to write reconciliation report to ${logPath}: ${error instanceof Error ? error.message : 'unknown error'}`);
     }
   }
 }
