@@ -222,8 +222,11 @@ export async function checkSession(cwd: string): Promise<SessionCheckResult> {
   try {
     lock = await readLockFile(cwd);
   } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    const errorCode = nodeError.code || 'UNKNOWN';
+    const errorName = nodeError.name || 'Error';
     console.warn(
-      `[session] Lock read failed; treating session as locked to avoid concurrent runs: ${
+      `[session] Lock read failed (code=${errorCode}, type=${errorName}); treating session as locked to avoid concurrent runs: ${
         error instanceof Error ? error.message : String(error)
       }`
     );
