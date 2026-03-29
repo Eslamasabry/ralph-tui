@@ -23,6 +23,12 @@ export interface ParallelEngineOptions {
   maxWorkers: number;
 }
 
+/**
+ * Maximum number of task iteration entries to prevent unbounded memory growth.
+ * When exceeded, oldest entries are removed.
+ */
+const MAX_TASK_ITERATIONS = 1000;
+
 export class ParallelExecutionEngine implements EngineController {
   private config: RalphConfig;
   private tracker: TrackerPlugin | null = null;
@@ -120,6 +126,24 @@ export class ParallelExecutionEngine implements EngineController {
 
   private shouldLogTrackerEvents(): boolean {
     return this.config.tracker.plugin.includes('beads');
+  }
+
+  /**
+   * Set task iteration with size limit enforcement.
+   * Removes oldest entries when MAX_TASK_ITERATIONS is exceeded.
+   */
+  private setTaskIteration(taskId: string, iteration: number): void {
+    if (this.taskIterations.size >= MAX_TASK_ITERATIONS) {
+      // Remove oldest entries (first 10%)
+      const entriesToRemove = Math.floor(MAX_TASK_ITERATIONS * 0.1);
+      let removed = 0;
+      for (const [key] of this.taskIterations) {
+        if (removed >= entriesToRemove) break;
+        this.taskIterations.delete(key);
+        removed++;
+      }
+    }
+    this.setTaskIteration(taskId, iteration);
   }
 
   getState(): Readonly<EngineState> {
@@ -335,7 +359,7 @@ export class ParallelExecutionEngine implements EngineController {
 
     if (event.type === 'parallel:task-claimed') {
       const iteration = ++this.iterationCounter;
-      this.taskIterations.set(event.task.id, iteration);
+      this.setTaskIteration(event.task.id, iteration);
       this.state.currentIteration = iteration;
       this.state.currentTask = event.task;
 
@@ -358,7 +382,7 @@ export class ParallelExecutionEngine implements EngineController {
 
     if (event.type === 'parallel:task-started') {
       const iteration = this.taskIterations.get(event.task.id) ?? ++this.iterationCounter;
-      this.taskIterations.set(event.task.id, iteration);
+      this.setTaskIteration(event.task.id, iteration);
       this.state.currentIteration = iteration;
       this.state.currentTask = event.task;
 
@@ -434,6 +458,8 @@ export class ParallelExecutionEngine implements EngineController {
 
       if (completed) {
         this.state.tasksCompleted += 1;
+        // Clean up task iteration tracking to prevent unbounded growth
+        this.taskIterations.delete(event.task.id);
         this.emit({
           type: 'task:completed',
           timestamp: new Date().toISOString(),
