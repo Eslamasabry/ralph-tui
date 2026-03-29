@@ -405,7 +405,8 @@ export class InstanceManager {
 
     try {
       return await client.getState();
-    } catch {
+    } catch (error) {
+      console.error('[instance-manager] Failed to get remote state:', error);
       return null;
     }
   }
@@ -420,7 +421,8 @@ export class InstanceManager {
 
     try {
       return await client.getTasks();
-    } catch {
+    } catch (error) {
+      console.error('[instance-manager] Failed to get remote tasks:', error);
       return null;
     }
   }
@@ -457,7 +459,8 @@ export class InstanceManager {
     try {
       await client.subscribe();
       return true;
-    } catch {
+    } catch (error) {
+      console.error('[instance-manager] Failed to subscribe to remote:', error);
       return false;
     }
   }
@@ -470,8 +473,9 @@ export class InstanceManager {
     if (client) {
       try {
         await client.unsubscribe();
-      } catch {
-        // Ignore errors on unsubscribe
+      } catch (error) {
+        // Log but ignore errors on unsubscribe
+        console.warn('[instance-manager] Failed to unsubscribe from remote:', error);
       }
     }
   }
@@ -505,7 +509,8 @@ export class InstanceManager {
           break;
       }
       return true;
-    } catch {
+    } catch (error) {
+      console.error(`[instance-manager] Failed to send remote command ${command}:`, error);
       return false;
     }
   }
@@ -520,7 +525,8 @@ export class InstanceManager {
     try {
       await client.addIterations(count);
       return true;
-    } catch {
+    } catch (error) {
+      console.error('[instance-manager] Failed to add remote iterations:', error);
       return false;
     }
   }
@@ -535,7 +541,8 @@ export class InstanceManager {
     try {
       await client.removeIterations(count);
       return true;
-    } catch {
+    } catch (error) {
+      console.error('[instance-manager] Failed to remove remote iterations:', error);
       return false;
     }
   }
