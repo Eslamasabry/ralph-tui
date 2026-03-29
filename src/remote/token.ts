@@ -134,7 +134,12 @@ export async function loadRemoteConfig(): Promise<RemoteConfig | null> {
     }
 
     return config;
-  } catch {
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (nodeError.code !== 'ENOENT') {
+      // Only log errors that aren't "file doesn't exist" - that's expected
+      console.error(`[remote/token] Failed to load remote config: ${error instanceof Error ? error.message : 'unknown error'}`);
+    }
     return null;
   }
 }
