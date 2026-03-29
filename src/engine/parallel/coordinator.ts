@@ -2148,6 +2148,8 @@ export class ParallelCoordinator {
       if ('clearPendingMain' in this.tracker && typeof this.tracker.clearPendingMain === 'function') {
         await this.tracker.clearPendingMain(taskId, 'Commits merged to main');
       }
+      // Unblock the task before completing
+      await this.tracker.updateTaskStatus(taskId, 'open');
       await this.tracker.completeTask(taskId, 'Completed after main sync');
       await this.tracker.releaseTask?.(taskId, entry.workerId);
       this.blockedTaskIds.delete(taskId);
