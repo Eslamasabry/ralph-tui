@@ -179,6 +179,10 @@ export class ExecutionEngine {
   private rateLimitConfig: Required<RateLimitHandlingConfig>;
   /** Track agents that have been rate-limited for the current task (cleared on task completion) */
   private rateLimitedAgents: Set<string> = new Set();
+  /** Maximum entries for retryCountMap to prevent unbounded growth */
+  private readonly MAX_RETRY_COUNT_MAP_SIZE = 1000;
+  /** Maximum entries for rateLimitRetryMap to prevent unbounded growth */
+  private readonly MAX_RATE_LIMIT_RETRY_MAP_SIZE = 1000;
   /** Primary agent instance - preserved when switching to fallback for recovery attempts */
   private primaryAgentInstance: AgentPlugin | null = null;
   /** Track agent switches during the current iteration for logging */
@@ -811,6 +815,7 @@ export class ExecutionEngine {
             });
 
             // Update retry count
+            this.enforceMapSizeLimit(this.retryCountMap, this.MAX_RETRY_COUNT_MAP_SIZE);
             this.retryCountMap.set(task.id, currentRetries + 1);
 
             // Wait before retry
@@ -950,6 +955,7 @@ export class ExecutionEngine {
     );
 
     // Increment retry count
+    this.enforceMapSizeLimit(this.rateLimitRetryMap, this.MAX_RATE_LIMIT_RETRY_MAP_SIZE);
     this.rateLimitRetryMap.set(task.id, currentRetries + 1);
 
     // Emit rate limit event
@@ -1613,6 +1619,21 @@ export class ExecutionEngine {
       currentIteration: this.state.currentIteration,
       maxIterations: this.config.maxIterations,
     };
+  }
+
+  /**
+   * Enforce size limit on a Map by removing oldest entries.
+   */
+  private enforceMapSizeLimit<K, V>(map: Map<K, V>, limit: number): void {
+    if (map.size >= limit) {
+      const entriesToRemove = Math.floor(limit * 0.1); // Remove 10% of limit
+      let removed = 0;
+      for (const [key] of map) {
+        if (removed >= entriesToRemove) break;
+        map.delete(key);
+        removed++;
+      }
+    }
   }
 
   /**
