@@ -139,9 +139,9 @@ async function readLockFile(cwd: string): Promise<LockFile | null> {
 
     // Log corruption/permission errors for debugging
     // Still return null to allow recovery, but make the issue visible
-    console.warn(
+    console.error(
       `[session/lock] Error reading lock file: ${nodeError.message || 'unknown error'}. ` +
-      `This may indicate a corrupt lock file at ${lockPath}.`
+        `This may indicate a corrupt lock file at ${lockPath}.`
     );
     return null;
   }
