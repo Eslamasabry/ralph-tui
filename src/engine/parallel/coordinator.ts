@@ -137,6 +137,11 @@ export class ParallelCoordinator {
   }
 
   on(listener: (event: ParallelEvent) => void): () => void {
+    // Prevent unbounded growth of listeners
+    if (this.listeners.length >= 100) {
+      console.warn('[coordinator] Listener limit (100) reached, ignoring new listener');
+      return () => {}; // Return no-op unsubscribe
+    }
     this.listeners.push(listener);
     return () => {
       const index = this.listeners.indexOf(listener);
@@ -699,6 +704,7 @@ export class ParallelCoordinator {
     this.taskAffinity.clear();
     this.validationQueue = [];
     this.activeWorkerTasks.clear();
+    this.listeners = [];
   }
 
   pause(): void {
