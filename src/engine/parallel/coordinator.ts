@@ -178,6 +178,11 @@ export class ParallelCoordinator {
     this.logToFile('WARN', message);
   }
 
+  private logError(message: string): void {
+    console.error(`[parallel] ${message}`);
+    this.logToFile('WARN', `ERROR: ${message}`);
+  }
+
   private logToFile(level: 'INFO' | 'WARN', message: string): void {
     const line = `${new Date().toISOString()} [${level}] ${message}\n`;
     this.appendRuntimeLog(line).catch(err => {
@@ -608,7 +613,7 @@ export class ParallelCoordinator {
       const taskPromise = this.runTaskOnWorker(idleWorker, task)
         .catch((error) => {
           const reason = error instanceof Error ? error.message : String(error);
-          this.logWarn(
+          this.logError(
             `Unhandled worker execution error for ${task.id} on ${idleWorker.workerId}: ${reason}`
           );
         })
