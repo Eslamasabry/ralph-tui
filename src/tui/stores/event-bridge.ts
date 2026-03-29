@@ -862,31 +862,35 @@ export function createEventBridge(
     flushInProgress = true;
 
     try {
-      if (pendingOutputStdout.length > 0) {
+      // Atomically snapshot and clear pending output to prevent race conditions
+      // where output is added between reading and clearing
+      const stdoutSnapshot = pendingOutputStdout;
+      const stderrSnapshot = pendingOutputStderr;
+      pendingOutputStdout = '';
+      pendingOutputStderr = '';
+
+      if (stdoutSnapshot.length > 0) {
         dispatchOutput({
           type: 'output/append-current-output',
-          chunk: pendingOutputStdout,
+          chunk: stdoutSnapshot,
         });
 
-        const cappedOutput = trimOutputToCap(
-          stores.output.getState().currentOutput,
-          outputCapBytes
-        );
-        if (cappedOutput !== stores.output.getState().currentOutput) {
+        // Read state once to avoid race condition between read and comparison
+        const currentState = stores.output.getState().currentOutput;
+        const cappedOutput = trimOutputToCap(currentState, outputCapBytes);
+        if (cappedOutput !== currentState) {
           dispatchOutput({
             type: 'output/set-current-output',
             output: cappedOutput,
           });
         }
-        pendingOutputStdout = '';
       }
 
-      if (pendingOutputStderr.length > 0) {
+      if (stderrSnapshot.length > 0) {
         dispatchOutput({
           type: 'output/append-cli-output',
-          chunk: pendingOutputStderr,
+          chunk: stderrSnapshot,
         });
-        pendingOutputStderr = '';
       }
 
       if (pendingEvents.length === 0) {

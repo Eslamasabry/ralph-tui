@@ -468,15 +468,23 @@ export class ExecutionEngine {
       return;
     }
 
+    // Atomically check and set refreshInFlight using state lock
+    const releaseLock = await this.acquireStateLock();
     if (this.refreshInFlight) {
       this.refreshQueued = true;
+      releaseLock();
       return;
     }
-
     this.refreshInFlight = true;
+    releaseLock();
+
     try {
+      let shouldContinue = false;
       do {
+        // Atomically reset refreshQueued using state lock
+        const releaseInnerLock = await this.acquireStateLock();
         this.refreshQueued = false;
+        releaseInnerLock();
 
         // Fetch all tasks including completed for TUI display
         const tasks = await this.tracker.getTasks({
@@ -494,9 +502,16 @@ export class ExecutionEngine {
           timestamp: new Date().toISOString(),
           tasks,
         });
-      } while (this.refreshQueued);
+        
+        // Atomically check refreshQueued using state lock
+        const releaseCheckLock = await this.acquireStateLock();
+        shouldContinue = this.refreshQueued;
+        releaseCheckLock();
+      } while (shouldContinue);
     } finally {
+      const releaseLock = await this.acquireStateLock();
       this.refreshInFlight = false;
+      releaseLock();
     }
   }
 
