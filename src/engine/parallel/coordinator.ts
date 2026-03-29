@@ -1017,6 +1017,8 @@ export class ParallelCoordinator {
     if (!this.tracker) return undefined;
     for (const [taskId, workerId] of this.taskAffinity.entries()) {
       if (workerId !== requestingWorkerId) continue;
+      // Skip blocked tasks even if they have affinity
+      if (this.blockedTaskIds.has(taskId)) continue;
       const stickyTask = await this.tracker.getTask(taskId);
       if (!stickyTask) {
         continue;
