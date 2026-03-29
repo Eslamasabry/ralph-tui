@@ -508,6 +508,14 @@ export abstract class BaseAgentPlugin implements AgentPlugin {
       clearTimeout(execution.killTimeoutId);
     }
 
+    // Remove all event listeners from the process to prevent memory leaks
+    const proc = execution.process;
+    proc.stdout?.removeAllListeners('data');
+    proc.stderr?.removeAllListeners('data');
+    proc.removeAllListeners('error');
+    proc.removeAllListeners('close');
+    proc.removeAllListeners('exit');
+
     const endedAt = new Date();
     const durationMs = endedAt.getTime() - execution.startedAt.getTime();
 
@@ -550,11 +558,17 @@ export abstract class BaseAgentPlugin implements AgentPlugin {
     execution.process.kill('SIGTERM');
 
     // Force kill after 5 seconds if still running
-    setTimeout(() => {
+    const killTimeoutId = setTimeout(() => {
       if (this.executions.has(executionId)) {
         execution.process.kill('SIGKILL');
       }
     }, 5000);
+    
+    // Store the timeout so it can be cleared if process exits normally
+    if (execution.killTimeoutId) {
+      clearTimeout(execution.killTimeoutId);
+    }
+    execution.killTimeoutId = killTimeoutId;
 
     return true;
   }
