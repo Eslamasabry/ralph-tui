@@ -342,6 +342,12 @@ export abstract class BaseAgentPlugin implements AgentPlugin {
       this.executions.set(executionId, execution);
       this.currentExecutionId = executionId;
 
+      // Check for pending interrupt immediately after registration
+      // This handles the race where interrupt() was called before process started
+      if (pendingInterrupt) {
+        this.interrupt(executionId);
+      }
+
       // Notify start callback
       options?.onStart?.(executionId);
 
