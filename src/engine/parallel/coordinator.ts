@@ -93,6 +93,8 @@ export class ParallelCoordinator {
   private summaryCounts = new Map<string, number>();
   private summaryStartAt: string | null = null;
   private activeWorkerTasks = new Set<Promise<void>>();
+  /** Semaphore for protecting shared state mutations */
+  private stateLock = Promise.resolve();
 
   constructor(config: RalphConfig, options: ParallelCoordinatorOptions) {
     this.config = config;
@@ -153,6 +155,20 @@ export class ParallelCoordinator {
 
   getPendingMainTaskIds(): string[] {
     return Array.from(this.pendingMainSyncTasks.keys());
+  }
+
+  /**
+   * Acquire the state lock for protecting shared state mutations.
+   * Returns a function to release the lock.
+   */
+  private async acquireStateLock(): Promise<() => void> {
+    const prevLock = this.stateLock;
+    let releaseLock: () => void;
+    this.stateLock = new Promise((resolve) => {
+      releaseLock = resolve;
+    });
+    await prevLock;
+    return () => releaseLock();
   }
 
   private emit(event: ParallelEvent): void {
@@ -2451,15 +2467,30 @@ export class ParallelCoordinator {
 
   private async enqueueMerge(entry: { task: TrackerTask; workerId: string; commit: string }): Promise<void> {
     const mergeKey = this.buildMergeKey(entry.task.id, entry.commit);
-    if (this.queuedMergeKeys.has(mergeKey) || this.processedCommits.has(entry.commit)) {
-      this.logInfo(`Skipping duplicate merge for ${entry.task.id} (${entry.commit.slice(0, 7)}).`);
-      return;
+    
+    // Acquire state lock for atomic check-and-update
+    const releaseLock = await this.acquireStateLock();
+    try {
+      if (this.queuedMergeKeys.has(mergeKey) || this.processedCommits.has(entry.commit)) {
+        this.logInfo(`Skipping duplicate merge for ${entry.task.id} (${entry.commit.slice(0, 7)}).`);
+        return;
+      }
+      this.queuedMergeKeys.add(mergeKey);
+    } finally {
+      releaseLock();
     }
+    
     const filesChanged = await this.getCommitFiles(entry.commit, this.config.cwd);
     const commitMetadata = await this.getCommitMetadata(entry.commit, this.config.cwd);
     const queuedEntry = { ...entry, filesChanged };
-    this.queuedMergeKeys.add(mergeKey);
-    this.mergeQueue.push(queuedEntry);
+    
+    // Re-acquire lock for queue update
+    const releaseLock2 = await this.acquireStateLock();
+    try {
+      this.mergeQueue.push(queuedEntry);
+    } finally {
+      releaseLock2();
+    }
     this.logInfo(
       `Merge queued for ${entry.task.id} (${entry.commit.slice(0, 7)}), ` +
         `files=${filesChanged.length}.`
