@@ -257,8 +257,25 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
   private workingDir: string = process.cwd();
   private knownTaskIds: Set<string> | null = null;
   private taskCache = new Map<string, TrackerTask>();
+  /** Maximum number of cached tasks to prevent unbounded memory growth */
+  private readonly MAX_TASK_CACHE_SIZE = 1000;
   private refreshInFlight = false;
   private refreshQueued = false;
+
+  /**
+   * Enforce size limit on taskCache by removing oldest entries.
+   */
+  private enforceTaskCacheSizeLimit(): void {
+    if (this.taskCache.size >= this.MAX_TASK_CACHE_SIZE) {
+      const entriesToRemove = Math.floor(this.MAX_TASK_CACHE_SIZE * 0.1); // Remove 10% of limit
+      let removed = 0;
+      for (const [key] of this.taskCache) {
+        if (removed >= entriesToRemove) break;
+        this.taskCache.delete(key);
+        removed++;
+      }
+    }
+  }
 
   private async getLockDir(): Promise<string> {
     const lockDir = join(this.workingDir, this.beadsDir, '.locks');
@@ -530,6 +547,7 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
               // Fetch from bd show
               const hydratedTask = await this.getTask(task.id);
               if (hydratedTask) {
+                this.enforceTaskCacheSizeLimit();
                 this.taskCache.set(task.id, hydratedTask);
               }
               return hydratedTask;
@@ -602,6 +620,7 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
     }
 
     const task = beadToTask(beads[0]!);
+    this.enforceTaskCacheSizeLimit();
     this.taskCache.set(id, task); // Cache the task
     return task;
   }
