@@ -341,6 +341,18 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
     }
   }
 
+  private async verifyTaskLock(taskId: string, workerId: string): Promise<boolean> {
+    const lockDir = await this.getLockDir();
+    const lockPath = join(lockDir, `${taskId}.lock`);
+    try {
+      const content = await readFile(lockPath, 'utf-8');
+      const lock = JSON.parse(content) as { taskId: string; workerId: string; claimedAt: string };
+      return lock.workerId === workerId;
+    } catch {
+      return false;
+    }
+  }
+
   override async initialize(config: Record<string, unknown>): Promise<void> {
     await super.initialize(config);
 
@@ -762,6 +774,12 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
     }
 
     if (!locked) {
+      return false;
+    }
+
+    // Verify we still own the lock before updating status (prevents race condition)
+    const stillLocked = await this.verifyTaskLock(id, workerId);
+    if (!stillLocked) {
       return false;
     }
 
