@@ -1420,6 +1420,10 @@ export class RemoteServer {
    * Send a message to a WebSocket client.
    */
   private send(ws: ServerWebSocket<WebSocketData>, message: WSMessage): void {
+    // Check if WebSocket is still open before sending
+    if (ws.readyState !== WebSocket.OPEN) {
+      return; // Silently skip - connection is closing or closed
+    }
     try {
       ws.send(JSON.stringify(message));
     } catch (error) {
