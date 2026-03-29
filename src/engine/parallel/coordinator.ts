@@ -385,6 +385,7 @@ export class ParallelCoordinator {
     }
 
     // Create merge worktree and initialize workers in parallel for faster startup
+    // Use temporary variable - only assign to this.mergeWorktreePath after all succeed
     const [mergeWorktreePath] = (
       await this.worktreeManager.createWorktrees([
         {
@@ -396,36 +397,49 @@ export class ParallelCoordinator {
       ])
     ).values();
 
-    this.mergeWorktreePath = mergeWorktreePath;
-    this.logInfo(`Merge worktree ready (${this.mergeWorktreePath}).`);
-
-    if (this.config.qualityGates.enabled) {
-      const safeBranch = this.baseBranch.replace(/[^\w.-]/g, '_');
-      this.validatorBranch = `ralph/validator/${safeBranch}`;
-      if (this.config.qualityGates.validatorWorktreePath) {
-        const validatorPath = resolve(this.config.qualityGates.validatorWorktreePath);
-        await this.execGitIn(this.config.cwd, [
-          'worktree',
-          'add',
-          '-B',
-          this.validatorBranch,
-          validatorPath,
-          this.mergeBranch,
-        ]);
-        this.validatorWorktreePath = validatorPath;
-      } else {
-        const [validatorWorktreePath] = (
-          await this.worktreeManager.createWorktrees([
-            {
-              workerId: 'validator',
-              branchName: this.validatorBranch,
-              baseRef: this.mergeBranch,
-              lockReason: 'validation',
-            },
-          ])
-        ).values();
-        this.validatorWorktreePath = validatorWorktreePath;
+    let validatorWorktreePath: string | null = null;
+    
+    try {
+      if (this.config.qualityGates.enabled) {
+        const safeBranch = this.baseBranch.replace(/[^\w.-]/g, '_');
+        this.validatorBranch = `ralph/validator/${safeBranch}`;
+        if (this.config.qualityGates.validatorWorktreePath) {
+          const validatorPath = resolve(this.config.qualityGates.validatorWorktreePath);
+          await this.execGitIn(this.config.cwd, [
+            'worktree',
+            'add',
+            '-B',
+            this.validatorBranch,
+            validatorPath,
+            this.mergeBranch,
+          ]);
+          validatorWorktreePath = validatorPath;
+        } else {
+          const [vPath] = (
+            await this.worktreeManager.createWorktrees([
+              {
+                workerId: 'validator',
+                branchName: this.validatorBranch,
+                baseRef: this.mergeBranch,
+                lockReason: 'validation',
+              },
+            ])
+          ).values();
+          validatorWorktreePath = vPath;
+        }
       }
+    } catch (error) {
+      // Validator worktree creation failed - clean up merge worktree
+      await this.worktreeManager.removeWorktree('merge');
+      throw error;
+    }
+
+    // All worktrees created successfully - assign paths
+    this.mergeWorktreePath = mergeWorktreePath;
+    this.validatorWorktreePath = validatorWorktreePath;
+    this.logInfo(`Merge worktree ready (${this.mergeWorktreePath}).`);
+    
+    if (this.config.qualityGates.enabled) {
       this.logInfo(
         `Validator worktree ready (${this.validatorWorktreePath ?? 'unknown'}) on ${this.validatorBranch}.`
       );
