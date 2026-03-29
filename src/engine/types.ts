@@ -804,7 +804,7 @@ export interface EngineController {
   generatePromptPreview?: (
     taskId: string
   ) => Promise<{ success: true; prompt: string; source: string } | { success: false; error: string }>;
-  getPendingMainTaskIds?: () => string[];
+  getPendingMainTaskIds?: () => Promise<string[]>;
   getSnapshotTag?: () => string | null;
 }
 

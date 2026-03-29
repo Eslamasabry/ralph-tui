@@ -3,7 +3,7 @@
  * Runs the droid CLI in non-interactive mode for Ralph task execution.
  */
 
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { platform } from 'node:os';
 import { BaseAgentPlugin } from '../base.js';
@@ -135,6 +135,9 @@ export class DroidAgentPlugin extends BaseAgentPlugin {
    * Custom execute that uses 'ignore' for stdin to prevent Ink TTY issues.
    * The droid exec command passes prompt as argument, not stdin, so we don't need stdin.
    * Setting stdin to 'ignore' prevents Ink from trying to set raw mode on a piped stdin.
+   * 
+   * NOTE: This implementation registers with base class tracking to ensure proper
+   * lifecycle management (interrupt, getCurrentExecution, etc.).
    */
   override execute(
     prompt: string,
@@ -164,9 +167,12 @@ export class DroidAgentPlugin extends BaseAgentPlugin {
     const [subcommand, ...restArgs] = args;
     const allArgs = [subcommand, ...this.defaultFlags, ...(options?.flags ?? []), ...restArgs];
 
+    // Create promise resolvers for base class tracking
     let resolvePromise: (result: AgentExecutionResult) => void;
-    const promise = new Promise<AgentExecutionResult>((resolve) => {
+    let rejectPromise: (error: Error) => void;
+    const promise = new Promise<AgentExecutionResult>((resolve, reject) => {
       resolvePromise = resolve;
+      rejectPromise = reject;
     });
 
     // On Linux/macOS, wrap with 'script' to provide a pseudo-TTY for Ink
@@ -178,7 +184,7 @@ export class DroidAgentPlugin extends BaseAgentPlugin {
       return "'" + s.replace(/'/g, "'\\''") + "'";
     };
 
-    let proc;
+    let proc: ChildProcess;
     if (isWindows) {
       proc = spawn(command, allArgs, {
         cwd: options?.cwd ?? process.cwd(),
@@ -211,55 +217,47 @@ export class DroidAgentPlugin extends BaseAgentPlugin {
       });
     }
 
-    // Track execution state
-    let stdout = '';
-    let stderr = '';
-    let interrupted = false;
+    // Create execution record for base class tracking
+    // This ensures interrupt(), interruptAll(), and getCurrentExecution() work properly
+    const execution = {
+      executionId,
+      process: proc,
+      promise,
+      startedAt,
+      stdout: '',
+      stderr: '',
+      interrupted: false,
+      resolve: resolvePromise!,
+      reject: rejectPromise!,
+    };
+
+    // Register with base class tracking system
+    this.registerExecution(execution);
+
+    // Track local timeout for cleanup
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    let completed = false;
 
     options?.onStart?.(executionId);
 
     proc.stdout?.on('data', (data: Buffer) => {
       const text = data.toString();
-      stdout += text;
+      execution.stdout += text;
       options?.onStdout?.(text);
     });
 
     proc.stderr?.on('data', (data: Buffer) => {
       const text = data.toString();
-      stderr += text;
+      execution.stderr += text;
       options?.onStderr?.(text);
     });
 
-    const complete = (status: AgentExecutionStatus, exitCode?: number, error?: string) => {
-      if (completed) {
-        return;
-      }
-      completed = true;
-      if (timeoutId) clearTimeout(timeoutId);
-      const endedAt = new Date();
-      resolvePromise!({
-        executionId,
-        status,
-        exitCode,
-        stdout,
-        stderr,
-        durationMs: endedAt.getTime() - startedAt.getTime(),
-        error,
-        interrupted,
-        startedAt: startedAt.toISOString(),
-        endedAt: endedAt.toISOString(),
-      });
-    };
-
-    proc.on('error', (error) => {
-      complete('failed', undefined, error.message);
+    proc.on('error', (error: Error) => {
+      this.completeExecution(executionId, 'failed', undefined, error.message);
     });
 
-    proc.on('close', (code, signal) => {
+    proc.on('close', (code: number | null, signal: NodeJS.Signals | null) => {
       let status: AgentExecutionStatus;
-      if (interrupted) {
+      if (execution.interrupted) {
         status = 'interrupted';
       } else if (signal === 'SIGTERM' || signal === 'SIGKILL') {
         status = timeoutId ? 'timeout' : 'interrupted';
@@ -268,30 +266,30 @@ export class DroidAgentPlugin extends BaseAgentPlugin {
       } else {
         status = 'failed';
       }
-      complete(status, code ?? undefined);
+      this.completeExecution(executionId, status, code ?? undefined);
     });
 
+    // Set up timeout if specified
     if (timeout > 0) {
       timeoutId = setTimeout(() => {
-        proc.kill('SIGTERM');
-        setTimeout(() => {
-          if (!proc.killed) proc.kill('SIGKILL');
-        }, 5000);
+        if (this.getCurrentExecution()?.executionId === executionId) {
+          proc.kill('SIGTERM');
+          // Give it 5 seconds to terminate gracefully, then SIGKILL
+          setTimeout(() => {
+            if (this.getCurrentExecution()?.executionId === executionId) {
+              proc.kill('SIGKILL');
+            }
+          }, 5000);
+        }
       }, timeout);
     }
 
+    // Return handle using base class methods for lifecycle management
     return {
       executionId,
       promise,
-      interrupt: () => {
-        interrupted = true;
-        proc.kill('SIGTERM');
-        setTimeout(() => {
-          if (!proc.killed) proc.kill('SIGKILL');
-        }, 5000);
-        return true;
-      },
-      isRunning: () => !completed,
+      interrupt: () => this.interrupt(executionId),
+      isRunning: () => this.getCurrentExecution()?.executionId === executionId,
     };
   }
 }

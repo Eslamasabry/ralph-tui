@@ -488,9 +488,21 @@ export abstract class BaseAgentPlugin implements AgentPlugin {
   }
 
   /**
-   * Complete an execution and resolve its promise.
+   * Register an execution with the tracking system.
+   * Subclasses can call this to ensure custom execute() implementations
+   * are properly tracked for lifecycle management.
+   * @protected
    */
-  private completeExecution(
+  protected registerExecution(execution: RunningExecution): void {
+    this.executions.set(execution.executionId, execution);
+    this.currentExecutionId = execution.executionId;
+  }
+
+  /**
+   * Complete an execution and resolve its promise.
+   * @protected
+   */
+  protected completeExecution(
     executionId: string,
     status: AgentExecutionStatus,
     exitCode?: number,

@@ -54,8 +54,8 @@ export class ParallelCoordinator {
   private pendingMergeCounts = new Map<string, number>();
   private workerBaseCommits = new Map<string, string>();
   private blockedTaskIds = new Set<string>();
-  private activeTaskPlans = new Map<string, TaskImpactPlan>();
-  private activeImpactTables = new Map<string, ImpactEntry[]>();
+  private activeTaskPlans = new Map<string, { plan: TaskImpactPlan; cachedAt: string }>();
+  private activeImpactTables = new Map<string, { table: ImpactEntry[]; cachedAt: string }>();
   private pendingMainSyncTasks = new Map<string, { task: TrackerTask; workerId: string }>();
   private commitRecoveryAttempts = new Map<string, number>();
   private taskFailureCounts = new Map<string, number>();
@@ -93,6 +93,10 @@ export class ParallelCoordinator {
   private summaryCounts = new Map<string, number>();
   private summaryStartAt: string | null = null;
   private activeWorkerTasks = new Set<Promise<void>>();
+  /** Active promise for validation queue processing */
+  private activeValidationPromise: Promise<void> | null = null;
+  /** Active promise for merge queue processing */
+  private activeMergePromise: Promise<void> | null = null;
   /** Semaphore for protecting shared state mutations */
   private stateLock = Promise.resolve();
 
@@ -600,17 +604,12 @@ export class ParallelCoordinator {
         continue;
       }
 
-      if (!idleWorker.tryReserve()) {
-        this.logWarn(`Worker ${idleWorker.workerId} became busy before claim for ${task.id}.`);
-        await this.delay(50);
-        continue;
-      }
-
       this.logInfo(`Task selected: ${task.id} -> ${idleWorker.workerId}.`);
-      const claimed = await this.claimTask(task, idleWorker.workerId);
+
+      // claimTask now atomically reserves worker and claims task under state lock
+      const claimed = await this.claimTask(task, idleWorker);
       if (!claimed) {
         this.logInfo(`Claim failed for ${task.id} by ${idleWorker.workerId}; retrying.`);
-        idleWorker.releaseReservation();
         await this.delay(50);
         continue;
       }
@@ -928,7 +927,7 @@ export class ParallelCoordinator {
               `Recovered commits for ${taskResult.task.id}: ${newFallbackCommits.length}.`
             );
             for (const commit of newFallbackCommits) {
-              void this.enqueueMerge({ task: taskResult.task, workerId, commit });
+              this.safeRun(() => this.enqueueMerge({ task: taskResult.task, workerId, commit }), `enqueueMerge failed for ${taskResult.task.id}`);
             }
             this.commitRecoveryAttempts.delete(taskResult.task.id);
             return;
@@ -965,7 +964,7 @@ export class ParallelCoordinator {
             `Commit recovery produced ${newRetryCommits.length} commit(s) for ${taskResult.task.id}.`
           );
           for (const commit of newRetryCommits) {
-            void this.enqueueMerge({ task: taskResult.task, workerId, commit });
+            this.safeRun(() => this.enqueueMerge({ task: taskResult.task, workerId, commit }), `enqueueMerge failed for ${taskResult.task.id}`);
           }
           this.commitRecoveryAttempts.delete(taskResult.task.id);
           return;
@@ -989,7 +988,7 @@ export class ParallelCoordinator {
       this.pendingMergeCounts.set(taskResult.task.id, newCommits.length);
       this.logInfo(`Queued ${newCommits.length} commit(s) for ${taskResult.task.id}.`);
       for (const commit of newCommits) {
-        void this.enqueueMerge({ task: taskResult.task, workerId, commit });
+        this.safeRun(() => this.enqueueMerge({ task: taskResult.task, workerId, commit }), `enqueueMerge failed for ${taskResult.task.id}`);
       }
       return;
     }
@@ -1093,10 +1092,10 @@ export class ParallelCoordinator {
         }
 
         if (plan) {
-          this.activeTaskPlans.set(task.id, plan);
+          this.activeTaskPlans.set(task.id, { plan, cachedAt: task.updatedAt ?? new Date().toISOString() });
         }
         if (table) {
-          this.activeImpactTables.set(task.id, table);
+          this.activeImpactTables.set(task.id, { table, cachedAt: task.updatedAt ?? new Date().toISOString() });
           task.metadata = { ...(task.metadata ?? {}), impactTable: table };
         }
 
@@ -1171,7 +1170,54 @@ export class ParallelCoordinator {
         return;
       }
       await this.trySyncPendingMainTasks();
+
+      // Trigger and await merge queue processing if there's work
+      if (this.mergeQueue.length > 0 && !this.merging) {
+        this.activeMergePromise = this.processMergeQueue().catch((error) => {
+          const reason = error instanceof Error ? error.message : String(error);
+          this.logWarn(`Merge queue processing error: ${reason}`);
+        });
+        await this.activeMergePromise;
+        this.activeMergePromise = null;
+      }
+
+      // Trigger and await validation queue processing if there's work
+      if (this.validationQueue.length > 0 && !this.validationRunning) {
+        this.activeValidationPromise = this.processValidationQueue().catch((error) => {
+          const reason = error instanceof Error ? error.message : String(error);
+          this.logWarn(`Validation queue processing error: ${reason}`);
+        });
+        await this.activeValidationPromise;
+        this.activeValidationPromise = null;
+      }
+
+      // Await any active promises that might be running from other triggers
+      if (this.activeMergePromise) {
+        await this.activeMergePromise.catch(() => {});
+      }
+      if (this.activeValidationPromise) {
+        await this.activeValidationPromise.catch(() => {});
+      }
+
       await this.delay(100);
+    }
+
+    // Final wait for any active promises to complete
+    if (this.activeMergePromise) {
+      try {
+        await this.activeMergePromise;
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        this.logWarn(`Final merge promise error: ${reason}`);
+      }
+    }
+    if (this.activeValidationPromise) {
+      try {
+        await this.activeValidationPromise;
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        this.logWarn(`Final validation promise error: ${reason}`);
+      }
     }
   }
 
@@ -1358,8 +1404,35 @@ export class ParallelCoordinator {
       return null;
     }
 
-    const taskPlan = this.activeTaskPlans.get(entry.task.id) ?? getImpactPlan(entry.task);
-    const impactTable = this.activeImpactTables.get(entry.task.id) ?? getImpactTable(entry.task);
+    const taskUpdatedAt = entry.task.updatedAt;
+
+    // Freshness check for cached impact data
+    const cachedPlanEntry = this.activeTaskPlans.get(entry.task.id);
+    const cachedTableEntry = this.activeImpactTables.get(entry.task.id);
+
+    let taskPlan: TaskImpactPlan | undefined;
+    let impactTable: ImpactEntry[] | undefined;
+
+    if (cachedPlanEntry && (!taskUpdatedAt || cachedPlanEntry.cachedAt === taskUpdatedAt)) {
+      taskPlan = cachedPlanEntry.plan;
+    } else {
+      // Cache miss or stale - clear and re-compute
+      if (cachedPlanEntry) {
+        this.activeTaskPlans.delete(entry.task.id);
+      }
+      taskPlan = getImpactPlan(entry.task);
+    }
+
+    if (cachedTableEntry && (!taskUpdatedAt || cachedTableEntry.cachedAt === taskUpdatedAt)) {
+      impactTable = cachedTableEntry.table;
+    } else {
+      // Cache miss or stale - clear and re-compute
+      if (cachedTableEntry) {
+        this.activeImpactTables.delete(entry.task.id);
+      }
+      impactTable = getImpactTable(entry.task);
+    }
+
     const impact = impactTable ?? this.buildImpactEntries(taskPlan, filesChanged);
     const selectedChecks = this.selectChecks(impact, checksConfig, filesChanged);
 
@@ -1533,14 +1606,20 @@ export class ParallelCoordinator {
         if (!this.validationBatchTimer) {
           this.validationBatchTimer = setTimeout(() => {
             this.validationBatchTimer = null;
-            void this.processValidationQueue().then(() => {
+            this.activeValidationPromise = this.processValidationQueue().then(() => {
               // If there are still items in queue (validation was running), reschedule
               if (this.validationQueue.length > 0 && !this.validationBatchTimer) {
                 this.validationBatchTimer = setTimeout(() => {
                   this.validationBatchTimer = null;
-                  void this.processValidationQueue();
+                  this.activeValidationPromise = this.processValidationQueue().catch((error) => {
+                    const reason = error instanceof Error ? error.message : String(error);
+                    this.logWarn(`Validation queue processing error: ${reason}`);
+                  });
                 }, this.config.qualityGates.batchWindowMs);
               }
+            }).catch((error) => {
+              const reason = error instanceof Error ? error.message : String(error);
+              this.logWarn(`Validation queue processing error: ${reason}`);
             });
           }, this.config.qualityGates.batchWindowMs);
         }
@@ -1550,7 +1629,10 @@ export class ParallelCoordinator {
       releaseLock();
     }
 
-    void this.processValidationQueue();
+    this.activeValidationPromise = this.processValidationQueue().catch((error) => {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.logWarn(`Validation queue processing error: ${reason}`);
+    });
   }
 
   private async processValidationQueue(): Promise<void> {
@@ -2566,7 +2648,10 @@ export class ParallelCoordinator {
       commitMetadata,
       filesChanged,
     });
-    void this.processMergeQueue();
+    this.activeMergePromise = this.processMergeQueue().catch((error) => {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.logWarn(`Merge queue processing error: ${reason}`);
+    });
   }
 
   private async processMergeQueue(): Promise<void> {
@@ -3278,18 +3363,58 @@ export class ParallelCoordinator {
     });
   }
 
-  private async claimTask(task: TrackerTask, workerId: string): Promise<boolean> {
+  private async claimTask(task: TrackerTask, worker: ParallelWorker): Promise<boolean> {
     if (!this.tracker) return false;
 
-    if (this.tracker.claimTask) {
-      return this.tracker.claimTask(task.id, workerId);
-    }
+    // Use state lock to make check-and-set atomic, preventing race conditions
+    // where multiple workers could claim the same task or worker simultaneously
+    const releaseLock = await this.acquireStateLock();
+    try {
+      // First, try to reserve the worker under lock protection
+      if (!worker.tryReserve()) {
+        return false;
+      }
 
-    const updated = await this.tracker.updateTaskStatus(task.id, 'in_progress');
-    return Boolean(updated);
+      // Check if already claimed under lock protection
+      if (this.activeTaskLeases.has(task.id)) {
+        worker.releaseReservation();
+        return false;
+      }
+
+      let claimed: boolean;
+      if (this.tracker.claimTask) {
+        claimed = await this.tracker.claimTask(task.id, worker.workerId);
+      } else {
+        claimed = Boolean(await this.tracker.updateTaskStatus(task.id, 'in_progress'));
+      }
+
+      if (claimed) {
+        // Set lease immediately within the same locked section - no gap
+        this.enforceMapSizeLimit(this.activeTaskLeases, this.MAX_ACTIVE_TASK_LEASES);
+        this.activeTaskLeases.set(task.id, { workerId: worker.workerId, claimedAt: Date.now() });
+      } else {
+        // Release worker reservation if claim failed
+        worker.releaseReservation();
+      }
+
+      return claimed;
+    } finally {
+      releaseLock();
+    }
   }
 
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Safely execute an async operation with error handling.
+   * Prevents unhandled promise rejections from fire-and-forget void calls.
+   */
+  private safeRun(operation: () => Promise<void>, context: string): void {
+    operation().catch((error) => {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.logError(`${context}: ${reason}`);
+    });
   }
 }

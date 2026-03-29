@@ -165,6 +165,8 @@ export class ExecutionEngine {
   private state: EngineState;
   private currentExecution: AgentExecutionHandle | null = null;
   private shouldStop = false;
+  /** Flag to prevent concurrent stop() execution and ensure single execution of stop logic */
+  private stopInProgress = false;
   /** Track retry attempts per task */
   private retryCountMap: Map<string, number> = new Map();
   /** Track skipped tasks to avoid retrying them */
@@ -309,7 +311,7 @@ export class ExecutionEngine {
     const tasks = await this.tracker.getTasks({ status: ['open', 'in_progress'] });
     this.state.totalTasks = tasks.length;
 
-    this.startTrackerRealtimeWatcher();
+    await this.startTrackerRealtimeWatcher();
 
     // Initialize main sync worktree only when cwd is a git repository.
     // Tests and some workflows use non-git temp directories where main sync is not applicable.
@@ -329,38 +331,44 @@ export class ExecutionEngine {
     }
   }
 
-  private startTrackerRealtimeWatcher(): void {
-    if (this.trackerRealtimeWatcher) {
-      this.trackerRealtimeWatcher.stop();
-      this.trackerRealtimeWatcher = null;
+  private async startTrackerRealtimeWatcher(): Promise<void> {
+    // Acquire lock for atomic check-and-create to prevent duplicate watchers
+    const releaseLock = await this.acquireStateLock();
+    try {
+      // Double-check under lock: if watcher already exists, do nothing
+      if (this.trackerRealtimeWatcher) {
+        return;
+      }
+
+      if (!this.tracker) {
+        return;
+      }
+
+      if (!this.config.tracker.plugin.includes('beads')) {
+        return;
+      }
+
+      const trackerOptions = this.config.tracker.options as Record<string, unknown> | undefined;
+      const workingDir = (trackerOptions?.workingDir as string) ?? this.config.cwd ?? process.cwd();
+      const beadsDir = (trackerOptions?.beadsDir as string) ?? '.beads';
+      const dbPath = join(workingDir, beadsDir, 'beads.db');
+
+      this.trackerRealtimeWatcher = new BeadsRealtimeWatcher({
+        dbPath,
+        liveIntervalMs: 1000,
+        fallbackIntervalMs: 5000,
+        onChange: async () => {
+          await this.refreshTasks();
+        },
+        onStatusChange: (status, intervalMs, reason) => {
+          this.setTrackerRealtimeStatus(status, intervalMs, reason);
+        },
+      });
+
+      this.trackerRealtimeWatcher.start();
+    } finally {
+      releaseLock();
     }
-
-    if (!this.tracker) {
-      return;
-    }
-
-    if (!this.config.tracker.plugin.includes('beads')) {
-      return;
-    }
-
-    const trackerOptions = this.config.tracker.options as Record<string, unknown> | undefined;
-    const workingDir = (trackerOptions?.workingDir as string) ?? this.config.cwd ?? process.cwd();
-    const beadsDir = (trackerOptions?.beadsDir as string) ?? '.beads';
-    const dbPath = join(workingDir, beadsDir, 'beads.db');
-
-    this.trackerRealtimeWatcher = new BeadsRealtimeWatcher({
-      dbPath,
-      liveIntervalMs: 1000,
-      fallbackIntervalMs: 5000,
-      onChange: async () => {
-        await this.refreshTasks();
-      },
-      onStatusChange: (status, intervalMs, reason) => {
-        this.setTrackerRealtimeStatus(status, intervalMs, reason);
-      },
-    });
-
-    this.trackerRealtimeWatcher.start();
   }
 
   private setTrackerRealtimeStatus(
@@ -709,7 +717,12 @@ export class ExecutionEngine {
       const task = await this.getNextAvailableTask();
       if (!task) {
         // If there are pending main sync tasks, wait and retry (with a limit)
-        if (this.pendingMainSyncTasks.size > 0) {
+        const releaseLock = await this.acquireStateLock();
+        const hasPendingTasks = this.pendingMainSyncTasks.size > 0;
+        const pendingCount = this.pendingMainSyncTasks.size;
+        releaseLock();
+        
+        if (hasPendingTasks) {
           // Track wait attempts to prevent infinite loop
           this.pendingMainSyncWaitCount++;
           const maxWaitAttempts = 20; // 20 * 250ms = 5 seconds max wait
@@ -727,7 +740,7 @@ export class ExecutionEngine {
             type: 'engine:warning',
             timestamp: new Date().toISOString(),
             code: 'pending-main-sync-blocked',
-            message: `Engine paused: ${this.pendingMainSyncTasks.size} tasks blocked pending main sync.`,
+            message: `Engine paused: ${pendingCount} tasks blocked pending main sync.`,
           });
           this.pause();
           continue;
@@ -1191,8 +1204,12 @@ export class ExecutionEngine {
           });
 
           this.currentExecution = handle;
-          const agentResult = await handle.promise;
-          this.currentExecution = null;
+          let agentResult: import('../plugins/agents/types.js').AgentExecutionResult;
+          try {
+            agentResult = await handle.promise;
+          } finally {
+            this.currentExecution = null;
+          }
 
           if (droidJsonlParser && isDroidAgent) {
             const remaining = droidJsonlParser.flush();
@@ -1336,8 +1353,10 @@ export class ExecutionEngine {
               // Get pending commits to mark in tracker
               const pendingInfo = await this.getPendingMainCommits();
 
-              // Add to pending main sync tasks
+              // Add to pending main sync tasks atomically
+              const releaseLock = await this.acquireStateLock();
               this.pendingMainSyncTasks.set(task.id, { task, workerId: 'main' });
+              releaseLock();
 
               // Mark task as blocked in tracker
               await this.tracker!.updateTaskStatus(task.id, 'blocked');
@@ -1470,18 +1489,42 @@ export class ExecutionEngine {
   }
 
   /**
-   * Stop the execution loop
+   * Stop the execution loop.
+   * Uses stateLock to make the operation atomic and prevent race conditions:
+   * - Multiple stop() calls are deduplicated via stopInProgress flag
+   * - shouldStop is set under lock to prevent new iterations from starting
+   * - Current execution is interrupted atomically with state changes
    */
   async stop(): Promise<void> {
-    this.shouldStop = true;
-    this.state.status = 'stopping';
-
-    // Interrupt current execution if any
-    if (this.currentExecution) {
-      this.currentExecution.interrupt();
+    // Fast-path check to skip if already stopping/stopped (without lock for performance)
+    if (this.stopInProgress || this.shouldStop) {
+      return;
     }
 
-    // Update session status
+    // Acquire lock for atomic state mutation
+    const releaseLock = await this.acquireStateLock();
+
+    try {
+      // Double-check under lock (prevents race between check and set)
+      if (this.stopInProgress || this.shouldStop) {
+        return;
+      }
+
+      // Mark stop as in progress and set shouldStop atomically
+      this.stopInProgress = true;
+      this.shouldStop = true;
+      this.state.status = 'stopping';
+
+      // Interrupt current execution if any (must be done under lock to prevent
+      // new iterations from starting between shouldStop=true and interrupt)
+      if (this.currentExecution) {
+        this.currentExecution.interrupt();
+      }
+    } finally {
+      releaseLock();
+    }
+
+    // Update session status (outside lock to avoid blocking)
     await updateSessionStatus(this.config.cwd, 'interrupted');
 
     this.emit({
@@ -1758,8 +1801,11 @@ export class ExecutionEngine {
    * Get the list of task IDs that are pending main sync.
    * Used for summary logging to report pending-main tasks.
    */
-  getPendingMainTaskIds(): string[] {
-    return Array.from(this.pendingMainSyncTasks.keys());
+  async getPendingMainTaskIds(): Promise<string[]> {
+    const releaseLock = await this.acquireStateLock();
+    const keys = Array.from(this.pendingMainSyncTasks.keys());
+    releaseLock();
+    return keys;
   }
 
   /**
@@ -2716,7 +2762,11 @@ export class ExecutionEngine {
    * Implements exponential backoff retry with alert on max retries.
    */
   private async trySyncPendingMainTasks(): Promise<void> {
-    if (this.pendingMainSyncTasks.size === 0) {
+    const releaseLock = await this.acquireStateLock();
+    const hasPendingTasks = this.pendingMainSyncTasks.size > 0;
+    releaseLock();
+    
+    if (!hasPendingTasks) {
       // Reset retry count and alert flag when no pending tasks
       this.pendingMainSyncRetryCount = 0;
       this.mainSyncAlertEmitted = false;
@@ -2762,7 +2812,9 @@ export class ExecutionEngine {
     } else if (!this.mainSyncAlertEmitted) {
       // Max retries reached - emit alert (only once to prevent spam)
       this.mainSyncAlertEmitted = true;
+      const releaseLock = await this.acquireStateLock();
       const affectedTasks = Array.from(this.pendingMainSyncTasks.values()).map((e) => e.task);
+      releaseLock();
       this.emit({
         type: 'main-sync-alert',
         timestamp: new Date().toISOString(),
@@ -2801,11 +2853,16 @@ export class ExecutionEngine {
    * Uses clearPendingMain to properly clear the pending-main status in the tracker.
    */
   private async completePendingMainSyncTasks(): Promise<void> {
-    if (!this.tracker || this.pendingMainSyncTasks.size === 0) {
+    const releaseLock = await this.acquireStateLock();
+    const hasPendingTasks = this.pendingMainSyncTasks.size > 0;
+    const entriesToProcess = new Map(this.pendingMainSyncTasks);
+    releaseLock();
+    
+    if (!this.tracker || !hasPendingTasks) {
       return;
     }
 
-    for (const [taskId, entry] of this.pendingMainSyncTasks) {
+    for (const [taskId, entry] of entriesToProcess) {
       // Clear the pending-main status in the tracker (if supported)
       if ('clearPendingMain' in this.tracker && typeof this.tracker.clearPendingMain === 'function') {
         await this.tracker.clearPendingMain(taskId, 'Commits merged to main');
@@ -2815,7 +2872,13 @@ export class ExecutionEngine {
       await this.tracker.releaseTask?.(taskId, entry.workerId);
     }
 
-    this.pendingMainSyncTasks.clear();
+    // Clear the pending tasks atomically
+    const releaseClearLock = await this.acquireStateLock();
+    // Only clear entries that were actually processed
+    for (const [taskId] of entriesToProcess) {
+      this.pendingMainSyncTasks.delete(taskId);
+    }
+    releaseClearLock();
   }
 
   /**

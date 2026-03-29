@@ -74,7 +74,7 @@ export class ParallelExecutionEngine implements EngineController {
     const tasks = await this.tracker.getTasks({ status: ['open', 'in_progress'] });
     this.state.totalTasks = tasks.length;
 
-    this.startTrackerRealtimeWatcher();
+    await this.startTrackerRealtimeWatcher();
 
     await this.coordinator.initialize();
     this.coordinator.on((event) => this.handleParallelEvent(event));
@@ -154,7 +154,7 @@ export class ParallelExecutionEngine implements EngineController {
     return this.tracker;
   }
 
-  getPendingMainTaskIds(): string[] {
+  async getPendingMainTaskIds(): Promise<string[]> {
     return this.coordinator.getPendingMainTaskIds();
   }
 

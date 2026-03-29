@@ -275,16 +275,26 @@ export class TrackerRegistry {
   /**
    * Get or create a shared instance of a plugin for a given config.
    * The instance is cached by config name for reuse.
+   * Stale instances (plugin ID mismatch) are re-initialized.
    * @param config Plugin configuration
    * @returns Initialized plugin instance
    */
   async getInstance(config: TrackerPluginConfig): Promise<TrackerPlugin> {
     const cacheKey = config.name;
 
-    // Return cached instance if available
+    // Check if cached instance is still fresh
     const cached = this.loadedInstances.get(cacheKey);
     if (cached) {
-      return cached;
+      // Verify the cached instance was created with the same plugin ID
+      const registered = this.plugins.get(config.plugin);
+      if (registered && cached.meta.id === config.plugin) {
+        return cached;
+      }
+      // Instance is stale - dispose and remove it
+      await cached.dispose().catch((err) => {
+        console.error(`[TrackerRegistry] Error disposing stale instance for ${cacheKey}:`, err);
+      });
+      this.loadedInstances.delete(cacheKey);
     }
 
     // If initialization is already in progress, wait for it

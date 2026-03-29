@@ -1415,7 +1415,7 @@ async function runHeadless(
   const logger = createStructuredLogger();
 
   // Subscribe to events for structured log output and state persistence
-  engine.on((event) => {
+  engine.on(async (event) => {
     switch (event.type) {
       case 'engine:started':
         logger.engineStarted(event.totalTasks);
@@ -1547,7 +1547,7 @@ async function runHeadless(
         if (engineStartTime) {
           const elapsedMs = Date.now() - engineStartTime.getTime();
           const engineState = engine.getState();
-          const pendingMainTaskIds = engine.getPendingMainTaskIds?.() ?? [];
+          const pendingMainTaskIds = await engine.getPendingMainTaskIds?.() ?? [];
           const tracker = engine.getTracker();
 
           // Build and log the summary

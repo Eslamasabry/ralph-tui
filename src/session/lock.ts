@@ -167,9 +167,14 @@ export async function checkLock(cwd: string): Promise<LockCheckResult> {
 }
 
 /**
- * Create a new lock file
+ * Atomically attempt to create a lock file with O_CREAT | O_EXCL.
+ * This ensures check-and-claim is atomic, preventing TOCTOU races.
  */
-async function writeLockFile(cwd: string, sessionId: string): Promise<void> {
+async function tryWriteLockFileAtomic(cwd: string, sessionId: string): Promise<
+  | { success: true }
+  | { success: false; reason: 'exists'; lock: LockFile }
+  | { success: false; reason: 'other'; error: NodeJS.ErrnoException }
+> {
   await ensureSessionDir(cwd);
   const lockPath = getLockPath(cwd);
 
@@ -181,23 +186,21 @@ async function writeLockFile(cwd: string, sessionId: string): Promise<void> {
     hostname: hostname(),
   };
 
-  await writeFile(lockPath, JSON.stringify(lock, null, 2), { flag: 'wx' });
-}
-
-/**
- * Attempt to create a lock file exclusively.
- * Returns false when another process created the lock concurrently.
- */
-async function tryWriteLockFile(cwd: string, sessionId: string): Promise<boolean> {
   try {
-    await writeLockFile(cwd, sessionId);
-    return true;
+    await writeFile(lockPath, JSON.stringify(lock, null, 2), { flag: 'wx' });
+    return { success: true };
   } catch (error) {
     const nodeError = error as NodeJS.ErrnoException;
     if (nodeError.code === 'EEXIST') {
-      return false;
+      // Atomically failed - read the existing lock to return to caller
+      const existingLock = await readLockFile(cwd);
+      if (existingLock) {
+        return { success: false, reason: 'exists', lock: existingLock };
+      }
+      // Lock disappeared between EEXIST and our read - caller should retry
+      return { success: false, reason: 'other', error: nodeError };
     }
-    throw error;
+    return { success: false, reason: 'other', error: nodeError };
   }
 }
 
@@ -444,10 +447,11 @@ export async function acquireLockWithPrompt(
     const lockStatus = await checkLock(cwd);
 
     if (!lockStatus.lock) {
-      const acquired = await tryWriteLockFile(cwd, sessionId);
-      if (acquired) {
+      const result = await tryWriteLockFileAtomic(cwd, sessionId);
+      if (result.success) {
         return { acquired: true };
       }
+      // Failed to acquire - another process got it, retry
       continue;
     }
 
@@ -487,10 +491,11 @@ export async function acquireLockWithPrompt(
       if (nonInteractive) {
         console.log(`Warning: Removing stale lock (PID: ${lockStatus.lock.pid})`);
       }
-      const acquired = await tryWriteLockFile(cwd, sessionId);
-      if (acquired) {
+      const result = await tryWriteLockFileAtomic(cwd, sessionId);
+      if (result.success) {
         return { acquired: true };
       }
+      // Failed - another process got it, retry
       continue;
     }
 
@@ -500,10 +505,11 @@ export async function acquireLockWithPrompt(
         continue;
       }
       console.log(`Warning: Forcing lock acquisition (previous PID: ${lockStatus.lock.pid})`);
-      const acquired = await tryWriteLockFile(cwd, sessionId);
-      if (acquired) {
+      const result = await tryWriteLockFileAtomic(cwd, sessionId);
+      if (result.success) {
         return { acquired: true };
       }
+      // Failed - another process got it, retry
       continue;
     }
   }
