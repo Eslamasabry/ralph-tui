@@ -69,6 +69,7 @@ export interface PipelineState {
 export type PipelineAction =
   | { type: 'pipeline/reset'; state?: Partial<PipelineState> }
   | { type: 'pipeline/patch'; patch: Partial<PipelineState> }
+  | { type: 'pipeline/clear-parallel-data' }
   | { type: 'pipeline/set-parallel-timing'; key: string; timing: IterationTimingInfo }
   | { type: 'pipeline/remove-parallel-timing'; key: string }
   | { type: 'pipeline/set-parallel-iteration'; key: string; iteration: number }
@@ -148,6 +149,13 @@ function pipelineReducer(state: Readonly<PipelineState>, action: PipelineAction)
 
     case 'pipeline/patch':
       return applyPatch(state, action.patch);
+
+    case 'pipeline/clear-parallel-data':
+      // Clear parallel timing and iteration data when run completes or worktrees are pruned
+      return applyPatch(state, {
+        parallelTimings: new Map(),
+        parallelIterations: new Map(),
+      });
 
     case 'pipeline/set-parallel-timing': {
       const current = state.parallelTimings.get(action.key);

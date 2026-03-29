@@ -386,6 +386,8 @@ export function mapEngineEventToStoreActions(
             ? 'error'
             : 'stopped',
       });
+      // Clear parallel timing data when run stops to prevent memory leaks
+      dispatchPipeline({ type: 'pipeline/clear-parallel-data' });
       dispatchPhase({
         type: 'phase/set-run-timing',
         startedAtMs: stores.phase.getState().runStartedAtMs,
