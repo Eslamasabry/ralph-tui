@@ -1313,7 +1313,7 @@ export class ParallelCoordinator {
       return;
     }
 
-    this.enqueueValidation({ entry: { ...entry, filesChanged }, plan, remaining });
+    await this.enqueueValidation({ entry: { ...entry, filesChanged }, plan, remaining });
   }
 
   private async finalizeMergeSuccess(
@@ -1507,54 +1507,71 @@ export class ParallelCoordinator {
     return `Selected checks (${checkSummary}) based on impact: ${impactSummary}`;
   }
 
-  private enqueueValidation(item: { entry: { task: TrackerTask; workerId: string; commit: string; filesChanged?: string[] }; plan: ValidationPlan; remaining: number }): void {
-    const mode = this.config.qualityGates.mode;
+  private async enqueueValidation(item: { entry: { task: TrackerTask; workerId: string; commit: string; filesChanged?: string[] }; plan: ValidationPlan; remaining: number }): Promise<void> {
+    const releaseLock = await this.acquireStateLock();
+    try {
+      const mode = this.config.qualityGates.mode;
 
-    if (mode === 'coalesce') {
-      this.validationQueue = [item];
-    } else {
-      this.validationQueue.push(item);
-    }
-
-    this.emit({
-      type: 'parallel:validation-queued',
-      timestamp: new Date().toISOString(),
-      plan: item.plan,
-      queueDepth: this.validationQueue.length,
-    });
-    this.logInfo(
-      `Validation queued (${item.plan.planId}) for ${item.plan.taskIds.join(', ')} ` +
-        `checks=${item.plan.checks.map((check) => check.id).join(', ')}.`
-    );
-
-    if (mode === 'batch-window') {
-      if (!this.validationBatchTimer) {
-        this.validationBatchTimer = setTimeout(() => {
-          this.validationBatchTimer = null;
-          void this.processValidationQueue().then(() => {
-            // If there are still items in queue (validation was running), reschedule
-            if (this.validationQueue.length > 0 && !this.validationBatchTimer) {
-              this.validationBatchTimer = setTimeout(() => {
-                this.validationBatchTimer = null;
-                void this.processValidationQueue();
-              }, this.config.qualityGates.batchWindowMs);
-            }
-          });
-        }, this.config.qualityGates.batchWindowMs);
+      if (mode === 'coalesce') {
+        this.validationQueue = [item];
+      } else {
+        this.validationQueue.push(item);
       }
-      return;
+
+      this.emit({
+        type: 'parallel:validation-queued',
+        timestamp: new Date().toISOString(),
+        plan: item.plan,
+        queueDepth: this.validationQueue.length,
+      });
+      this.logInfo(
+        `Validation queued (${item.plan.planId}) for ${item.plan.taskIds.join(', ')} ` +
+          `checks=${item.plan.checks.map((check) => check.id).join(', ')}.`
+      );
+
+      if (mode === 'batch-window') {
+        if (!this.validationBatchTimer) {
+          this.validationBatchTimer = setTimeout(() => {
+            this.validationBatchTimer = null;
+            void this.processValidationQueue().then(() => {
+              // If there are still items in queue (validation was running), reschedule
+              if (this.validationQueue.length > 0 && !this.validationBatchTimer) {
+                this.validationBatchTimer = setTimeout(() => {
+                  this.validationBatchTimer = null;
+                  void this.processValidationQueue();
+                }, this.config.qualityGates.batchWindowMs);
+              }
+            });
+          }, this.config.qualityGates.batchWindowMs);
+        }
+        return;
+      }
+    } finally {
+      releaseLock();
     }
 
     void this.processValidationQueue();
   }
 
   private async processValidationQueue(): Promise<void> {
-    if (this.validationRunning) return;
+    // Atomically check and set validationRunning using state lock
+    const releaseLock = await this.acquireStateLock();
+    if (this.validationRunning) {
+      releaseLock();
+      return;
+    }
     this.validationRunning = true;
+    releaseLock();
+
     try {
-      while (this.validationQueue.length > 0) {
+      while (true) {
+        // Atomically dequeue the next item
+        const releaseInnerLock = await this.acquireStateLock();
         const item = this.validationQueue.shift();
+        releaseInnerLock();
+
         if (!item) break;
+
         this.logInfo(`Validation dequeued (${item.plan.planId}).`);
         try {
           await this.runValidationPlan(item);
@@ -1574,7 +1591,9 @@ export class ParallelCoordinator {
         }
       }
     } finally {
+      const releaseLock = await this.acquireStateLock();
       this.validationRunning = false;
+      releaseLock();
       this.logInfo('Validation queue drained.');
     }
   }
@@ -2157,19 +2176,32 @@ export class ParallelCoordinator {
       return;
     }
 
-    for (const [taskId, entry] of this.pendingMainSyncTasks) {
-      // Clear the pending-main status in the tracker (if supported)
-      if ('clearPendingMain' in this.tracker && typeof this.tracker.clearPendingMain === 'function') {
-        await this.tracker.clearPendingMain(taskId, 'Commits merged to main');
-      }
-      // Unblock the task before completing
-      await this.tracker.updateTaskStatus(taskId, 'open');
-      await this.tracker.completeTask(taskId, 'Completed after main sync');
-      await this.tracker.releaseTask?.(taskId, entry.workerId);
-      this.blockedTaskIds.delete(taskId);
-    }
-
+    // Atomically snapshot and clear the pending tasks to prevent race conditions
+    // where the map is modified while we're iterating
+    const releaseLock = await this.acquireStateLock();
+    const tasksToComplete = new Map(this.pendingMainSyncTasks);
     this.pendingMainSyncTasks.clear();
+    releaseLock();
+
+    for (const [taskId, entry] of tasksToComplete) {
+      try {
+        // Clear the pending-main status in the tracker (if supported)
+        if ('clearPendingMain' in this.tracker && typeof this.tracker.clearPendingMain === 'function') {
+          await this.tracker.clearPendingMain(taskId, 'Commits merged to main');
+        }
+        // Unblock the task before completing
+        await this.tracker.updateTaskStatus(taskId, 'open');
+        await this.tracker.completeTask(taskId, 'Completed after main sync');
+        await this.tracker.releaseTask?.(taskId, entry.workerId);
+        
+        const releaseInnerLock = await this.acquireStateLock();
+        this.blockedTaskIds.delete(taskId);
+        releaseInnerLock();
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        this.logWarn(`Failed to complete pending main sync task ${taskId}: ${reason}`);
+      }
+    }
   }
 
   private async fastForwardRootMain(commit: string): Promise<{ success: boolean; reason?: string }> {
@@ -2538,11 +2570,22 @@ export class ParallelCoordinator {
   }
 
   private async processMergeQueue(): Promise<void> {
-    if (this.merging) return;
+    // Atomically check and set merging using state lock
+    const releaseLock = await this.acquireStateLock();
+    if (this.merging) {
+      releaseLock();
+      return;
+    }
     this.merging = true;
+    releaseLock();
+
     try {
-      while (this.mergeQueue.length > 0) {
+      while (true) {
+        // Atomically dequeue the next item
+        const releaseInnerLock = await this.acquireStateLock();
         const entry = this.mergeQueue.shift();
+        releaseInnerLock();
+
         if (!entry) break;
 
         const mergePath = this.mergeWorktreePath ?? this.config.cwd;
@@ -2610,7 +2653,9 @@ export class ParallelCoordinator {
         }
       }
     } finally {
+      const releaseLock = await this.acquireStateLock();
       this.merging = false;
+      releaseLock();
     }
   }
 

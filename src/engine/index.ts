@@ -207,6 +207,8 @@ export class ExecutionEngine {
   private readonly maxMainSyncRetries = 10;
   /** Flag to prevent repeated main sync alert spam (reset when pending tasks cleared) */
   private mainSyncAlertEmitted = false;
+  /** Semaphore for protecting shared state mutations */
+  private stateLock = Promise.resolve();
 
   constructor(config: RalphConfig) {
     this.config = config;
@@ -240,6 +242,20 @@ export class ExecutionEngine {
       ...DEFAULT_RATE_LIMIT_HANDLING,
       ...agentRateLimitConfig,
     };
+  }
+
+  /**
+   * Acquire the state lock for protecting shared state mutations.
+   * Returns a function to release the lock.
+   */
+  private async acquireStateLock(): Promise<() => void> {
+    const prevLock = this.stateLock;
+    let releaseLock: () => void;
+    this.stateLock = new Promise((resolve) => {
+      releaseLock = resolve;
+    });
+    await prevLock;
+    return () => releaseLock();
   }
 
   /**
@@ -777,8 +793,10 @@ export class ExecutionEngine {
       if (result.status !== 'failed') {
         if (result.taskCompleted) {
           this.state.tasksCompleted++;
-          // Clear retry count on success
+          // Clear retry count on success (atomically)
+          const releaseLock = await this.acquireStateLock();
           this.retryCountMap.delete(task.id);
+          releaseLock();
         }
         return result;
       }
@@ -788,9 +806,16 @@ export class ExecutionEngine {
 
       switch (errorConfig.strategy) {
         case 'retry': {
+          // Acquire lock for atomic read-check-act on retryCountMap
+          const releaseLock = await this.acquireStateLock();
           const currentRetries = this.retryCountMap.get(task.id) ?? 0;
 
           if (currentRetries < errorConfig.maxRetries && !this.shouldStop) {
+            // Update retry count atomically while holding lock
+            this.enforceMapSizeLimit(this.retryCountMap, this.MAX_RETRY_COUNT_MAP_SIZE);
+            this.retryCountMap.set(task.id, currentRetries + 1);
+            releaseLock();
+
             // Emit failed event with retry action
             this.emit({
               type: 'iteration:failed',
@@ -814,10 +839,6 @@ export class ExecutionEngine {
               delayMs: errorConfig.retryDelayMs,
             });
 
-            // Update retry count
-            this.enforceMapSizeLimit(this.retryCountMap, this.MAX_RETRY_COUNT_MAP_SIZE);
-            this.retryCountMap.set(task.id, currentRetries + 1);
-
             // Wait before retry
             if (errorConfig.retryDelayMs > 0 && !this.shouldStop) {
               await this.delay(errorConfig.retryDelayMs);
@@ -828,6 +849,7 @@ export class ExecutionEngine {
             // Each retry becomes a new iteration in the monotonic sequence.
             continue;
           } else if (currentRetries >= errorConfig.maxRetries) {
+            releaseLock();
             // Max retries exceeded - treat as skip
             const skipReason = `Max retries (${errorConfig.maxRetries}) exceeded: ${errorMessage}`;
             this.emit({
@@ -841,7 +863,10 @@ export class ExecutionEngine {
             this.logIterationFailure(task, skipReason, 'skip');
             this.emitSkipEvent(task, skipReason);
             this.skippedTasks.add(task.id);
+            // Clear retry count atomically
+            const releaseDeleteLock = await this.acquireStateLock();
             this.retryCountMap.delete(task.id);
+            releaseDeleteLock();
             // Fix 2: Prevent tracker task from being stuck in in_progress forever
             await this.tracker!.updateTaskStatus(task.id, 'open');
             result = { ...result, status: 'skipped', error: skipReason };
@@ -1187,7 +1212,9 @@ export class ExecutionEngine {
 
             // Try fallback agent
             const currentAgentPlugin = this.state.activeAgent?.plugin ?? this.config.agent.plugin;
+            const releaseLock = await this.acquireStateLock();
             this.rateLimitedAgents.add(currentAgentPlugin);
+            releaseLock();
 
             const fallbackResult = await this.tryFallbackAgent(task, iteration, startedAt);
             if (fallbackResult.switched && !this.shouldStop) {
@@ -1197,11 +1224,16 @@ export class ExecutionEngine {
             }
 
             if (fallbackResult.allAgentsLimited) {
+              // Acquire lock to safely read rateLimitedAgents for the event
+              const releaseReadLock = await this.acquireStateLock();
+              const triedAgents = Array.from(this.rateLimitedAgents);
+              releaseReadLock();
+              
               this.emit({
                 type: 'agent:all-limited',
                 timestamp: new Date().toISOString(),
                 task,
-                triedAgents: Array.from(this.rateLimitedAgents),
+                triedAgents,
                 rateLimitState: this.state.rateLimitState!,
               });
               this.pause();
@@ -1222,7 +1254,7 @@ export class ExecutionEngine {
           }
 
           // Success (not rate limited)
-          this.clearRateLimitedAgents();
+          await this.clearRateLimitedAgents();
           this.clearRateLimitRetryCount(task.id);
 
           const endedAt = new Date();
@@ -1280,7 +1312,7 @@ export class ExecutionEngine {
 
               // Clear rate-limited agents tracking on task completion
               // This allows agents to be retried for the next task
-              this.clearRateLimitedAgents();
+              await this.clearRateLimitedAgents();
             } else {
               // Main sync failed or was skipped - block the task pending main sync
               console.log(`[main-sync] Task ${task.id} blocked: ${syncResult.reason}`);
@@ -2099,21 +2131,28 @@ export class ExecutionEngine {
   /**
    * Get the next available fallback agent that hasn't been rate-limited.
    * Returns undefined if no fallback agents are configured or all are rate-limited.
+   * This operation is atomic to prevent race conditions with concurrent updates.
    */
-  private getNextFallbackAgent(): string | undefined {
+  private async getNextFallbackAgent(): Promise<string | undefined> {
     const fallbackAgents = this.config.agent.fallbackAgents;
     if (!fallbackAgents || fallbackAgents.length === 0) {
       return undefined;
     }
 
-    // Find the first fallback that hasn't been rate-limited
-    for (const fallbackPlugin of fallbackAgents) {
-      if (!this.rateLimitedAgents.has(fallbackPlugin)) {
-        return fallbackPlugin;
+    // Acquire lock for atomic read of rateLimitedAgents
+    const releaseLock = await this.acquireStateLock();
+    try {
+      // Find the first fallback that hasn't been rate-limited
+      for (const fallbackPlugin of fallbackAgents) {
+        if (!this.rateLimitedAgents.has(fallbackPlugin)) {
+          return fallbackPlugin;
+        }
       }
-    }
 
-    return undefined;
+      return undefined;
+    } finally {
+      releaseLock();
+    }
   }
 
   /**
@@ -2131,7 +2170,7 @@ export class ExecutionEngine {
     _startedAt: Date
   ): Promise<{ switched: boolean; allAgentsLimited: boolean }> {
     while (true) {
-      const nextFallback = this.getNextFallbackAgent();
+      const nextFallback = await this.getNextFallbackAgent();
 
       if (!nextFallback) {
         // No more fallback agents available
@@ -2160,7 +2199,9 @@ export class ExecutionEngine {
           console.log(
             `[fallback] Agent '${nextFallback}' not available: ${detectResult.error}`
           );
+          const releaseLock = await this.acquireStateLock();
           this.rateLimitedAgents.add(nextFallback);
+          releaseLock();
           continue; // Bug 8: Use loop (continue) instead of recursion
         }
 
@@ -2183,7 +2224,9 @@ export class ExecutionEngine {
         );
 
         // Mark this fallback as unavailable and try the next one
+        const releaseLock = await this.acquireStateLock();
         this.rateLimitedAgents.add(nextFallback);
+        releaseLock();
         continue; // Bug 8: Use loop (continue) instead of recursion
       }
     }
@@ -2226,11 +2269,13 @@ export class ExecutionEngine {
   }
 
   /**
-      * Clear rate-limited agents tracking.
-      * Called when a task completes successfully to allow agents to be used again.
-      */
-  private clearRateLimitedAgents(): void {
+   * Clear rate-limited agents tracking.
+   * Called when a task completes successfully to allow agents to be used again.
+   */
+  private async clearRateLimitedAgents(): Promise<void> {
+    const releaseLock = await this.acquireStateLock();
     this.rateLimitedAgents.clear();
+    releaseLock();
   }
 
   /**
