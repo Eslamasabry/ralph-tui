@@ -584,10 +584,10 @@ export const DEFAULT_QUALITY_GATES_CONFIG: QualityGatesConfig = {
 /**
  * Default configuration values
  */
-export const DEFAULT_CONFIG: Omit<RalphConfig, 'agent' | 'tracker'> = {
+export const DEFAULT_CONFIG: Omit<RalphConfig, 'agent' | 'tracker' | 'cwd'> = {
   maxIterations: 10,
   iterationDelay: 1000,
-  cwd: process.cwd(),
+  // cwd is intentionally omitted - it should be determined at runtime, not import time
   outputDir: '.ralph-tui/iterations',
   progressFile: '.ralph-tui/progress.md',
   showTui: true,
