@@ -1543,6 +1543,10 @@ export class ParallelCoordinator {
             planId: item.plan.planId,
             reason: `Validation execution error: ${reason}`,
           });
+          // Mark task as blocked when validation crashes
+          if (this.tracker) {
+            await this.tracker.updateTaskStatus(item.entry.task.id, 'blocked');
+          }
         }
       }
     } finally {
