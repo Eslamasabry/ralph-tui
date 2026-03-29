@@ -446,8 +446,9 @@ export class RemoteServer {
     for (const [ws] of this.clients) {
       try {
         ws.close();
-      } catch {
-        // Ignore close errors
+      } catch (error) {
+        // Ignore close errors - client may already be disconnected
+        console.debug(`[RemoteServer] Error closing client connection: ${error instanceof Error ? error.message : 'unknown error'}`);
       }
     }
     this.clients.clear();
@@ -1068,8 +1069,9 @@ export class RemoteServer {
       await access(globalPath, constants.R_OK);
       globalExists = true;
       globalContent = await readFile(globalPath, 'utf-8');
-    } catch {
-      // Global config doesn't exist or isn't readable
+    } catch (error) {
+      // Global config doesn't exist or isn't readable - this is expected
+      console.debug(`[RemoteServer] Global config not readable: ${error instanceof Error ? error.message : 'unknown error'}`);
     }
 
     // Check project config
@@ -1077,8 +1079,9 @@ export class RemoteServer {
       await access(projectPath, constants.R_OK);
       projectExists = true;
       projectContent = await readFile(projectPath, 'utf-8');
-    } catch {
-      // Project config doesn't exist or isn't readable
+    } catch (error) {
+      // Project config doesn't exist or isn't readable - this is expected
+      console.debug(`[RemoteServer] Project config not readable: ${error instanceof Error ? error.message : 'unknown error'}`);
     }
 
     const response = createMessage<CheckConfigResponseMessage>('check_config_response', {
@@ -1139,8 +1142,9 @@ export class RemoteServer {
     try {
       await access(configPath, constants.R_OK);
       configExists = true;
-    } catch {
-      // Config doesn't exist
+    } catch (error) {
+      // Config doesn't exist - this is expected for new configs
+      console.debug(`[RemoteServer] Config file doesn't exist at ${configPath}: ${error instanceof Error ? error.message : 'unknown error'}`);
     }
 
     // If config exists and overwrite not allowed, return error
@@ -1181,8 +1185,9 @@ export class RemoteServer {
     // Ensure directory exists
     try {
       await mkdir(dirname(configPath), { recursive: true });
-    } catch {
-      // Directory may already exist
+    } catch (error) {
+      // Directory may already exist - this is expected
+      console.debug(`[RemoteServer] Directory creation skipped: ${error instanceof Error ? error.message : 'unknown error'}`);
     }
 
     // Write the new config
@@ -1417,8 +1422,9 @@ export class RemoteServer {
   private send(ws: ServerWebSocket<WebSocketData>, message: WSMessage): void {
     try {
       ws.send(JSON.stringify(message));
-    } catch {
-      // Client may have disconnected
+    } catch (error) {
+      // Client may have disconnected - log for debugging
+      console.debug(`[RemoteServer] Failed to send message to client: ${error instanceof Error ? error.message : 'unknown error'}`);
     }
   }
 }
