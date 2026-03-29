@@ -28,6 +28,24 @@ import {
  */
 const templateCache = new Map<string, Handlebars.TemplateDelegate>();
 
+/** Maximum number of cached templates to prevent unbounded memory growth */
+const MAX_TEMPLATE_CACHE_SIZE = 100;
+
+/**
+ * Enforce size limit on template cache by removing oldest entries.
+ */
+function enforceTemplateCacheSizeLimit(): void {
+  if (templateCache.size >= MAX_TEMPLATE_CACHE_SIZE) {
+    const entriesToRemove = Math.floor(MAX_TEMPLATE_CACHE_SIZE * 0.1); // Remove 10% of limit
+    let removed = 0;
+    for (const [key] of templateCache) {
+      if (removed >= entriesToRemove) break;
+      templateCache.delete(key);
+      removed++;
+    }
+  }
+}
+
 /**
  * Get the built-in template content for a tracker type.
  * @param trackerType The tracker type (plugin name)
@@ -437,6 +455,7 @@ function compileTemplate(
     noEscape: true, // Don't escape HTML entities in output
     strict: false, // Don't throw on missing variables
   });
+  enforceTemplateCacheSizeLimit();
   templateCache.set(source, compiled);
   return compiled;
 }
