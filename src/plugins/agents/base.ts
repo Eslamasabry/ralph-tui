@@ -153,6 +153,9 @@ export abstract class BaseAgentPlugin implements AgentPlugin {
 
     if (typeof config.timeout === 'number' && config.timeout > 0) {
       this.defaultTimeout = config.timeout;
+    } else if (config.timeout !== undefined) {
+      // Invalid timeout value provided - log warning and use default
+      console.warn(`[Agent] Invalid timeout value: ${config.timeout}. Using default timeout.`);
     }
 
     this.ready = true;
