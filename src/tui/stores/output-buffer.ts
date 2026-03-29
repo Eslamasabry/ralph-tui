@@ -13,6 +13,22 @@ import {
   type StoreSelector,
 } from './store-utils.js';
 
+/** Maximum number of parallel outputs to prevent unbounded memory growth */
+const MAX_PARALLEL_OUTPUTS = 100;
+
+/** Enforce size limit on Map by removing oldest entries */
+function enforceMapSizeLimit<K, V>(map: Map<K, V>, limit: number): void {
+  if (map.size >= limit) {
+    const entriesToRemove = Math.floor(limit * 0.1); // Remove 10% of limit
+    let removed = 0;
+    for (const [key] of map) {
+      if (removed >= entriesToRemove) break;
+      map.delete(key);
+      removed++;
+    }
+  }
+}
+
 export interface OutputBufferState {
   currentOutput: string;
   currentCliOutput: string;
@@ -146,6 +162,7 @@ function outputBufferReducer(
         return state;
       }
       const nextOutputs = new Map(state.parallelOutputs);
+      enforceMapSizeLimit(nextOutputs, MAX_PARALLEL_OUTPUTS);
       nextOutputs.set(action.key, trimToCap(action.output, OUTPUT_CAP_BYTES));
       return withVersion(state, { parallelOutputs: nextOutputs });
     }
@@ -155,6 +172,7 @@ function outputBufferReducer(
         return state;
       }
       const nextOutputs = new Map(state.parallelOutputs);
+      enforceMapSizeLimit(nextOutputs, MAX_PARALLEL_OUTPUTS);
       const previousOutput = nextOutputs.get(action.key) ?? '';
       nextOutputs.set(
         action.key,
@@ -168,6 +186,7 @@ function outputBufferReducer(
         return state;
       }
       const nextOutputs = new Map(state.parallelCliOutputs);
+      enforceMapSizeLimit(nextOutputs, MAX_PARALLEL_OUTPUTS);
       nextOutputs.set(action.key, trimToCap(action.output, OUTPUT_CAP_BYTES));
       return withVersion(state, { parallelCliOutputs: nextOutputs });
     }
@@ -177,6 +196,7 @@ function outputBufferReducer(
         return state;
       }
       const nextOutputs = new Map(state.parallelCliOutputs);
+      enforceMapSizeLimit(nextOutputs, MAX_PARALLEL_OUTPUTS);
       const previousOutput = nextOutputs.get(action.key) ?? '';
       nextOutputs.set(
         action.key,
@@ -187,6 +207,7 @@ function outputBufferReducer(
 
     case 'output/set-parallel-segments': {
       const nextSegments = new Map(state.parallelSegments);
+      enforceMapSizeLimit(nextSegments, MAX_PARALLEL_OUTPUTS);
       nextSegments.set(action.key, cloneSegments(action.segments));
       return withVersion(state, { parallelSegments: nextSegments });
     }
