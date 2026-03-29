@@ -310,6 +310,11 @@ export async function validateToken(providedToken: string): Promise<boolean> {
 }
 
 /**
+ * Maximum number of active connection tokens to prevent memory DoS
+ */
+const MAX_ACTIVE_TOKENS = 1000;
+
+/**
  * In-memory store for active connection tokens.
  * Maps connection token value to ConnectionToken object.
  * Server-side only - not persisted to disk.
@@ -319,6 +324,7 @@ const activeConnectionTokens = new Map<string, ConnectionToken>();
 /**
  * Issue a new connection token for an authenticated client.
  * Stores the token in memory for validation.
+ * Includes protection against unbounded growth.
  */
 export function issueConnectionToken(clientId: string): ConnectionToken {
   // Clean up any existing tokens for this client
@@ -328,13 +334,30 @@ export function issueConnectionToken(clientId: string): ConnectionToken {
     }
   }
 
+  // Prevent unbounded growth - remove oldest tokens if at limit
+  if (activeConnectionTokens.size >= MAX_ACTIVE_TOKENS) {
+    // Remove expired tokens first
+    cleanupExpiredTokens();
+    
+    // If still at limit, remove oldest tokens
+    if (activeConnectionTokens.size >= MAX_ACTIVE_TOKENS) {
+      const entriesToRemove = activeConnectionTokens.size - MAX_ACTIVE_TOKENS + 1;
+      let removed = 0;
+      for (const [tokenValue] of activeConnectionTokens) {
+        if (removed >= entriesToRemove) break;
+        activeConnectionTokens.delete(tokenValue);
+        removed++;
+      }
+    }
+  }
+
   const token = createConnectionToken(clientId);
   activeConnectionTokens.set(token.value, token);
   return token;
 }
 
 /**
- * Validate a connection token.
+ * Validate a connection token using constant-time comparison.
  * Returns the client ID if valid, null otherwise.
  */
 export function validateConnectionToken(tokenValue: string): {
@@ -343,25 +366,27 @@ export function validateConnectionToken(tokenValue: string): {
   needsRefresh: boolean;
   error?: string;
 } {
-  const token = activeConnectionTokens.get(tokenValue);
+  // Use constant-time comparison to prevent timing attacks
+  // Iterate through all tokens instead of using Map.get()
+  for (const [storedTokenValue, token] of activeConnectionTokens) {
+    if (constantTimeCompare(tokenValue, storedTokenValue)) {
+      if (isTokenExpired(token.expiresAt)) {
+        // Remove expired token
+        activeConnectionTokens.delete(storedTokenValue);
+        return { valid: false, needsRefresh: false, error: 'Connection token expired' };
+      }
 
-  if (!token) {
-    return { valid: false, needsRefresh: false, error: 'Unknown connection token' };
+      const shouldRefresh = needsRefresh(token.expiresAt);
+
+      return {
+        valid: true,
+        clientId: token.clientId,
+        needsRefresh: shouldRefresh,
+      };
+    }
   }
 
-  if (isTokenExpired(token.expiresAt)) {
-    // Remove expired token
-    activeConnectionTokens.delete(tokenValue);
-    return { valid: false, needsRefresh: false, error: 'Connection token expired' };
-  }
-
-  const shouldRefresh = needsRefresh(token.expiresAt);
-
-  return {
-    valid: true,
-    clientId: token.clientId,
-    needsRefresh: shouldRefresh,
-  };
+  return { valid: false, needsRefresh: false, error: 'Unknown connection token' };
 }
 
 /**
@@ -375,16 +400,29 @@ export function refreshConnectionToken(currentTokenValue: string): ConnectionTok
     return null;
   }
 
-  // Remove the old token and issue a new one
-  activeConnectionTokens.delete(currentTokenValue);
+  // Find and remove the old token using constant-time comparison
+  for (const [storedTokenValue] of activeConnectionTokens) {
+    if (constantTimeCompare(currentTokenValue, storedTokenValue)) {
+      activeConnectionTokens.delete(storedTokenValue);
+      break;
+    }
+  }
+  
   return issueConnectionToken(validation.clientId);
 }
 
 /**
  * Revoke a connection token (e.g., on disconnect).
+ * Uses constant-time comparison to prevent timing attacks.
  */
 export function revokeConnectionToken(tokenValue: string): void {
-  activeConnectionTokens.delete(tokenValue);
+  // Use constant-time comparison to prevent timing attacks
+  for (const [storedTokenValue] of activeConnectionTokens) {
+    if (constantTimeCompare(tokenValue, storedTokenValue)) {
+      activeConnectionTokens.delete(storedTokenValue);
+      return;
+    }
+  }
 }
 
 /**
