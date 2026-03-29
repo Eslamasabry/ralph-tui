@@ -590,11 +590,21 @@ export class ParallelCoordinator {
 
   async stop(): Promise<void> {
     this.running = false;
+    // Clear validation batch timer to prevent memory leaks
+    if (this.validationBatchTimer) {
+      clearTimeout(this.validationBatchTimer);
+      this.validationBatchTimer = null;
+    }
     this.logInfo('Parallel execution stop requested.');
   }
 
   async dispose(): Promise<void> {
     this.running = false;
+    // Clear validation batch timer to prevent memory leaks
+    if (this.validationBatchTimer) {
+      clearTimeout(this.validationBatchTimer);
+      this.validationBatchTimer = null;
+    }
     this.logInfo('Disposing parallel coordinator.');
     const removals = this.workers.map(async (worker) => {
       await worker.dispose();
