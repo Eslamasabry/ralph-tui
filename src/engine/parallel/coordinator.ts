@@ -1076,23 +1076,20 @@ export class ParallelCoordinator {
           const plan = getImpactPlan(task);
           const table = getImpactTable(task);
 
-          // DEBUG: Log quality gates config
-          console.error(`[DEBUG] Quality gates: enabled=${this.config.qualityGates.enabled}, requireImpactTable=${this.config.qualityGates.requireImpactTable}`);
-
           if (this.config.qualityGates.enabled && this.config.qualityGates.requireImpactTable) {
-          if (!plan && !table) {
-            this.blockedTaskIds.add(task.id);
-            await this.tracker.updateTaskStatus(task.id, 'blocked');
-            this.logWarn(`Blocked ${task.id}: Task Impact Table is required for parallel execution.`);
-            this.emit({
-              type: 'parallel:impact-missing',
-              timestamp: new Date().toISOString(),
-              task,
-              reason: 'Task Impact Table is required for parallel execution.',
-            });
-            return undefined;
+            if (!plan && !table) {
+              this.blockedTaskIds.add(task.id);
+              await this.tracker.updateTaskStatus(task.id, 'blocked');
+              this.logWarn(`Blocked ${task.id}: Task Impact Table is required for parallel execution.`);
+              this.emit({
+                type: 'parallel:impact-missing',
+                timestamp: new Date().toISOString(),
+                task,
+                reason: 'Task Impact Table is required for parallel execution.',
+              });
+              return undefined;
+            }
           }
-        }
 
         if (plan) {
           this.activeTaskPlans.set(task.id, { plan, cachedAt: task.updatedAt ?? new Date().toISOString() });
