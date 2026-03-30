@@ -1072,11 +1072,14 @@ export class ParallelCoordinator {
         continue;
       }
 
-      if (await this.isTaskReady(task)) {
-        const plan = getImpactPlan(task);
-        const table = getImpactTable(task);
+        if (await this.isTaskReady(task)) {
+          const plan = getImpactPlan(task);
+          const table = getImpactTable(task);
 
-        if (this.config.qualityGates.enabled && this.config.qualityGates.requireImpactTable) {
+          // DEBUG: Log quality gates config
+          console.error(`[DEBUG] Quality gates: enabled=${this.config.qualityGates.enabled}, requireImpactTable=${this.config.qualityGates.requireImpactTable}`);
+
+          if (this.config.qualityGates.enabled && this.config.qualityGates.requireImpactTable) {
           if (!plan && !table) {
             this.blockedTaskIds.add(task.id);
             await this.tracker.updateTaskStatus(task.id, 'blocked');
