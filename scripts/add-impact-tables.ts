@@ -34,7 +34,7 @@ const categoryToPath: Record<string, string> = {
 };
 
 // Add impact table to each bead
-for (const bead of beads.slice(0, 10)) { // Do first 10 as a test
+for (const bead of beads) { // All beads, not just first 10
   const path = categoryToPath[bead.category] || 'src/';
   
   const impactTable = `### Impact Table
