@@ -1,0 +1,168 @@
+# Kilo Code Task Prompts for Parallel Test Execution
+# 
+# Copy and paste these prompts into Kilo Code to run tests in parallel
+# Each prompt launches one test suite in a separate agent
+#
+
+# ============================================================
+# AGENT 1: Engine Tests
+# ============================================================
+Run the Engine Tests suite for ralph-tui.
+
+Test files:
+- src/engine/index.test.ts
+- tests/engine/execution-engine.test.ts
+- tests/engine/parallel-engine.test.ts
+- tests/engine/integration.test.ts
+- tests/engine/rate-limit-detector.test.ts
+- tests/engine/impact.test.ts
+- tests/engine/types.test.ts
+- tests/engine/parallel/validation.test.ts
+- tests/engine/parallel/commit-metadata.test.ts
+- tests/engine/parallel/worktree-manager.test.ts
+
+Command to run:
+bun test --timeout 180000 src/engine/index.test.ts tests/engine/execution-engine.test.ts tests/engine/parallel-engine.test.ts tests/engine/integration.test.ts tests/engine/rate-limit-detector.test.ts tests/engine/impact.test.ts tests/engine/types.test.ts tests/engine/parallel/validation.test.ts tests/engine/parallel/commit-metadata.test.ts tests/engine/parallel/worktree-manager.test.ts
+
+Acceptance Criteria:
+- [ ] All engine tests pass
+- [ ] No test timeouts
+- [ ] Report pass count and fail count
+- [ ] If failures occur, show the error summary
+
+# ============================================================
+# AGENT 2: Plugin Tests
+# ============================================================
+Run the Plugin Tests suite for ralph-tui.
+
+Test files:
+- tests/plugins/claude-agent.test.ts
+- tests/plugins/opencode-agent.test.ts
+- tests/plugins/beads-tracker.test.ts
+- tests/plugins/json-tracker.test.ts
+- tests/plugins/tracker-registry.test.ts
+- tests/plugins/agent-registry.test.ts
+- src/plugins/agents/base.test.ts
+- src/plugins/agents/droid/outputParser.test.ts
+- src/plugins/agents/output-formatting.test.ts
+- tests/plugins/agents/opencode-output-parser.test.ts
+- tests/plugins/agents/subagent-tracing-integration.test.ts
+
+Command to run:
+bun test --timeout 180000 tests/plugins/claude-agent.test.ts tests/plugins/opencode-agent.test.ts tests/plugins/beads-tracker.test.ts tests/plugins/json-tracker.test.ts tests/plugins/tracker-registry.test.ts tests/plugins/agent-registry.test.ts src/plugins/agents/base.test.ts src/plugins/agents/droid/outputParser.test.ts src/plugins/agents/output-formatting.test.ts tests/plugins/agents/opencode-output-parser.test.ts tests/plugins/agents/subagent-tracing-integration.test.ts
+
+Acceptance Criteria:
+- [ ] All plugin tests pass
+- [ ] No test timeouts
+- [ ] Report pass count and fail count
+- [ ] If failures occur, show the error summary
+
+# ============================================================
+# AGENT 3: TUI Tests
+# ============================================================
+Run the TUI Tests suite for ralph-tui.
+
+Test files:
+- tests/tui/stores/task-store.test.ts
+- tests/tui/stores/output-buffer.test.ts
+- tests/tui/stores/event-bridge.test.ts
+- tests/tui/stores/ui-store.test.ts
+- tests/tui/stores/pipeline-store.test.ts
+- tests/tui/stores/phase-store.test.ts
+- tests/tui/stores/history-store.test.ts
+- tests/tui/stores/subagent-store.test.ts
+- tests/tui/theme.test.ts
+- tests/tui/keyboard-manager.test.ts
+- tests/tui/error-boundary.test.ts
+
+Command to run:
+bun test --timeout 120000 tests/tui/stores/task-store.test.ts tests/tui/stores/output-buffer.test.ts tests/tui/stores/event-bridge.test.ts tests/tui/stores/ui-store.test.ts tests/tui/stores/pipeline-store.test.ts tests/tui/stores/phase-store.test.ts tests/tui/stores/history-store.test.ts tests/tui/stores/subagent-store.test.ts tests/tui/theme.test.ts tests/tui/keyboard-manager.test.ts tests/tui/error-boundary.test.ts
+
+Acceptance Criteria:
+- [ ] All TUI tests pass
+- [ ] No test timeouts
+- [ ] Report pass count and fail count
+- [ ] If failures occur, show the error summary
+
+# ============================================================
+# AGENT 4: Command Tests
+# ============================================================
+Run the Command Tests suite for ralph-tui.
+
+Test files:
+- tests/commands/run.test.ts
+- tests/commands/status.test.ts
+- tests/commands/config.test.ts
+- tests/commands/local-flow-e2e.test.ts
+- src/commands/remote.test.ts
+- src/commands/info.test.ts
+- src/commands/doctor.test.ts
+- src/commands/skills.test.ts
+
+Command to run:
+bun test --timeout 120000 tests/commands/run.test.ts tests/commands/status.test.ts tests/commands/config.test.ts tests/commands/local-flow-e2e.test.ts src/commands/remote.test.ts src/commands/info.test.ts src/commands/doctor.test.ts src/commands/skills.test.ts
+
+Acceptance Criteria:
+- [ ] All command tests pass
+- [ ] No test timeouts
+- [ ] Report pass count and fail count
+- [ ] If failures occur, show the error summary
+
+# ============================================================
+# AGENT 5: Config & Utils Tests
+# ============================================================
+Run the Config & Utils Tests suite for ralph-tui.
+
+Test files:
+- src/config/index.test.ts
+- src/config/types.test.ts
+- src/config/schema.test.ts
+- tests/utils/files.test.ts
+- tests/utils/logger.test.ts
+- tests/utils/process.test.ts
+- tests/utils/retry.test.ts
+- tests/utils/validation.test.ts
+- tests/utils/clipboard.test.ts
+
+Command to run:
+bun test --timeout 60000 src/config/index.test.ts src/config/types.test.ts src/config/schema.test.ts tests/utils/files.test.ts tests/utils/logger.test.ts tests/utils/process.test.ts tests/utils/retry.test.ts tests/utils/validation.test.ts tests/utils/clipboard.test.ts
+
+Acceptance Criteria:
+- [ ] All config/utils tests pass
+- [ ] No test timeouts
+- [ ] Report pass count and fail count
+- [ ] If failures occur, show the error summary
+
+# ============================================================
+# AGENT 6: Session & Remote Tests
+# ============================================================
+Run the Session & Remote Tests suite for ralph-tui.
+
+Test files:
+- tests/session/lock.test.ts
+- tests/remote/remote.test.ts
+- src/remote/config.test.ts
+- src/remote/token.test.ts
+- src/remote/audit.test.ts
+
+Command to run:
+bun test --timeout 120000 tests/session/lock.test.ts tests/remote/remote.test.ts src/remote/config.test.ts src/remote/token.test.ts src/remote/audit.test.ts
+
+Acceptance Criteria:
+- [ ] All session/remote tests pass
+- [ ] No test timeouts
+- [ ] Report pass count and fail count
+- [ ] If failures occur, show the error summary
+
+# ============================================================
+# QUICK REFERENCE
+# ============================================================
+
+# To run a single suite manually:
+bash scripts/kilo-parallel-tests.sh engine
+
+# To run all suites with Python parallel runner:
+python3 scripts/run-parallel-tests.py --agents 6
+
+# To generate fake test epics:
+bun run scripts/create-test-epics.ts --epics 5 --beads 10
