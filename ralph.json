@@ -4,17 +4,17 @@
     "plugin": "claude",
     "command": "claude",
     "options": {
-      "model": "claude-sonnet-4-20250514"
+      "model": "claude-3-sonnet-20240229"
     }
   },
   "tracker": {
     "type": "beads",
     "config": {}
   },
-  "model": "claude-sonnet-4-20250514",
+  "model": "claude-3-sonnet-20240229",
   "parallel": {
-    "enabled": false,
-    "maxWorkers": 1
+    "enabled": true,
+    "maxWorkers": 4
   },
   "qualityGates": {
     "enabled": false
