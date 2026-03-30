@@ -162,6 +162,7 @@ export function parseRunArgs(args: string[]): ExtendedRuntimeOptions {
 
     switch (arg) {
       case '--epic':
+      case '--parent':
         if (nextArg && !nextArg.startsWith('-')) {
           options.epicId = nextArg;
           i++;
@@ -340,6 +341,7 @@ Usage: ralph-tui run [options]
 
 Options:
   --epic <id>         Epic ID for beads tracker (if omitted, shows epic selection)
+  --parent <id>        Alias for --epic (parent epic ID)
   --prd <path>        PRD file path (auto-switches to json tracker)
   --agent <name>      Override agent plugin (e.g., claude, opencode)
   --model <name>      Override model (e.g., opus, sonnet)
@@ -383,6 +385,7 @@ Log Output Format (--no-tui mode):
 Examples:
   ralph-tui run                              # Start with defaults
   ralph-tui run --epic ralph-tui-45r         # Run with specific epic
+  ralph-tui run --parent ralph-tui-45r       # Same as --epic (alias)
   ralph-tui run --prd ./prd.json             # Run with PRD file
   ralph-tui run --agent claude --model opus  # Override agent settings
   ralph-tui run --tracker beads-bv           # Use beads-bv tracker
