@@ -1,0 +1,26 @@
+{
+  "version": "0.3.0",
+  "cwd": "/home/eslam/Storage/Code/ralph-tui/.test-epics",
+  "agent": {
+    "plugin": "mock",
+    "command": "echo",
+    "options": {
+      "mode": "test",
+      "simulateWork": true
+    }
+  },
+  "tracker": {
+    "type": "beads-local",
+    "config": {
+      "path": "/home/eslam/Storage/Code/ralph-tui/.test-epics/.beads"
+    }
+  },
+  "model": "test-model",
+  "parallel": {
+    "maxWorkers": 8,
+    "enabled": true
+  },
+  "qualityGates": {
+    "enabled": false
+  }
+}
