@@ -13,12 +13,10 @@
   },
   "model": "claude-sonnet-4-20250514",
   "parallel": {
-    "enabled": true,
-    "maxWorkers": 4
+    "enabled": false,
+    "maxWorkers": 1
   },
   "qualityGates": {
-    "enabled": true,
-    "mode": "coalesce",
-    "batchWindowMs": 5000
+    "enabled": false
   }
 }
