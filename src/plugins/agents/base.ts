@@ -125,6 +125,7 @@ export abstract class BaseAgentPlugin implements AgentPlugin {
   protected ready = false;
   protected commandPath?: string;
   protected defaultFlags: string[] = [];
+  protected defaultEnv: Record<string, string> = {};
   protected defaultTimeout = 0; // 0 = no timeout
 
   /** Map of running executions by ID */
@@ -148,6 +149,18 @@ export abstract class BaseAgentPlugin implements AgentPlugin {
     if (Array.isArray(config.defaultFlags)) {
       this.defaultFlags = config.defaultFlags.filter(
         (f): f is string => typeof f === 'string'
+      );
+    }
+
+    if (
+      config.env &&
+      typeof config.env === 'object' &&
+      !Array.isArray(config.env)
+    ) {
+      this.defaultEnv = Object.fromEntries(
+        Object.entries(config.env).filter(
+          (entry): entry is [string, string] => typeof entry[1] === 'string'
+        )
       );
     }
 
@@ -287,6 +300,7 @@ export abstract class BaseAgentPlugin implements AgentPlugin {
     // Merge environment
     const env = {
       ...process.env,
+      ...this.defaultEnv,
       ...options?.env,
     };
 

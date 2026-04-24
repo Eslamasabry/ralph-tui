@@ -81,6 +81,9 @@ export interface SetupOptions {
   /** Working directory (default: process.cwd()) */
   cwd?: string;
 
+  /** Home directory for detecting local agent auth config (default: os.homedir()) */
+  homeDir?: string;
+
   /** Whether to overwrite existing config */
   force?: boolean;
 

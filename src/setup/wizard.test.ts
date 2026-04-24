@@ -202,6 +202,58 @@ describe('runSetupWizard', () => {
     expect(parsed.autoCommit).toBe(true);
   });
 
+  test('optionally copies OpenCode auth config into ignored project state', async () => {
+    const fakeHome = join(tempDir, 'home');
+    const openCodeConfigDir = join(fakeHome, '.config', 'opencode');
+    const openCodeDataDir = join(fakeHome, '.local', 'share', 'opencode');
+    await mkdir(openCodeConfigDir, { recursive: true });
+    await mkdir(openCodeDataDir, { recursive: true });
+    await writeFile(join(openCodeConfigDir, 'opencode.json'), '{"provider":"test"}', 'utf-8');
+    await writeFile(join(openCodeDataDir, 'auth.json'), '{"token":"local-test"}', 'utf-8');
+
+    mockPromptSelect = (prompt) => {
+      if (prompt.includes('tracker')) return Promise.resolve('json');
+      if (prompt.includes('agent')) return Promise.resolve('opencode');
+      return Promise.resolve('');
+    };
+    mockPromptBoolean = (prompt) => Promise.resolve(prompt.includes('OpenCode auth config'));
+
+    const result = await runSetupWizard({ cwd: tempDir, homeDir: fakeHome });
+
+    expect(result.success).toBe(true);
+    expect(result.answers?.agent).toBe('opencode');
+
+    const copiedConfigPath = join(
+      tempDir,
+      '.ralph-tui',
+      'opencode-auth',
+      'config',
+      'opencode',
+      'opencode.json'
+    );
+    const copiedAuthPath = join(
+      tempDir,
+      '.ralph-tui',
+      'opencode-auth',
+      'data',
+      'opencode',
+      'auth.json'
+    );
+    expect(await readFile(copiedConfigPath, 'utf-8')).toBe('{"provider":"test"}');
+    expect(await readFile(copiedAuthPath, 'utf-8')).toBe('{"token":"local-test"}');
+
+    const configContent = await readFile(result.configPath!, 'utf-8');
+    const parsed = parseToml(configContent) as {
+      agentOptions?: { env?: Record<string, unknown> };
+    };
+    expect(parsed.agentOptions?.env?.XDG_CONFIG_HOME).toBe(
+      join(tempDir, '.ralph-tui', 'opencode-auth', 'config')
+    );
+    expect(parsed.agentOptions?.env?.XDG_DATA_HOME).toBe(
+      join(tempDir, '.ralph-tui', 'opencode-auth', 'data')
+    );
+  });
+
   test('shows PRD-specific instructions for json tracker', async () => {
     mockPromptSelect = (prompt) => {
       if (prompt.includes('tracker')) return Promise.resolve('json');

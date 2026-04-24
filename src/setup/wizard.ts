@@ -4,7 +4,8 @@
  * Detects available plugins and collects tracker/agent preferences.
  */
 
-import { access, constants, writeFile, mkdir } from 'node:fs/promises';
+import { access, constants, cp, mkdir, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { stringify as stringifyToml } from 'smol-toml';
 import { getTrackerRegistry } from '../plugins/trackers/registry.js';
@@ -40,6 +41,62 @@ import { CURRENT_CONFIG_VERSION } from './migration.js';
  */
 const CONFIG_DIR = '.ralph-tui';
 const CONFIG_FILENAME = 'config.toml';
+
+const OPENCODE_AUTH_CONFIG_DIR = 'opencode-auth';
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path, constants.R_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function copyOpenCodeAuthConfig(
+  cwd: string,
+  homeDir: string
+): Promise<{
+  copiedPaths: string[];
+  env: Record<string, string>;
+}> {
+  const targetRoot = join(cwd, CONFIG_DIR, OPENCODE_AUTH_CONFIG_DIR);
+  const targetConfigHome = join(targetRoot, 'config');
+  const targetDataHome = join(targetRoot, 'data');
+  const copiedPaths: string[] = [];
+
+  const configSource = join(homeDir, '.config', 'opencode');
+  if (await pathExists(configSource)) {
+    const configTarget = join(targetConfigHome, 'opencode');
+    await mkdir(targetConfigHome, { recursive: true });
+    await cp(configSource, configTarget, {
+      recursive: true,
+      force: true,
+      errorOnExist: false,
+    });
+    copiedPaths.push(configTarget);
+  }
+
+  const dataSource = join(homeDir, '.local', 'share', 'opencode');
+  if (await pathExists(dataSource)) {
+    const dataTarget = join(targetDataHome, 'opencode');
+    await mkdir(targetDataHome, { recursive: true });
+    await cp(dataSource, dataTarget, {
+      recursive: true,
+      force: true,
+      errorOnExist: false,
+    });
+    copiedPaths.push(dataTarget);
+  }
+
+  return {
+    copiedPaths,
+    env: {
+      XDG_CONFIG_HOME: targetConfigHome,
+      XDG_DATA_HOME: targetDataHome,
+    },
+  };
+}
 
 /**
  * Check if a project config file exists
@@ -205,6 +262,7 @@ export async function runSetupWizard(
   options: SetupOptions = {}
 ): Promise<SetupResult> {
   const cwd = options.cwd ?? process.cwd();
+  const homeDir = options.homeDir ?? homedir();
 
   try {
     // Check if config already exists
@@ -301,6 +359,39 @@ export async function runSetupWizard(
     // For simplicity, we'll skip agent-specific options in the wizard
     // They can be configured later via config file
     const agentOptions: Record<string, unknown> = {};
+
+    if (selectedAgent === 'opencode') {
+      printSection('OpenCode Auth');
+      const configSource = join(homeDir, '.config', 'opencode');
+      const dataSource = join(homeDir, '.local', 'share', 'opencode');
+      const hasOpenCodeAuthConfig =
+        (await pathExists(configSource)) || (await pathExists(dataSource));
+
+      if (hasOpenCodeAuthConfig) {
+        const copyAuthConfig = await promptBoolean(
+          'Do you want me to copy your current OpenCode auth config also?',
+          {
+            default: false,
+            help:
+              'Copies local OpenCode config/data into ignored .ralph-tui/opencode-auth/ and points OpenCode at that copy for this project.',
+          }
+        );
+
+        if (copyAuthConfig) {
+          const copiedAuthConfig = await copyOpenCodeAuthConfig(cwd, homeDir);
+          if (copiedAuthConfig.copiedPaths.length > 0) {
+            agentOptions.env = copiedAuthConfig.env;
+            for (const copiedPath of copiedAuthConfig.copiedPaths) {
+              printSuccess(`  Copied: ${copiedPath}`);
+            }
+          } else {
+            printInfo('No readable OpenCode auth config was found to copy.');
+          }
+        }
+      } else {
+        printInfo('No local OpenCode auth config found to copy.');
+      }
+    }
 
     // === Step 3: Iteration Settings ===
     printSection('Iteration Settings');
