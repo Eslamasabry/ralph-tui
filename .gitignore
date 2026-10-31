@@ -60,3 +60,6 @@ coverage/
 
 # Worker
 worktrees
+
+# Local agent session logs
+.claude/transcripts/
